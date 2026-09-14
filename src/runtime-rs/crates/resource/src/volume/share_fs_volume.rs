@@ -6,8 +6,7 @@
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    fs::File,
-    io::Read,
+    convert::TryFrom,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     str::FromStr,
@@ -43,6 +42,7 @@ use oci_spec::runtime as oci;
 const SYS_MOUNT_PREFIX: [&str; 2] = ["/proc", "/sys"];
 const MONITOR_INTERVAL: Duration = Duration::from_millis(100);
 const DEBOUNCE_TIME: Duration = Duration::from_millis(500);
+const COPY_FILE_CHUNK_SIZE: usize = 3 * 1024 * 1024;
 
 // Corresponds to os.FileMode(0750) | os.ModeDir in Go
 // So, it's (permission bits 0o750) ORed with (file type bit S_IFDIR).
@@ -594,36 +594,45 @@ impl ShareFsVolume {
         agent: &Arc<dyn Agent>,
         preserve_inode: bool,
     ) -> Result<()> {
-        // Read file metadata
-        let file_metadata = std::fs::metadata(src)
+        let mut file = tokio::fs::File::open(src)
+            .await
+            .with_context(|| format!("Failed to open file: {src:?}"))?;
+        let file_metadata = file
+            .metadata()
+            .await
             .with_context(|| format!("Failed to read metadata from file: {src:?}"))?;
-
-        // Open file
-        let mut file = File::open(src).with_context(|| format!("Failed to open file: {src:?}"))?;
-
-        // Open read file contents to buffer
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)
-            .with_context(|| format!("Failed to read file: {src:?}"))?;
-
-        // Create gRPC request
-        let r = agent::CopyFileRequest {
-            path: guest_path.to_owned(),
-            file_size: file_metadata.len() as i64,
-            uid: file_metadata.uid() as i32,
-            gid: file_metadata.gid() as i32,
-            file_mode: file_metadata.mode(),
-            data: buffer,
-            preserve_inode,
-            ..Default::default()
-        };
+        let file_size = i64::try_from(file_metadata.len())
+            .with_context(|| format!("File is too large to copy: {src:?}"))?;
 
         debug!(sl!(), "copy_file: {:?} to sandbox {:?}", &src, guest_path);
 
-        // Issue gRPC request to agent
-        agent.copy_file(r).await.with_context(|| {
-            format!("copy file request failed: src: {src:?}, dest: {guest_path:?}")
-        })?;
+        let mut offset = 0;
+        loop {
+            let chunk_size = (file_size - offset).min(COPY_FILE_CHUNK_SIZE as i64) as usize;
+            let mut data = vec![0; chunk_size];
+            file.read_exact(&mut data)
+                .await
+                .with_context(|| format!("Failed to read file: {src:?} at offset {offset}"))?;
+
+            let request = agent::CopyFileRequest {
+                path: guest_path.to_owned(),
+                file_size,
+                uid: file_metadata.uid() as i32,
+                gid: file_metadata.gid() as i32,
+                file_mode: file_metadata.mode(),
+                offset,
+                data,
+                preserve_inode,
+                ..Default::default()
+            };
+            agent.copy_file(request).await.with_context(|| {
+                format!("copy file request failed: src: {src:?}, dest: {guest_path:?}, offset: {offset}")
+            })?;
+            offset += chunk_size as i64;
+            if offset == file_size {
+                break;
+            }
+        }
         Ok(())
     }
 
@@ -911,29 +920,8 @@ async fn copy_dir_recursively<P: AsRef<Path>>(
                 // push back the sub-dir into queue to handle it in time
                 queue.push_back((entry_path, dest_path));
             } else if metadata.is_file() {
-                // async read file
-                let mut file = tokio::fs::File::open(&entry_path)
-                    .await
-                    .context(format!("open file: {entry_path:?}"))?;
-
-                let mut buffer = Vec::new();
-                file.read_to_end(&mut buffer)
-                    .await
-                    .context(format!("read file: {entry_path:?}"))?;
-
-                let file_request = agent::CopyFileRequest {
-                    path: dest_path.clone(),
-                    file_size: metadata.len() as i64,
-                    uid: metadata.uid() as i32,
-                    gid: metadata.gid() as i32,
-                    file_mode: metadata.mode(),
-                    data: buffer,
-                    ..Default::default()
-                };
-
                 info!(sl!(), "copy file {:?} to guest", dest_path.clone());
-                agent
-                    .copy_file(file_request)
+                ShareFsVolume::copy_file_to_guest(&entry_path, &dest_path, agent, false)
                     .await
                     .context(format!("copy file: {entry_path:?} -> {dest_path:?}"))?;
             }
@@ -1037,7 +1025,270 @@ fn generate_copy_file_guest_path(cid: &str, mount_destination: &Path) -> Result<
 
 #[cfg(test)]
 mod test {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
+
+    #[derive(Default)]
+    struct CopyFileRecorder {
+        requests: Mutex<Vec<protocols::agent::CopyFileRequest>>,
+        fail_offset: Option<i64>,
+        resize_source: Option<(PathBuf, u64)>,
+    }
+
+    #[async_trait]
+    impl protocols::agent_ttrpc_async::AgentService for CopyFileRecorder {
+        async fn copy_file(
+            &self,
+            _ctx: &ttrpc::asynchronous::TtrpcContext,
+            request: protocols::agent::CopyFileRequest,
+        ) -> ttrpc::Result<protocols::empty::Empty> {
+            let offset = request.offset;
+            self.requests.lock().await.push(request);
+            if self.fail_offset == Some(offset) {
+                return Err(ttrpc::Error::RpcStatus(ttrpc::get_status(
+                    ttrpc::Code::INTERNAL,
+                    "injected copy failure",
+                )));
+            }
+            if offset == 0 {
+                if let Some((path, size)) = &self.resize_source {
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(path)
+                        .unwrap()
+                        .set_len(*size)
+                        .unwrap();
+                }
+            }
+            Ok(protocols::empty::Empty::new())
+        }
+    }
+
+    async fn start_copy_agent(
+        temp_dir: &Path,
+        recorder: Arc<CopyFileRecorder>,
+    ) -> (Arc<dyn Agent>, ttrpc::asynchronous::Server) {
+        let socket_path = temp_dir.join("agent.sock");
+        let mut server = ttrpc::asynchronous::Server::new()
+            .bind(&format!("unix://{}", socket_path.display()))
+            .unwrap()
+            .register_service(protocols::agent_ttrpc_async::create_agent_service(recorder));
+        server.start().await.unwrap();
+        let agent: Arc<dyn Agent> =
+            Arc::new(agent::kata::KataAgent::new(kata_types::config::Agent {
+                dial_timeout_ms: 100,
+                ..Default::default()
+            }));
+        agent
+            .start(&format!("remote://{}", socket_path.display()))
+            .await
+            .unwrap();
+        (agent, server)
+    }
+
+    fn copy_test_data(size: usize) -> Vec<u8> {
+        (0..size)
+            .map(|index| ((index / COPY_FILE_CHUNK_SIZE + index) % 251) as u8)
+            .collect()
+    }
+
+    fn assert_copied_file(
+        requests: &[protocols::agent::CopyFileRequest],
+        guest_path: &str,
+        data: &[u8],
+        metadata: &std::fs::Metadata,
+        preserve_inode: bool,
+    ) {
+        let requests: Vec<_> = requests
+            .iter()
+            .filter(|request| request.path == guest_path)
+            .collect();
+        assert_eq!(
+            requests.len(),
+            data.len().div_ceil(COPY_FILE_CHUNK_SIZE).max(1)
+        );
+        let mut offset = 0;
+        for request in requests {
+            assert_eq!(request.file_size, data.len() as i64);
+            assert_eq!(request.offset, offset as i64);
+            assert_eq!(
+                request.data.len(),
+                (data.len() - offset).min(COPY_FILE_CHUNK_SIZE)
+            );
+            assert_eq!(request.data, data[offset..offset + request.data.len()]);
+            assert_eq!(request.file_mode, metadata.mode());
+            assert_eq!(request.uid, metadata.uid() as i32);
+            assert_eq!(request.gid, metadata.gid() as i32);
+            assert_eq!(request.preserve_inode, preserve_inode);
+            offset += request.data.len();
+        }
+        assert_eq!(offset, data.len());
+    }
+
+    #[rstest::rstest]
+    #[case(0)]
+    #[case(1)]
+    #[case(COPY_FILE_CHUNK_SIZE - 1)]
+    #[case(COPY_FILE_CHUNK_SIZE)]
+    #[case(COPY_FILE_CHUNK_SIZE + 1)]
+    #[case(2 * COPY_FILE_CHUNK_SIZE)]
+    #[case(5 * COPY_FILE_CHUNK_SIZE + 19)]
+    #[tokio::test]
+    async fn test_copy_file_chunks(
+        #[case] size: usize,
+        #[values(false, true)] preserve_inode: bool,
+    ) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let source = temp_dir.path().join("payload.bin");
+        let data = copy_test_data(size);
+        std::fs::write(&source, &data).unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let metadata = std::fs::metadata(&source).unwrap();
+        let recorder = Arc::new(CopyFileRecorder::default());
+        let (agent, mut server) = start_copy_agent(temp_dir.path(), recorder.clone()).await;
+        let guest_path = "/run/kata-containers/shared/test/payload.bin";
+
+        let result =
+            ShareFsVolume::copy_file_to_guest(&source, guest_path, &agent, preserve_inode).await;
+
+        agent.disconnect().await.unwrap();
+        server.shutdown().await.unwrap();
+        result.unwrap();
+        assert_copied_file(
+            &recorder.requests.lock().await,
+            guest_path,
+            &data,
+            &metadata,
+            preserve_inode,
+        );
+    }
+
+    #[tokio::test]
+    async fn test_copy_dir_large_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let source_dir = temp_dir.path().join("source");
+        std::fs::create_dir_all(source_dir.join("nested")).unwrap();
+        let source = source_dir.join("nested/payload.bin");
+        let data = copy_test_data(5 * COPY_FILE_CHUNK_SIZE);
+        std::fs::write(&source, &data).unwrap();
+        let metadata = std::fs::metadata(&source).unwrap();
+        std::fs::write(source_dir.join("empty"), []).unwrap();
+        std::os::unix::fs::symlink("nested/payload.bin", source_dir.join("link")).unwrap();
+        let recorder = Arc::new(CopyFileRecorder::default());
+        let (agent, mut server) = start_copy_agent(temp_dir.path(), recorder.clone()).await;
+        let guest_dir = "/run/kata-containers/shared/test";
+
+        let result = ShareFsVolume::copy_directory_to_guest(&source_dir, guest_dir, &agent).await;
+
+        agent.disconnect().await.unwrap();
+        server.shutdown().await.unwrap();
+        result.unwrap();
+        let requests = recorder.requests.lock().await;
+        assert_copied_file(
+            &requests,
+            &format!("{guest_dir}/nested/payload.bin"),
+            &data,
+            &metadata,
+            false,
+        );
+        assert_copied_file(
+            &requests,
+            &format!("{guest_dir}/empty"),
+            &[],
+            &std::fs::metadata(source_dir.join("empty")).unwrap(),
+            false,
+        );
+        for directory in [guest_dir.to_string(), format!("{guest_dir}/nested")] {
+            assert!(requests.iter().any(|request| request.path == directory
+                && request.file_mode & libc::S_IFMT == libc::S_IFDIR));
+        }
+        let link = requests
+            .iter()
+            .find(|request| request.path == format!("{guest_dir}/link"))
+            .unwrap();
+        assert_eq!(link.file_mode & libc::S_IFMT, libc::S_IFLNK);
+        assert_eq!(link.data, b"nested/payload.bin");
+    }
+
+    #[rstest::rstest]
+    #[tokio::test]
+    async fn test_copy_file_stops_on_agent_error(#[values(false, true)] preserve_inode: bool) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let source = temp_dir.path().join("payload.bin");
+        std::fs::write(&source, copy_test_data(3 * COPY_FILE_CHUNK_SIZE)).unwrap();
+        let recorder = Arc::new(CopyFileRecorder {
+            fail_offset: Some(COPY_FILE_CHUNK_SIZE as i64),
+            ..Default::default()
+        });
+        let (agent, mut server) = start_copy_agent(temp_dir.path(), recorder.clone()).await;
+
+        let result = ShareFsVolume::copy_file_to_guest(
+            &source,
+            "/run/kata-containers/shared/payload.bin",
+            &agent,
+            preserve_inode,
+        )
+        .await;
+
+        agent.disconnect().await.unwrap();
+        server.shutdown().await.unwrap();
+        let error = format!("{:#}", result.unwrap_err());
+        assert!(error.contains("injected copy failure"), "{}", error);
+        assert!(
+            error.contains(&format!("offset: {COPY_FILE_CHUNK_SIZE}")),
+            "{}",
+            error
+        );
+        assert_eq!(recorder.requests.lock().await.len(), 2);
+    }
+
+    #[rstest::rstest]
+    #[case(COPY_FILE_CHUNK_SIZE, true)]
+    #[case(4 * COPY_FILE_CHUNK_SIZE, false)]
+    #[tokio::test]
+    async fn test_copy_file_source_size_changes(
+        #[case] new_size: usize,
+        #[case] should_fail: bool,
+    ) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let source = temp_dir.path().join("payload.bin");
+        let data = copy_test_data(3 * COPY_FILE_CHUNK_SIZE);
+        std::fs::write(&source, &data).unwrap();
+        let metadata = std::fs::metadata(&source).unwrap();
+        let recorder = Arc::new(CopyFileRecorder {
+            resize_source: Some((source.clone(), new_size as u64)),
+            ..Default::default()
+        });
+        let (agent, mut server) = start_copy_agent(temp_dir.path(), recorder.clone()).await;
+        let guest_path = "/run/kata-containers/shared/payload.bin";
+
+        let result = ShareFsVolume::copy_file_to_guest(&source, guest_path, &agent, false).await;
+
+        agent.disconnect().await.unwrap();
+        server.shutdown().await.unwrap();
+        if should_fail {
+            let error = result.unwrap_err();
+            assert_eq!(
+                error
+                    .root_cause()
+                    .downcast_ref::<std::io::Error>()
+                    .unwrap()
+                    .kind(),
+                std::io::ErrorKind::UnexpectedEof
+            );
+            assert_eq!(recorder.requests.lock().await.len(), 1);
+        } else {
+            result.unwrap();
+            assert_copied_file(
+                &recorder.requests.lock().await,
+                guest_path,
+                &data,
+                &metadata,
+                false,
+            );
+        }
+    }
 
     #[test]
     fn test_is_system_mount() {
