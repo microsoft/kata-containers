@@ -553,6 +553,7 @@ pub struct CopyFileRequest {
     pub gid: i32,
     pub offset: i64,
     pub data: ::std::vec::Vec<u8>,
+    pub preserve_inode: bool,
 }
 
 #[derive(PartialEq, Clone, Default, Debug)]
