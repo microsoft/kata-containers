@@ -2402,6 +2402,53 @@ fn do_copy_file(req: &CopyFileRequest, shared_dir: &PathBuf) -> Result<()> {
     std::fs::create_dir_all(shared_dir)?;
     let root = pathrs::Root::open(shared_dir)?;
 
+    if req.preserve_inode {
+        if req.file_mode & libc::S_IFMT != libc::S_IFREG {
+            return Err(anyhow!("inode-preserving copy requires a regular file"));
+        }
+        if req.offset < 0
+            || req.file_size < req.offset
+            || req.data.len() as u64 > (req.file_size - req.offset) as u64
+        {
+            return Err(anyhow!("invalid inode-preserving copy range"));
+        }
+        let handle = root
+            .resolve_nofollow(path)
+            .context("resolve existing file")?;
+        let metadata = stat::fstat(&handle).context("stat existing file")?;
+        if metadata.st_mode & libc::S_IFMT != libc::S_IFREG {
+            return Err(anyhow!(
+                "inode-preserving copy target is not a regular file"
+            ));
+        }
+        if metadata.st_nlink != 1 {
+            return Err(anyhow!(
+                "inode-preserving copy target has multiple hard links"
+            ));
+        }
+        let file = handle
+            .reopen(OpenFlags::O_WRONLY)
+            .context("reopen existing file")?;
+        if req.offset == 0 {
+            file.set_len(0).context("truncate existing file")?;
+        }
+        file.write_all_at(&req.data, req.offset as u64)
+            .context("write existing file")?;
+        if req.offset + req.data.len() as i64 == req.file_size {
+            file.set_permissions(std::fs::Permissions::from_mode(
+                req.file_mode & FILE_PERMISSION_MASK,
+            ))
+            .context("set existing file permissions")?;
+            unistd::fchown(
+                file,
+                Some(Uid::from_raw(req.uid as u32)),
+                Some(Gid::from_raw(req.gid as u32)),
+            )
+            .context("chown existing file")?;
+        }
+        return Ok(());
+    }
+
     // Create parent directories if missing
     if let Some(parent) = path.parent() {
         let dir = root
@@ -3923,6 +3970,160 @@ COMMIT
         let mut ids: Vec<String> = vec![resp1.container_id, resp2.container_id];
         ids.sort();
         assert_eq!(ids, vec!["container-1", "container-2"]);
+    }
+
+    #[rstest::rstest]
+    #[case("hosts", b"10.0.0.2 new-pod\n")]
+    #[case(
+        "resolv.conf",
+        b"nameserver 10.0.0.10\nsearch default.svc.cluster.local\n"
+    )]
+    fn test_do_copy_file_refresh_preserves_inode(#[case] name: &str, #[case] data: &[u8]) {
+        use std::os::unix::fs::{FileExt, MetadataExt};
+
+        let temp_dir = tempdir().unwrap();
+        let base = temp_dir.path().to_path_buf();
+        let path = base.join(name);
+        fs::write(&path, b"10.0.0.1 old-pod\n").unwrap();
+        let mounted_file = fs::File::open(&path).unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .unwrap();
+
+        for contents in [data, &data[..4], b""] {
+            let request = CopyFileRequest {
+                path: path.to_string_lossy().into_owned(),
+                file_mode: 0o640 | libc::S_IFREG,
+                file_size: contents.len() as i64,
+                data: contents.to_vec(),
+                uid: unistd::geteuid().as_raw() as i32,
+                gid: unistd::getegid().as_raw() as i32,
+                preserve_inode: true,
+                ..Default::default()
+            };
+            do_copy_file(&request, &base).unwrap();
+
+            let mut actual = vec![0; contents.len()];
+            mounted_file.read_exact_at(&mut actual, 0).unwrap();
+            assert_eq!(actual, contents);
+            let metadata = mounted_file.metadata().unwrap();
+            assert_eq!(metadata.ino(), fs::metadata(&path).unwrap().ino());
+            assert_eq!(metadata.len(), contents.len() as u64);
+            assert_eq!(metadata.permissions().mode() & 0o777, 0o640);
+            assert_eq!(metadata.uid(), request.uid as u32);
+            assert_eq!(metadata.gid(), request.gid as u32);
+        }
+    }
+
+    #[test]
+    fn test_do_copy_file_preserve_inode_chunked() {
+        use std::os::unix::fs::{FileExt, MetadataExt};
+
+        let temp_dir = tempdir().unwrap();
+        let base = temp_dir.path().to_path_buf();
+        let path = base.join("hosts");
+        fs::write(&path, b"old content with a longer trailing suffix").unwrap();
+        let mounted_file = fs::File::open(&path).unwrap();
+        let data = b"10.0.0.2 new-pod\n";
+        let first_chunk = b"10.0.0.2 ";
+        let mut request = CopyFileRequest {
+            path: path.to_string_lossy().into_owned(),
+            file_mode: 0o644 | libc::S_IFREG,
+            file_size: data.len() as i64,
+            data: first_chunk.to_vec(),
+            uid: unistd::geteuid().as_raw() as i32,
+            gid: unistd::getegid().as_raw() as i32,
+            preserve_inode: true,
+            ..Default::default()
+        };
+        do_copy_file(&request, &base).unwrap();
+        assert_eq!(
+            mounted_file.metadata().unwrap().len(),
+            first_chunk.len() as u64
+        );
+        request.offset = first_chunk.len() as i64;
+        request.data = data[first_chunk.len()..].to_vec();
+        do_copy_file(&request, &base).unwrap();
+
+        let mut actual = vec![0; data.len()];
+        mounted_file.read_exact_at(&mut actual, 0).unwrap();
+        assert_eq!(actual, data);
+        assert_eq!(mounted_file.metadata().unwrap().len(), data.len() as u64);
+        assert_eq!(
+            mounted_file.metadata().unwrap().ino(),
+            fs::metadata(path).unwrap().ino()
+        );
+    }
+
+    #[test]
+    fn test_do_copy_file_preserve_inode_rejects_unsafe_targets() {
+        let temp_dir = tempdir().unwrap();
+        let base = temp_dir.path().join("shared");
+        fs::create_dir(&base).unwrap();
+        let outside = temp_dir.path().join("outside");
+        fs::write(&outside, b"unchanged").unwrap();
+        std::os::unix::fs::symlink(&outside, base.join("symlink")).unwrap();
+        std::os::unix::fs::symlink(temp_dir.path(), base.join("parent-link")).unwrap();
+        fs::hard_link(&outside, base.join("hardlink")).unwrap();
+        fs::create_dir(base.join("directory")).unwrap();
+        unistd::mkfifo(&base.join("fifo"), stat::Mode::S_IRUSR).unwrap();
+
+        for path in [
+            base.join("missing"),
+            base.join("symlink"),
+            base.join("parent-link/outside"),
+            base.join("hardlink"),
+            base.join("directory"),
+            base.join("fifo"),
+            base.join("../outside"),
+            outside.clone(),
+        ] {
+            let request = CopyFileRequest {
+                path: path.to_string_lossy().into_owned(),
+                file_mode: 0o644 | libc::S_IFREG,
+                file_size: 3,
+                data: b"new".to_vec(),
+                preserve_inode: true,
+                ..Default::default()
+            };
+            assert!(do_copy_file(&request, &base).is_err(), "{}", path.display());
+            assert_eq!(fs::read(&outside).unwrap(), b"unchanged");
+        }
+        assert!(!base.join("missing").exists());
+        assert!(base.join("symlink").is_symlink());
+        assert!(base.join("directory").is_dir());
+    }
+
+    #[test]
+    fn test_do_copy_file_preserve_inode_rejects_invalid_requests() {
+        let temp_dir = tempdir().unwrap();
+        let base = temp_dir.path().to_path_buf();
+        let path = base.join("hosts");
+        fs::write(&path, b"unchanged").unwrap();
+
+        for (offset, file_size, file_type) in [
+            (-1, 3, libc::S_IFREG),
+            (0, -1, libc::S_IFREG),
+            (4, 3, libc::S_IFREG),
+            (1, 3, libc::S_IFREG),
+            (i64::MAX, i64::MAX, libc::S_IFREG),
+            (0, 3, libc::S_IFDIR),
+            (0, 3, libc::S_IFLNK),
+        ] {
+            let request = CopyFileRequest {
+                path: path.to_string_lossy().into_owned(),
+                file_mode: 0o644 | file_type,
+                file_size,
+                offset,
+                data: b"new".to_vec(),
+                preserve_inode: true,
+                ..Default::default()
+            };
+            assert!(do_copy_file(&request, &base).is_err());
+            assert_eq!(fs::read(&path).unwrap(), b"unchanged");
+        }
     }
 
     #[tokio::test]
