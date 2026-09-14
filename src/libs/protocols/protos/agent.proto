@@ -580,9 +580,9 @@ message CopyFileRequest {
 	// Path is the destination file in the guest. It must be absolute,
 	// canonical and below /run.
 	string path = 1;
-	// FileSize is the expected file size, for security reasons write operations
-	// are made in a temporary file, once it has the expected size, it's moved
-	// to the destination path.
+	// FileSize is the expected file size. By default, writes are staged in a
+	// temporary file and moved to the destination once complete. With
+	// preserve_inode, writes update an existing regular file in place.
 	int64 file_size = 2;
 	// FileMode is the file mode.
 	uint32 file_mode = 3;
@@ -596,6 +596,7 @@ message CopyFileRequest {
 	int64 offset = 7;
 	// Data to write in the destination file.
 	bytes data = 8;
+	bool preserve_inode = 9;
 }
 
 message GetOOMEventRequest {}
