@@ -582,6 +582,12 @@ get_latest_upx_version() {
 	get_from_kata_deps ".externals.upx.version"
 }
 
+get_latest_nvidia_dcgm_version() {
+	echo "$(get_from_kata_deps ".externals.nvidia.dcgm.version")" \
+		"$(get_from_kata_deps ".externals.nvidia.dcgm.exporter.version")" \
+		| sha256sum | cut -c1-9
+}
+
 get_latest_nvidia_nvat_version() {
 	get_from_kata_deps ".externals.nvidia.nvat.version"
 }
@@ -627,6 +633,7 @@ install_image() {
 		latest_artefact+="-$(get_latest_kernel_nvidia_artefact_and_builder_image_version)"
 		latest_artefact+="-$(get_latest_nvidia_driver_version)"
 		latest_artefact+="-$(get_latest_nvidia_ctk_version)"
+		latest_artefact+="-$(get_latest_nvidia_dcgm_version)"
 		latest_artefact+="-$(get_latest_upx_version)"
 	else
 		local libs_last_commit
@@ -651,6 +658,7 @@ install_image() {
 			latest_artefact+="-$(get_latest_kernel_nvidia_artefact_and_builder_image_version)"
 			latest_artefact+="-$(get_latest_nvidia_driver_version)"
 			latest_artefact+="-$(get_latest_nvidia_ctk_version)"
+			latest_artefact+="-$(get_latest_nvidia_dcgm_version)"
 			latest_artefact+="-$(get_latest_nvidia_nvrc_version)"
 			latest_artefact+="-$(get_latest_upx_version)"
 			latest_artefact+="-$(get_latest_nvidia_nvat_version)"
@@ -669,6 +677,7 @@ install_image() {
 		latest_artefact+="-$(get_latest_kernel_nvidia_artefact_and_builder_image_version)"
 		latest_artefact+="-$(get_latest_nvidia_driver_version)"
 		latest_artefact+="-$(get_latest_nvidia_ctk_version)"
+		latest_artefact+="-$(get_latest_nvidia_dcgm_version)"
 		latest_artefact+="-$(get_latest_nvidia_nvrc_version)"
 		latest_artefact+="-$(get_latest_upx_version)"
 		latest_artefact+="-$(get_latest_nvidia_repo_version)"
@@ -997,6 +1006,7 @@ install_initrd() {
 			latest_artefact+="-$(get_latest_kernel_nvidia_artefact_and_builder_image_version)"
 			latest_artefact+="-$(get_latest_nvidia_driver_version)"
 			latest_artefact+="-$(get_latest_nvidia_ctk_version)"
+			latest_artefact+="-$(get_latest_nvidia_dcgm_version)"
 			latest_artefact+="-$(get_latest_nvidia_nvrc_version)"
 			latest_artefact+="-$(get_latest_upx_version)"
 			latest_artefact+="-$(get_latest_nvidia_nvat_version)"
@@ -1012,6 +1022,7 @@ install_initrd() {
 		latest_artefact+="-$(get_latest_kernel_nvidia_artefact_and_builder_image_version)"
 		latest_artefact+="-$(get_latest_nvidia_driver_version)"
 		latest_artefact+="-$(get_latest_nvidia_ctk_version)"
+		latest_artefact+="-$(get_latest_nvidia_dcgm_version)"
 		latest_artefact+="-$(get_latest_nvidia_nvrc_version)"
 		latest_artefact+="-$(get_latest_upx_version)"
 		latest_artefact+="-$(get_latest_nvidia_repo_version)"
