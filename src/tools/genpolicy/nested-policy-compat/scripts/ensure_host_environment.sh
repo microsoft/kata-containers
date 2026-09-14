@@ -38,8 +38,10 @@ if [[ -z "${container_engine}" || ! -x "${container_engine}" ]]; then
 	exit 1
 fi
 missing_host_packages=()
+command -v curl >/dev/null 2>&1 || missing_host_packages+=(curl)
 command -v jq >/dev/null 2>&1 || missing_host_packages+=(jq)
 command -v protoc >/dev/null 2>&1 || missing_host_packages+=(protobuf-compiler)
+command -v skopeo >/dev/null 2>&1 || missing_host_packages+=(skopeo)
 if [[ "${#missing_host_packages[@]}" -ne 0 ]]; then
 	if [[ "${approval}" != yes ]]; then
 		echo "required Ubuntu host packages are unavailable: ${missing_host_packages[*]}" >&2

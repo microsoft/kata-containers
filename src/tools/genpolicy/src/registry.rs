@@ -570,8 +570,9 @@ async fn get_image_layers(
 
 /// The inputs a derived dm-verity root hash depends on, beyond the layer content
 /// itself: the compressed digest (which seeds the EROFS filesystem UUID) and the
-/// erofs-utils version that builds the image. Used to invalidate cache entries
-/// rather than silently reuse a hash derived under different conditions.
+/// erofs-utils runtime bundle that builds the image. Used to invalidate cache
+/// entries rather than silently reuse a hash derived under different
+/// conditions.
 pub fn verity_cache_key(layer_digest: &str) -> Result<String> {
     static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     let version = match VERSION.get() {
@@ -582,7 +583,9 @@ pub fn verity_cache_key(layer_digest: &str) -> Result<String> {
             v
         }
     };
-    Ok(format!("{layer_digest}|{version}"))
+    let runtime_fingerprint =
+        std::env::var("GENPOLICY_EROFS_RUNTIME_FINGERPRINT").unwrap_or_default();
+    Ok(format!("{layer_digest}|{version}|{runtime_fingerprint}"))
 }
 
 async fn get_users_from_layer(

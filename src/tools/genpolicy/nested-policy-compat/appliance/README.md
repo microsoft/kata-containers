@@ -22,7 +22,7 @@ harness collects the authoritative nested-Agent verdict.
 - `config/` contains the kubelet and CNI configuration copied into every
   appliance image.
 - `policy-settings.d/` contains settings applied to every policy-generation
-  run.
+  run. These files are host inputs and are not copied into the execution image.
 - `scripts/` contains the control-plane entrypoint and helpers embedded in the
   appliance image.
 
@@ -49,13 +49,15 @@ The Makefile performs these steps:
 
 1. Includes
    `appliance/profiles/k8s-1.33-containerd-2.3-erofs-dmverity.env`.
-2. Builds GenPolicy from the current checkout and stages it at
-   `nested-policy-compat/build/genpolicy`.
-3. Invokes the shared Dockerfile with explicit build arguments. For this
+2. Invokes the shared Dockerfile with explicit build arguments. For this
    profile, `KUBERNETES_VERSION=v1.33.13` overrides the Dockerfile's
    `v1.36.3` default.
-4. Tags the image as
+3. Tags the image as
    `nested-policy-compat:k8s-1.33-containerd-2.3-erofs-dmverity`.
+
+GenPolicy is built separately when a fixture is run. The host generation phase
+uses `build/genpolicy`, the settings files in this directory, and the
+repository's `rules.rego` without embedding them in the profile image.
 
 The Kubernetes 1.36 EROFS profile follows the same flow. Guest-pull profiles
 use the same Dockerfile and produce:

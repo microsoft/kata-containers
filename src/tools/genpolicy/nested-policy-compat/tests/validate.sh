@@ -11,12 +11,15 @@ set -o pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 bash -n "${root}/scripts/entrypoint.sh"
+bash -n "${root}/scripts/build_genpolicy.sh"
+bash -n "${root}/scripts/component_input_fingerprint.sh"
 bash -n "${root}/scripts/ensure_host_environment.sh"
 bash -n "${root}/scripts/ensure_kata_source_provenance.sh"
 bash -n "${root}/scripts/generate_policy.sh"
 bash -n "${root}/scripts/image_input_fingerprint.sh"
 bash -n "${root}/scripts/kata_config_value.sh"
 bash -n "${root}/scripts/rebuild_kata_stack.sh"
+bash -n "${root}/scripts/run_pinned_mkfs_erofs.sh"
 bash -n "${root}/scripts/source_tree_fingerprint.sh"
 bash -n "${root}/scripts/verify_kata_source_provenance.sh"
 bash -n "${root}/appliance/scripts/entrypoint.sh"
@@ -47,7 +50,6 @@ for profile in "${root}"/appliance/profiles/*.env; do
 		# shellcheck disable=SC2154
 		for required_file in \
 			"${root}/appliance/profiles/${GENPOLICY_SETTINGS}" \
-			"${root}/config/${GENPOLICY_CONTAINERD_CONFIG}" \
 			"${root}/config/${RUNTIME_CONTAINERD_CONFIG}"; do
 			[[ -f "${required_file}" ]]
 		done
@@ -84,12 +86,15 @@ PY
 if command -v shellcheck >/dev/null 2>&1; then
 	shellcheck \
 		"${root}/scripts/entrypoint.sh" \
+		"${root}/scripts/build_genpolicy.sh" \
+		"${root}/scripts/component_input_fingerprint.sh" \
 		"${root}/scripts/ensure_host_environment.sh" \
 		"${root}/scripts/ensure_kata_source_provenance.sh" \
 		"${root}/scripts/generate_policy.sh" \
 		"${root}/scripts/image_input_fingerprint.sh" \
 		"${root}/scripts/kata_config_value.sh" \
 		"${root}/scripts/rebuild_kata_stack.sh" \
+		"${root}/scripts/run_pinned_mkfs_erofs.sh" \
 		"${root}/scripts/source_tree_fingerprint.sh" \
 		"${root}/scripts/verify_kata_source_provenance.sh" \
 		"${root}/appliance/scripts/entrypoint.sh" \

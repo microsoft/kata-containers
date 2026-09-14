@@ -10,6 +10,10 @@ set -o pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 engine=${CONTAINER_ENGINE:?CONTAINER_ENGINE is required}
+genpolicy_bin=${GENPOLICY_BIN:?GENPOLICY_BIN is required}
+erofs_utils_version=${EROFS_UTILS_VERSION:?EROFS_UTILS_VERSION is required}
+profile_file=${PROFILE_FILE:?PROFILE_FILE is required}
+repo_root=${REPO_ROOT:?REPO_ROOT is required}
 nested_image=${NESTED_IMAGE:?NESTED_IMAGE is required}
 kata_root=${KATA_ROOT:?KATA_ROOT is required}
 kata_config=${KATA_CONFIG:?KATA_CONFIG is required}
@@ -33,7 +37,34 @@ if [[ ! -f "${output_marker}" ]] &&
 fi
 touch "${output_marker}"
 rm -rf "${output_root}/cases"
-mkdir -p "${output_root}/cases"
+rm -rf "${output_root}/generation-assets"
+mkdir -p \
+	"${output_root}/cases" \
+	"${output_root}/generation-assets/images"
+
+asset_container=$("${engine}" create "${nested_image}")
+# shellcheck disable=SC2317,SC2329
+cleanup_asset_container() {
+	"${engine}" rm -f "${asset_container}" >/dev/null 2>&1 || true
+}
+trap cleanup_asset_container EXIT
+"${engine}" cp \
+	"${asset_container}:/opt/genpolicy/images/." \
+	"${output_root}/generation-assets/images"
+"${engine}" cp \
+	"${asset_container}:/opt/genpolicy/registry-tls/registry.crt" \
+	"${output_root}/generation-assets/registry.crt"
+"${engine}" cp \
+	"${asset_container}:/opt/genpolicy/erofs-runtime" \
+	"${output_root}/generation-assets/erofs-runtime"
+"${engine}" rm "${asset_container}" >/dev/null
+asset_container=
+trap - EXIT
+if find "${output_root}/generation-assets/erofs-runtime" -type l -print -quit |
+	grep -q .; then
+	echo "EROFS runtime bundle must contain only resolved regular files" >&2
+	exit 1
+fi
 
 default_fixtures=(
 	pod.yaml
@@ -61,11 +92,18 @@ for fixture in "${fixtures[@]}"; do
 		"${case_dir}/generation-input/workload.yaml"
 
 	set +o errexit
-	"${engine}" run --rm --privileged --network=none --cgroupns=host \
-		-v "${case_dir}/generation-input:/input:ro" \
-		-v "${case_dir}/generation-output:/output" \
-		--entrypoint /opt/nested-policy-compat/scripts/generate_policy.sh \
-		"${nested_image}" >"${case_dir}/generation.log" 2>&1
+	CONTAINER_ENGINE="${engine}" \
+		GENPOLICY_BIN="${genpolicy_bin}" \
+		GENPOLICY_EROFS_BUNDLE_DIR="${output_root}/generation-assets/erofs-runtime" \
+		EROFS_UTILS_VERSION="${erofs_utils_version}" \
+		PROFILE_FILE="${profile_file}" \
+		REPO_ROOT="${repo_root}" \
+		GENPOLICY_INPUT_DIR="${case_dir}/generation-input" \
+		GENPOLICY_OUTPUT_DIR="${case_dir}/generation-output" \
+		GENPOLICY_REFERENCE_IMAGES_DIR="${output_root}/generation-assets/images" \
+		GENPOLICY_LAYER_CACHE="${output_root}/layers-cache.json" \
+		"${repo_root}/src/tools/genpolicy/nested-policy-compat/scripts/generate_policy.sh" \
+		>"${case_dir}/generation.log" 2>&1
 	generation_status=$?
 	set -o errexit
 	if [[ "${generation_status}" -ne 0 ]]; then
@@ -83,14 +121,10 @@ for fixture in "${fixtures[@]}"; do
 	python3 "${script_dir}/annotate_workload.py" \
 		--workload "${case_dir}/generation-output/workload.yaml" \
 		--policy "${case_dir}/generation-output/policy.rego" \
-		--registry-ca <(
-			"${engine}" run --rm --entrypoint /bin/cat "${nested_image}" \
-				/opt/genpolicy/registry-tls/registry.crt
-		) \
+		--registry-ca "${output_root}/generation-assets/registry.crt" \
 		--output "${case_dir}/nested-input/workload.yaml"
-	"${engine}" run --rm --entrypoint /bin/cat "${nested_image}" \
-		/opt/genpolicy/images/busybox.tar \
-		>"${case_dir}/nested-input/images/busybox.tar"
+	cp "${output_root}/generation-assets/images/busybox.tar" \
+		"${case_dir}/nested-input/images/busybox.tar"
 
 	set +o errexit
 	"${engine}" run --rm --privileged --cgroupns=host \

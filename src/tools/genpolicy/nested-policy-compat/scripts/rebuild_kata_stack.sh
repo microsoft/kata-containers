@@ -63,21 +63,30 @@ if ! command -v yq >/dev/null 2>&1; then
 	INSTALL_IN_GOPATH=true "${repo_root}/ci/install_yq.sh"
 fi
 export PATH="${tool_dir}:${GOPATH:-${HOME}/go}/bin:${PATH}"
+export ARCH
+ARCH=$(uname -m)
+export TARGET_ARCH="${ARCH}"
+export TARGET_OS=linux
+export CROSS_BUILD=false
+export DEBUG=false
+export RELEASE=no
+export EXTRA_PKGS=
+export REPO_URL=
+export REPO_URL_X86_64=
+export REPO_COMPONENTS=
+export BUSYBOX_CONF_FILE=
+export GUEST_HOOKS_TARBALL_NAME=
+export BUILDER_REGISTRY=quay.io/kata-containers/builders
+export USE_ORAS_CACHE=yes
+export PUSH_TO_REGISTRY=no
+unset \
+	AGENT_CONTAINER_BUILDER \
+	COCO_GUEST_COMPONENTS_CONTAINER_BUILDER \
+	PAUSE_IMAGE_CONTAINER_BUILDER \
+	SHIM_V2_CONTAINER_BUILDER
 
 mkdir -p "${build_dir}"
 "${local_build_dir}/kata-deploy-copy-libseccomp-installer.sh" agent
-rm -rf \
-	"${build_dir}/agent" \
-	"${build_dir}/coco-guest-components" \
-	"${build_dir}/pause-image" \
-	"${build_dir}/rootfs-image-confidential" \
-	"${build_dir}/shim-v2-rust"
-rm -f \
-	"${build_dir}/kata-static-agent.tar.zst" \
-	"${build_dir}/kata-static-coco-guest-components.tar.zst" \
-	"${build_dir}/kata-static-pause-image.tar.zst" \
-	"${build_dir}/kata-static-rootfs-image-confidential.tar.zst" \
-	"${build_dir}/kata-static-shim-v2-rust.tar.zst"
 
 build_component() {
 	local component=$1
@@ -94,13 +103,129 @@ build_component() {
 	)
 }
 
+component_archive() {
+	case "$1" in
+	agent) echo "${build_dir}/kata-static-agent.tar.zst" ;;
+	coco-guest-components)
+		echo "${build_dir}/kata-static-coco-guest-components.tar.zst"
+		;;
+	pause-image) echo "${build_dir}/kata-static-pause-image.tar.zst" ;;
+	rootfs-image-confidential)
+		echo "${build_dir}/kata-static-rootfs-image-confidential.tar.zst"
+		;;
+	shim-v2-rust) echo "${build_dir}/kata-static-shim-v2-rust.tar.zst" ;;
+	*)
+		echo "unsupported Kata component: $1" >&2
+		exit 2
+		;;
+	esac
+}
+
+component_builder_identity() {
+	local component=$1
+	local helper
+	local reference
+	local digest
+	local -a base_images
+
+	case "${component}" in
+	agent) helper=get_agent_image_name ;;
+	coco-guest-components) helper=get_coco_guest_components_image_name ;;
+	pause-image) helper=get_pause_image_name ;;
+	shim-v2-rust) helper=get_shim_v2_image_name ;;
+	rootfs-image-confidential)
+		local ubuntu_digest
+		local fedora_digest
+		ubuntu_digest=$(
+			skopeo inspect --format '{{.Digest}}' docker://docker.io/library/ubuntu:noble
+		)
+		fedora_digest=$(
+			skopeo inspect --format '{{.Digest}}' \
+				docker://registry.fedoraproject.org/fedora:44
+		)
+		printf 'ubuntu:noble@%s;fedora:44@%s\n' \
+			"${ubuntu_digest}" "${fedora_digest}"
+		return
+		;;
+	esac
+	reference=$(
+		# shellcheck source=/dev/null
+		source "${repo_root}/tools/packaging/scripts/lib.sh"
+		"${helper}"
+	)
+	digest=$(
+		skopeo inspect --format '{{.Digest}}' "docker://${reference}" \
+			2>/dev/null || true
+	)
+	if [[ -n "${digest}" ]]; then
+		printf '%s@%s\n' "${reference}" "${digest}"
+		return
+	fi
+
+	case "${component}" in
+	coco-guest-components)
+		base_images=(docker.io/library/ubuntu:24.04)
+		;;
+	*)
+		base_images=(docker.io/library/ubuntu:22.04)
+		;;
+	esac
+	printf '%s;locally-built-from=' "${reference}"
+	for base_image in "${base_images[@]}"; do
+		digest=$(
+			skopeo inspect --format '{{.Digest}}' "docker://${base_image}"
+		)
+		printf '%s@%s,' "${base_image}" "${digest}"
+	done
+	printf '\n'
+}
+
+ensure_component() {
+	local component=$1
+	shift
+	local archive
+	local fingerprint_file
+	local expected
+	local actual=
+
+	archive=$(component_archive "${component}")
+	fingerprint_file="${build_dir}/.nested-policy-compat-${component}.fingerprint"
+	export NPC_COMPONENT_BUILDER_IDENTITY
+	NPC_COMPONENT_BUILDER_IDENTITY=$(component_builder_identity "${component}")
+	expected=$(
+		"${script_dir}/component_input_fingerprint.sh" \
+			"${repo_root}" "${component}" "$@"
+	)
+	if [[ -f "${fingerprint_file}" ]]; then
+		actual=$(<"${fingerprint_file}")
+	fi
+	if [[ -f "${archive}" && "${actual}" == "${expected}" ]]; then
+		echo "reusing Kata ${component}: ${archive}"
+		return
+	fi
+
+	echo "Kata ${component} inputs changed or output is missing"
+	rm -rf "${build_dir:?}/${component}"
+	rm -f "${archive}" "${fingerprint_file}"
+	build_component "${component}"
+	if [[ ! -f "${archive}" ]]; then
+		echo "Kata build did not produce ${archive}" >&2
+		exit 1
+	fi
+	printf '%s\n' "${expected}" >"${fingerprint_file}.new"
+	mv -f "${fingerprint_file}.new" "${fingerprint_file}"
+}
+
 export KATA_AGENT_MAKEFLAGS="EXTRA_RUSTFEATURES=allow-unattested-initdata"
-build_component agent
+ensure_component agent
 unset KATA_AGENT_MAKEFLAGS
-build_component coco-guest-components
-build_component pause-image
-build_component rootfs-image-confidential
-build_component shim-v2-rust
+ensure_component coco-guest-components
+ensure_component pause-image
+ensure_component rootfs-image-confidential \
+	"$(component_archive agent)" \
+	"$(component_archive coco-guest-components)" \
+	"$(component_archive pause-image)"
+ensure_component shim-v2-rust
 
 for archive in \
 	"${build_dir}/kata-static-rootfs-image-confidential.tar.zst" \
@@ -194,7 +319,8 @@ runtime_source=$(
 	"${script_dir}/source_tree_fingerprint.sh" "${repo_root}" \
 		Cargo.toml Cargo.lock VERSION versions.yaml ci/install_yq.sh src/libs \
 		src/dragonball src/runtime-rs \
-		src/tools/genpolicy/nested-policy-compat/scripts/rebuild_kata_stack.sh \
+	src/tools/genpolicy/nested-policy-compat/scripts/component_input_fingerprint.sh \
+	src/tools/genpolicy/nested-policy-compat/scripts/rebuild_kata_stack.sh \
 		tools/packaging/kata-deploy/local-build/kata-deploy-binaries.sh \
 		tools/packaging/scripts tools/packaging/static-build/shim-v2
 )
@@ -202,6 +328,7 @@ agent_source=$(
 	"${script_dir}/source_tree_fingerprint.sh" "${repo_root}" \
 		Cargo.toml Cargo.lock VERSION versions.yaml ci/install_libseccomp.sh \
 		ci/install_yq.sh src/libs src/agent tools/osbuilder \
+		src/tools/genpolicy/nested-policy-compat/scripts/component_input_fingerprint.sh \
 		src/tools/genpolicy/nested-policy-compat/scripts/rebuild_kata_stack.sh \
 		tools/packaging/guest-image \
 		tools/packaging/kata-deploy/local-build/kata-deploy-binaries.sh \

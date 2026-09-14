@@ -13,8 +13,8 @@ Run the harness on a disposable Linux x86-64 L1 VM with:
   configuration uses native vhost-vsock;
 - Podman or Docker, with permission to run a privileged container in the host
   cgroup namespace;
-- GNU Make, Bash, Python 3, and a Rust/Cargo toolchain capable of building the
-  repository's `x86_64-unknown-linux-musl` GenPolicy target;
+- GNU Make, Bash, Python 3, curl, `skopeo`, and a Rust/Cargo toolchain capable
+  of building the repository's `x86_64-unknown-linux-musl` GenPolicy target;
 - a Kata installation supplied through `KATA_ROOT` or approval to install one.
 
 `fixture-e2e` and `ci-fixture-e2e` check these prerequisites before building or
@@ -66,12 +66,17 @@ Override `FLAT_VMDK_CLOUD_HYPERVISOR_REPO` and
 `FLAT_VMDK_CLOUD_HYPERVISOR_COMMIT` together to select another audited source.
 The build requires `build-essential`, `m4`, `bison`, `flex`, `uuid-dev`,
 `qemu-utils`, `musl-tools`, `pkg-config`, `protobuf-compiler`, `jq`, `kmod`,
-Git, and Rust/Cargo. Approved bootstrap installs missing `protobuf-compiler`
-and `jq` packages on Ubuntu hosts. The running host kernel must also provide
-EROFS filesystem and dm-verity device-mapper support; approved bootstrap loads
-the `erofs` and `dm_verity` modules and fails clearly if the kernel does not
-provide them. Guest-pull profiles do not require flat-VMDK, host EROFS, or
-dm-verity support.
+Git, and Rust/Cargo. EROFS policy generation also runs `mkfs.erofs` directly
+on the host. Approved bootstrap installs missing `protobuf-compiler`, `jq`,
+`curl` and `skopeo` packages on Ubuntu hosts. The running host kernel
+must also provide EROFS filesystem and dm-verity device-mapper support;
+approved bootstrap loads the `erofs` and `dm_verity` modules and fails clearly
+if the kernel does not provide them. The harness copies the repository-pinned
+`mkfs.erofs` binary, dynamic loader, and shared libraries from the static
+execution image and uses that exact runtime bundle for host policy generation,
+so its EROFS layout matches nested containerd. The complete bundle hash is part
+of the GenPolicy layer-cache key.
+Guest-pull profiles do not require flat-VMDK, host EROFS, or dm-verity.
 The Kata build scripts also require `yq`; install the repository-pinned version
 with `./ci/install_yq.sh` and add `${HOME}/go/bin` to `PATH`, or let
 approved bootstrap install the pinned version under `/usr/local/bin`.
@@ -85,13 +90,14 @@ fixtures, it verifies a rebuild-generated marker that binds the installed
 runtime-rs shim and monolithic confidential image to the current runtime-rs and
 strict-Agent build inputs, including local tracked and untracked changes. If
 they differ, it reuses the repository's Kata local-build pipeline with
-component caching disabled, builds the shim and monolithic confidential image
-containing the strict policy-enabled Agent, Confidential Data Hub, and pause
-bundle, installs them under `KATA_ROOT`, records source-and-artifact
-fingerprints, and verifies them again. All compatibility profiles boot that
-same monolithic image so profile comparisons do not also compare different
-guest environments. `KATA_ROOT` must therefore be writable when a rebuild is
-needed.
+harness-owned exact fingerprints. Unchanged Agent, CoCo/CDH, pause, runtime-rs,
+and confidential-image archives are reused. A changed embedded guest component
+invalidates the confidential image and dm-verity metadata; a runtime-rs-only
+change rebuilds only the shim. The resulting artifacts are installed under
+`KATA_ROOT`, recorded in the source-and-artifact provenance marker, and
+verified again. All compatibility profiles boot that same monolithic image so
+profile comparisons do not also compare different guest environments.
+`KATA_ROOT` must therefore be writable when a rebuild is needed.
 
 These Cloud Hypervisor profiles are intentionally non-confidential development
 VMs. Their rebuilt Agent enables `allow-unattested-initdata` so the host can
@@ -109,9 +115,12 @@ retained Cloud Hypervisor profiles, the VMM must include flat-VMDK support from
 The selected runtime configuration must enable the `cc_init_data` annotation
 and use `shared_fs = "none"`.
 
-Kubernetes, containerd, etcd, runc, CNI plugins, EROFS tooling, and the fixture
-images do not need to be installed on the host; the appliance image downloads
-or embeds them. The host also does not need an existing Kubernetes cluster.
+Kubernetes, containerd, etcd, runc, and CNI plugins do not need to be installed
+on the host; the appliance image downloads them. The host also does not need an
+existing Kubernetes cluster or containerd daemon. GenPolicy runs directly on
+the host against a temporary local registry. The static image supplies the
+fixture OCI archives and retains the EROFS and registry tools needed by nested
+execution.
 
 ## Build
 
@@ -123,18 +132,19 @@ make -C src/tools/genpolicy/nested-policy-compat \
 ```
 
 The image downloads the Kubernetes, containerd, etcd, runc, and CNI versions
-declared by the selected profile. The build also compiles GenPolicy from the
-checked-out source tree and embeds that binary together with this tree's
-`rules.rego` and `genpolicy-settings.json`. No appliance branch or prebuilt
-appliance image is an input. The other Kata components come from the separately
-prepared `KATA_ROOT`; they are not compiled by this target.
+declared by the selected profile. It is a static nested-execution image and
+does not embed GenPolicy, `rules.rego`, or GenPolicy settings. Those inputs are
+built or read from the checkout when each host generation phase runs. No
+appliance branch or prebuilt appliance image is an input. The other Kata
+components come from the separately prepared `KATA_ROOT`; they are not
+compiled by this target.
 
 All profiles use the shared `Dockerfile`; the Makefile passes the selected
 profile's version pins as Docker build arguments and stores the resulting tag
 in the local Podman or Docker image store. See `appliance/README.md` for the
 directory layout, build flow, image tags, and storage details.
 
-For compatibility tests, the image appends
+For compatibility tests, the host generation script appends
 `tests/policy/create-sandbox-reasons.rego.inc` to the selected `rules.rego`.
 These test-only rules add denial attribution for sandbox guest hooks, kernel
 modules, PID namespace mode, and storage matching. This is a GenPolicy
@@ -186,7 +196,20 @@ The workflow is available as an opt-in CI pilot through the
 profile jobs to `tools/testing/gatekeeper/required-tests.yaml`. Do not execute
 untrusted pull-request code on a persistent privileged runner.
 
-## Inputs
+## Generation and inputs
+
+Before each nested run, `fixture-matrix-e2e.sh` creates a stopped container from
+the static image and copies out its fixture OCI archives and registry
+certificate. It does not start the appliance for generation. The host
+`generate_policy.sh` starts only a temporary Distribution registry, publishes
+the exact requested manifests through Podman or Docker, and invokes the
+checkout-built GenPolicy without a containerd socket. The temporary generation
+registry authority is replaced with the profile's nested registry authority in
+both the policy and annotated workload before execution.
+
+GenPolicy, rules, and settings therefore do not participate in the static image
+fingerprint. A GenPolicy-only change rebuilds the binary and regenerates policy
+without rebuilding the Kubernetes/runtime image or Kata guest appliance.
 
 - `/input/workload.yaml`: digest-pinned workload carrying an externally
   generated `io.katacontainers.config.hypervisor.cc_init_data` annotation.
@@ -289,6 +312,8 @@ privilege rationale.
 - `component-versions.txt` and `kata-artifacts.sha256`;
 - control-plane, shim, relay, and Agent-related logs available through
   containerd.
+- `generation-inputs.sha256`: hashes of the host GenPolicy binary, composed
+  rules, and effective settings used for that fixture.
 
 The raw Agent channel intentionally retains complete test request traffic,
 including the synthetic Secret and ConfigMap fixture values, for diagnostics.

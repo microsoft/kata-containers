@@ -18,6 +18,7 @@ APPROVE_KATA_INSTALL ?= no
 GENPOLICY_TARGET ?= x86_64-unknown-linux-musl
 GENPOLICY_BIN ?= $(REPO_ROOT)/target/$(GENPOLICY_TARGET)/release/genpolicy
 GENPOLICY_STAGE := $(CURDIR)/build/genpolicy
+EROFS_UTILS_VERSION ?= $(shell yq -r '.. | select(has("erofs-utils")) | ."erofs-utils".version' $(REPO_ROOT)/versions.yaml)
 
 PROFILE_FILE := $(CURDIR)/appliance/profiles/$(PROFILE).env
 ifeq ($(wildcard $(PROFILE_FILE)),)
@@ -27,10 +28,10 @@ include $(PROFILE_FILE)
 
 .PHONY: image ensure-image ensure-host-environment prepare-kata-stack verify-kata-provenance ensure-kata-provenance validate genpolicy-bin fixture-e2e ci-fixture-e2e runtime-operations-e2e termination-log-e2e custom-service-account-e2e clean
 
-image: $(GENPOLICY_STAGE)
+image:
 	@test -n "$(CONTAINER_ENGINE)" || { echo "docker or podman is required"; exit 1; }
 	@input_fingerprint="$$(./scripts/image_input_fingerprint.sh \
-		"$(REPO_ROOT)" "$(PROFILE_FILE)" "$(KATA_ROOT)" "$(KATA_CONFIG)")"; \
+		"$(REPO_ROOT)" "$(PROFILE_FILE)" "$(EROFS_UTILS_VERSION)")"; \
 	$(CONTAINER_ENGINE) build \
 		--file $(CURDIR)/Dockerfile \
 		--build-arg PROFILE_NAME=$(PROFILE_NAME) \
@@ -39,14 +40,15 @@ image: $(GENPOLICY_STAGE)
 		--build-arg RUNC_VERSION=$(RUNC_VERSION) \
 		--build-arg ETCD_VERSION=$(ETCD_VERSION) \
 		--build-arg CNI_PLUGINS_VERSION=$(CNI_PLUGINS_VERSION) \
-		--build-arg INPUT_FINGERPRINT="$${input_fingerprint}" \
+		--build-arg EROFS_UTILS_VERSION=$(EROFS_UTILS_VERSION) \
+		--label "io.katacontainers.nested-policy-compat.input-fingerprint=$${input_fingerprint}" \
 		--tag $(IMAGE) \
 		$(REPO_ROOT)
 
 ensure-image:
 	@test -n "$(CONTAINER_ENGINE)" || { echo "docker or podman is required"; exit 1; }
 	@expected="$$(./scripts/image_input_fingerprint.sh \
-		"$(REPO_ROOT)" "$(PROFILE_FILE)" "$(KATA_ROOT)" "$(KATA_CONFIG)")"; \
+		"$(REPO_ROOT)" "$(PROFILE_FILE)" "$(EROFS_UTILS_VERSION)")"; \
 	actual="$$( \
 		$(CONTAINER_ENGINE) image inspect \
 			--format '{{ index .Config.Labels "io.katacontainers.nested-policy-compat.input-fingerprint" }}' \
@@ -91,19 +93,16 @@ validate:
 	./tests/validate.sh
 
 genpolicy-bin:
-	$(MAKE) --always-make \
-		--directory $(REPO_ROOT)/src/tools/genpolicy \
-		src/version.rs
-	cargo build --locked --release --package genpolicy \
-		--target $(GENPOLICY_TARGET) \
-		--manifest-path $(REPO_ROOT)/Cargo.toml
-
-$(GENPOLICY_STAGE): genpolicy-bin
-	mkdir -p $(dir $@)
-	cp $(GENPOLICY_BIN) $@
+	./scripts/build_genpolicy.sh \
+		"$(REPO_ROOT)" "$(GENPOLICY_TARGET)" \
+		"$(GENPOLICY_BIN)" "$(GENPOLICY_STAGE)"
 
 define run_fixture_e2e
 	CONTAINER_ENGINE="$(CONTAINER_ENGINE)" \
+		GENPOLICY_BIN="$(GENPOLICY_STAGE)" \
+		EROFS_UTILS_VERSION="$(EROFS_UTILS_VERSION)" \
+		PROFILE_FILE="$(PROFILE_FILE)" \
+		REPO_ROOT="$(REPO_ROOT)" \
 		NESTED_IMAGE="$(IMAGE)" \
 		KATA_ROOT="$(KATA_ROOT)" \
 		KATA_CONFIG="$(KATA_CONFIG)" \
@@ -113,11 +112,11 @@ define run_fixture_e2e
 		./tests/fixture-matrix-e2e.sh
 endef
 
-fixture-e2e: ensure-host-environment ensure-kata-provenance ensure-image
+fixture-e2e: ensure-host-environment ensure-kata-provenance ensure-image genpolicy-bin
 	$(run_fixture_e2e)
 
 ci-fixture-e2e: APPROVE_KATA_INSTALL := no
-ci-fixture-e2e: ensure-host-environment verify-kata-provenance ensure-image
+ci-fixture-e2e: ensure-host-environment verify-kata-provenance ensure-image genpolicy-bin
 	$(run_fixture_e2e)
 
 runtime-operations-e2e: FIXTURES := runtime-operations-workload.yaml

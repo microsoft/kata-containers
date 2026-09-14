@@ -4,11 +4,11 @@
 
 Test whether an externally generated Kata Agent policy remains compatible with
 the shim requests produced by a specific Kubernetes and containerd version.
-Policy generation is a separate phase from nested execution, but both phases
-run in the same self-contained profile image.
+Policy generation runs directly on the host. Nested execution runs in a
+self-contained static profile image.
 
-The image builds GenPolicy from the checked-out source tree and vendors the
-versioned appliance profiles, API server, kubelet, containerd, etcd, CNI
+The host builds GenPolicy from the checked-out source tree. The image vendors
+the versioned appliance profiles, API server, kubelet, containerd, etcd, CNI
 plugins, image preparation, and workload normalization needed by the test. It
 uses an unmodified Kata shim to boot a real guest through nested virtualization
 exposed by the disposable L1 VM.
@@ -39,11 +39,18 @@ and embeds OCI fixtures, the workload submitter, kubelet and CNI configuration,
 and startup orchestration. It has no dependency on another Git branch, source
 worktree, or prebuilt appliance image.
 
-The compatibility matrix invokes the embedded GenPolicy binary in a dedicated
-generation mode before annotating the workload. Consequently the generated
-policy, rules, and settings all come from the same `manifold-cc`-based commit
-as the harness. Policy generation is separate from the nested runtime path and
-remains independent of the Kubernetes/containerd version under test.
+The compatibility matrix invokes the checkout-built GenPolicy binary on the
+host before annotating the workload. A temporary local Distribution registry
+serves the exact fixture manifests through GenPolicy's direct registry backend;
+there is no generation-side containerd. Consequently the generated policy,
+rules, and settings all come from the same `manifold-cc`-based commit as the
+harness. They are not static image inputs and remain independent of the
+Kubernetes/containerd version under test.
+
+For EROFS profiles, host generation invokes the exact `mkfs.erofs` runtime
+bundle copied from the static execution image, including its loader and shared
+libraries. A hash of that bundle participates in the layer-cache key so hashes
+cannot be reused across a toolchain change that retains the same version text.
 
 An unmodified Kata installation is mounted at `/opt/kata`. This separates the
 Kubernetes/containerd profile from the Kata build being tested and avoids
@@ -56,8 +63,12 @@ confidential-image root hash to fingerprints of the runtime-rs and strict-Agent
 build inputs. Requiring this marker prevents a same-commit Agent built without
 strict-policy enforcement, an unrelated confidential image, or stale boot
 components from being accepted. A mismatch invokes the repository's local-build
-pipeline with its artifact cache disabled, atomically replaces the installed
-artifacts, and writes a new marker.
+pipeline through harness-owned component fingerprints, atomically replaces the
+installed artifacts, and writes a new marker. Agent, CoCo/CDH, pause,
+runtime-rs, and the confidential image are reused independently when their
+effective inputs match. The confidential image fingerprint includes the
+component archive hashes, so embedded-content changes always regenerate the
+EROFS image and dm-verity metadata.
 For CI, `prepare-kata-stack` is the artifact-production phase,
 `verify-kata-provenance` is the artifact-consumption gate, and
 `ci-fixture-e2e` deliberately verifies without rebuilding so a stale artifact
@@ -68,17 +79,16 @@ cannot be hidden by work performed inside the test job.
 Strict-policy Agent builds intentionally avoid exposing request contents or a
 full policy trace to the host. A bare GenPolicy denial can therefore
 identify the rejected endpoint without identifying which comparison failed.
-The compatibility appliance adds test-only `reason` rules so a failed matrix
+The compatibility harness adds test-only `reason` rules so a failed matrix
 case can attribute the denial without weakening enforcement.
 
 The reason rules are Rego source, not a GenPolicy settings option and not a
-runtime-rs or Agent configuration flag. During the appliance image build,
+runtime-rs or Agent configuration flag. During host policy generation,
 `tests/policy/create-sandbox-reasons.rego.inc` is appended to the repository-tip
-`rules.rego`. During policy generation, that combined module is supplied to
-GenPolicy through:
+`rules.rego`. That combined module is supplied to GenPolicy through:
 
 ```text
---rego-rules-path /opt/genpolicy/policy/rules.rego
+--rego-rules-path <temporary-generation-directory>/rules.rego
 ```
 
 GenPolicy embeds the resulting rules module in each generated workload policy.

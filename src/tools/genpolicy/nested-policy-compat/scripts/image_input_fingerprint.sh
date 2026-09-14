@@ -8,16 +8,14 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-if [[ $# -ne 4 ]]; then
-	echo "usage: $0 REPO_ROOT PROFILE_FILE KATA_ROOT KATA_CONFIG" >&2
+if [[ $# -ne 3 ]]; then
+	echo "usage: $0 REPO_ROOT PROFILE_FILE EROFS_UTILS_VERSION" >&2
 	exit 2
 fi
 
 repo_root=$1
 profile_file=$2
-kata_root=$3
-kata_config=$4
-staged_genpolicy="${repo_root}/src/tools/genpolicy/nested-policy-compat/build/genpolicy"
+erofs_utils_version=$3
 
 if [[ ! -f "${profile_file}" ]]; then
 	echo "profile file not found: ${profile_file}" >&2
@@ -25,39 +23,19 @@ if [[ ! -f "${profile_file}" ]]; then
 fi
 
 inputs=(
-	"${repo_root}/Cargo.lock"
-	"${repo_root}/Cargo.toml"
-	"${repo_root}/src/agent"
-	"${repo_root}/src/runtime-rs"
-	"${repo_root}/src/tools/genpolicy"
+	"${repo_root}/src/tools/genpolicy/nested-policy-compat/Dockerfile"
+	"${repo_root}/src/tools/genpolicy/nested-policy-compat/appliance/config"
+	"${repo_root}/src/tools/genpolicy/nested-policy-compat/appliance/scripts"
+	"${repo_root}/src/tools/genpolicy/nested-policy-compat/config"
+	"${repo_root}/src/tools/genpolicy/nested-policy-compat/scripts/compat_report.py"
+	"${repo_root}/src/tools/genpolicy/nested-policy-compat/scripts/entrypoint.sh"
+	"${repo_root}/src/tools/genpolicy/nested-policy-compat/scripts/hvsock_capture.py"
+	"${repo_root}/src/tools/genpolicy/nested-policy-compat/scripts/image_input_fingerprint.sh"
+	"${profile_file}"
 )
 
-if [[ -n "${kata_config}" ]]; then
-	if [[ ! -f "${kata_config}" ]]; then
-		echo "Kata configuration not found: ${kata_config}" >&2
-		exit 1
-	fi
-	inputs+=("${kata_config}")
-fi
-
-if [[ -n "${kata_root}" ]]; then
-	for installed_input in \
-		"${kata_root}/runtime-rs/bin/containerd-shim-kata-v2" \
-		"${kata_root}/bin/kata-agent" \
-		"${kata_root}/share/kata-containers/kata-containers-confidential.img" \
-		"${kata_root}/share/kata-containers/root_hash_confidential.txt"; do
-		[[ ! -f "${installed_input}" ]] || inputs+=("${installed_input}")
-	done
-fi
-
 {
-	printf 'profile=%s\n' "${profile_file}"
-	printf 'staged-genpolicy\0'
-	if [[ -f "${staged_genpolicy}" ]]; then
-		sha256sum "${staged_genpolicy}"
-	else
-		printf 'missing\n'
-	fi
+	printf 'erofs-utils-version=%s\n' "${erofs_utils_version}"
 	while IFS= read -r -d '' input; do
 		relative=${input#"${repo_root}/"}
 		printf '%s\0' "${relative}"

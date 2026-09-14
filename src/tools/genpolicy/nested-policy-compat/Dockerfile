@@ -8,8 +8,8 @@ ARG RUNC_VERSION=v1.2.8
 ARG ETCD_VERSION=v3.5.21
 ARG CNI_PLUGINS_VERSION=v1.7.1
 
-FROM registry.k8s.io/pause:3.10 AS pause
-FROM busybox:1.36.1 AS busybox
+FROM registry.k8s.io/pause@sha256:7c38f24774e3cbd906d2d33c38354ccf787635581c122965132c9bd309754d4a AS pause
+FROM docker.io/library/busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662 AS busybox
 FROM docker.io/library/registry:2.8.3 AS registry
 
 FROM debian:bookworm-slim AS component-downloader
@@ -70,7 +70,7 @@ RUN set -eux; \
         /out/
 
 FROM debian:bookworm-slim AS erofs-utils-builder
-ARG EROFS_UTILS_VERSION=1.8.4
+ARG EROFS_UTILS_VERSION=1.8.5
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         autoconf automake build-essential ca-certificates curl liblz4-dev \
@@ -87,6 +87,7 @@ RUN set -eux; \
     make install
 
 FROM debian:bookworm-slim
+ARG PROFILE_NAME=k8s-1.36-containerd-2.3-erofs-dmverity
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
@@ -100,23 +101,36 @@ COPY --from=runtime-binaries /out/ /usr/local/bin/
 COPY --from=cni-binaries /out/ /opt/cni/bin/
 COPY --from=registry /bin/registry /usr/local/bin/registry
 COPY --from=erofs-utils-builder /usr/local/bin/mkfs.erofs /usr/local/bin/mkfs.erofs
-COPY src/tools/genpolicy/nested-policy-compat/build/genpolicy /usr/local/bin/genpolicy
+RUN set -eux; \
+    mkdir -p \
+        /opt/genpolicy/erofs-runtime/bin \
+        /opt/genpolicy/erofs-runtime/lib/x86_64-linux-gnu \
+        /opt/genpolicy/erofs-runtime/lib64; \
+    cp /usr/local/bin/mkfs.erofs /opt/genpolicy/erofs-runtime/bin/; \
+    cp -L \
+        /lib/x86_64-linux-gnu/libuuid.so.1 \
+        /lib/x86_64-linux-gnu/liblz4.so.1 \
+        /lib/x86_64-linux-gnu/libz.so.1 \
+        /lib/x86_64-linux-gnu/libc.so.6 \
+        /opt/genpolicy/erofs-runtime/lib/x86_64-linux-gnu/; \
+    cp -L /lib64/ld-linux-x86-64.so.2 \
+        /opt/genpolicy/erofs-runtime/lib64/
 COPY --from=pause /pause /opt/genpolicy/rootfs/pause/pause
 COPY --from=busybox / /opt/genpolicy/rootfs/busybox
 RUN mkdir -p /opt/genpolicy/rootfs/busybox/work
 
-COPY src/tools/genpolicy/nested-policy-compat/appliance /opt/genpolicy/appliance
-COPY src/tools/genpolicy/rules.rego /opt/genpolicy/policy/rules.rego
-COPY src/tools/genpolicy/nested-policy-compat/tests/policy/create-sandbox-reasons.rego.inc \
-    /opt/genpolicy/policy/create-sandbox-reasons.rego.inc
-COPY src/tools/genpolicy/genpolicy-settings.json \
-    /opt/genpolicy/policy/settings/genpolicy-settings.json
-COPY src/tools/genpolicy/nested-policy-compat/appliance/policy-settings.d \
-    /opt/genpolicy/policy/settings/genpolicy-settings.d
+COPY src/tools/genpolicy/nested-policy-compat/appliance/config \
+    /opt/genpolicy/appliance/config
+COPY src/tools/genpolicy/nested-policy-compat/appliance/profiles/${PROFILE_NAME}.env \
+    /opt/genpolicy/appliance/profiles/
+COPY src/tools/genpolicy/nested-policy-compat/appliance/scripts \
+    /opt/genpolicy/appliance/scripts
 COPY src/tools/genpolicy/nested-policy-compat/config \
     /opt/nested-policy-compat/config
-COPY src/tools/genpolicy/nested-policy-compat/scripts \
-    /opt/nested-policy-compat/scripts
+COPY src/tools/genpolicy/nested-policy-compat/scripts/entrypoint.sh \
+    src/tools/genpolicy/nested-policy-compat/scripts/compat_report.py \
+    src/tools/genpolicy/nested-policy-compat/scripts/hvsock_capture.py \
+    /opt/nested-policy-compat/scripts/
 
 RUN set -eux; \
     mkdir -p /opt/genpolicy/registry-tls; \
@@ -128,9 +142,6 @@ RUN set -eux; \
         -addext "subjectAltName=IP:10.188.0.1" \
         -keyout /opt/genpolicy/registry-tls/registry.key \
         -out /opt/genpolicy/registry-tls/registry.crt; \
-    printf '\n' >>/opt/genpolicy/policy/rules.rego; \
-    cat /opt/genpolicy/policy/create-sandbox-reasons.rego.inc \
-        >>/opt/genpolicy/policy/rules.rego; \
     chmod 0755 /opt/genpolicy/appliance/scripts/*.sh \
         /opt/nested-policy-compat/scripts/*.sh \
         /opt/nested-policy-compat/scripts/*.py; \
@@ -148,9 +159,6 @@ RUN set -eux; \
         --output /opt/genpolicy/images/busybox.tar; \
     rm -rf /opt/genpolicy/rootfs
 
-ARG PROFILE_NAME=k8s-1.36-containerd-2.3-erofs-dmverity
-ARG INPUT_FINGERPRINT=unknown
-LABEL io.katacontainers.nested-policy-compat.input-fingerprint="${INPUT_FINGERPRINT}"
 ENV PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENV GENPOLICY_APPLIANCE_ROOT=/opt/genpolicy/appliance
 ENV GENPOLICY_PROFILE_NAME=${PROFILE_NAME}

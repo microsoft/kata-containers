@@ -34,6 +34,7 @@ runtime_inputs=(
 	src/libs
 	src/dragonball
 	src/runtime-rs
+	src/tools/genpolicy/nested-policy-compat/scripts/component_input_fingerprint.sh
 	src/tools/genpolicy/nested-policy-compat/scripts/rebuild_kata_stack.sh
 	tools/packaging/kata-deploy/local-build/kata-deploy-binaries.sh
 	tools/packaging/scripts
@@ -48,6 +49,7 @@ agent_inputs=(
 	ci/install_yq.sh
 	src/libs
 	src/agent
+	src/tools/genpolicy/nested-policy-compat/scripts/component_input_fingerprint.sh
 	src/tools/genpolicy/nested-policy-compat/scripts/rebuild_kata_stack.sh
 	tools/osbuilder
 	tools/packaging/guest-image

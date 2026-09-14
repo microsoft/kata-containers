@@ -69,7 +69,14 @@ impl ImageLayersCache {
 
     pub fn insert_layer(&self, layer: &ImageLayer) {
         let mut layers = self.inner.lock().unwrap();
-        layers.push(layer.clone());
+        if let Some(existing) = layers
+            .iter_mut()
+            .find(|existing| existing.diff_id == layer.diff_id)
+        {
+            *existing = layer.clone();
+        } else {
+            layers.push(layer.clone());
+        }
     }
 
     pub fn persist(&self) {
@@ -93,5 +100,30 @@ impl ImageLayersCache {
         serde_json::to_writer_pretty(&file, &*layers)?;
         FileExt::unlock(&file)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert_layer_replaces_stale_entry() {
+        let cache = ImageLayersCache::new(&None);
+        let mut original = ImageLayer {
+            diff_id: "sha256:diff".to_string(),
+            passwd: String::new(),
+            group: String::new(),
+            verity_hash: String::new(),
+            verity_key: "old".to_string(),
+        };
+        cache.insert_layer(&original);
+
+        original.verity_key = "new".to_string();
+        cache.insert_layer(&original);
+
+        let stored = cache.get_layer("sha256:diff").unwrap();
+        assert_eq!(stored.verity_key, "new");
+        assert_eq!(cache.inner.lock().unwrap().len(), 1);
     }
 }
