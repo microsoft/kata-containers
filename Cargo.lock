@@ -6492,6 +6492,7 @@ dependencies = [
  "nix 0.31.3",
  "oci-spec 0.10.0",
  "persist",
+ "protocols",
  "rand 0.10.1",
  "rstest",
  "rtnetlink 0.21.0",
@@ -6505,6 +6506,7 @@ dependencies = [
  "tests_utils",
  "tokio",
  "tracing",
+ "ttrpc",
  "uuid 0.4.0",
  "walkdir",
 ]
