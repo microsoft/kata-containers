@@ -86,14 +86,12 @@ use resource::network::{dan_config_path, DanNetworkConfig, NetworkConfig, Networ
 use resource::{ResourceConfig, ResourceManager};
 use runtime_spec as spec;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs;
-use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use strum::Display;
 use tokio::sync::{mpsc::Sender, watch, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
@@ -101,16 +99,16 @@ use tracing::instrument;
 
 pub(crate) const VIRTCONTAINER: &str = "virt_container";
 const VMM_START_TIMEOUT_SECS: i32 = 10_000;
+const SOURCE_AGENT_LISTEN_GRACE: Duration = Duration::from_secs(2);
 
 #[derive(Serialize)]
 struct SnapshotFileManifest {
     path: String,
     size: u64,
-    sha256: String,
 }
 
 #[derive(Serialize)]
-struct SnapshotContainerManifest {
+struct SnapshotLiveContainerManifest {
     cri_name: String,
     source_host_id: String,
     snapshot_guest_id: String,
@@ -119,12 +117,28 @@ struct SnapshotContainerManifest {
 }
 
 #[derive(Serialize)]
+struct SnapshotCompletedContainerManifest {
+    cri_name: String,
+    exit_code: i32,
+}
+
+#[derive(Serialize)]
+struct SnapshotAgentTransportManifest {
+    contract_version: u32,
+    state: &'static str,
+    server_port: u32,
+    log_port: u32,
+}
+
+#[derive(Serialize)]
 struct SnapshotManifest {
     format_version: u32,
     producer: &'static str,
     hypervisor: &'static str,
     source_sandbox_id: String,
-    containers: Vec<SnapshotContainerManifest>,
+    agent_transport: SnapshotAgentTransportManifest,
+    live_containers: Vec<SnapshotLiveContainerManifest>,
+    completed_containers: Vec<SnapshotCompletedContainerManifest>,
     files: Vec<SnapshotFileManifest>,
 }
 
@@ -156,21 +170,78 @@ fn snapshot_file_manifest(root: &Path, path: &Path) -> Result<SnapshotFileManife
             path.display()
         ));
     }
-    let mut file = fs::File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
     Ok(SnapshotFileManifest {
         path: relative_snapshot_path(root, path)?,
         size: metadata.len(),
-        sha256: hex::encode(hasher.finalize()),
     })
+}
+
+#[cfg(test)]
+mod snapshot_manifest_tests {
+    use super::*;
+
+    #[test]
+    fn agent_transport_contract_is_required_in_manifest() {
+        let manifest = SnapshotManifest {
+            format_version: 1,
+            producer: "runtime-rs",
+            hypervisor: "cloud-hypervisor",
+            source_sandbox_id: "sandbox".to_string(),
+            agent_transport: SnapshotAgentTransportManifest {
+                contract_version: 1,
+                state: "disconnected-listening",
+                server_port: 1024,
+                log_port: 1025,
+            },
+            live_containers: Vec::new(),
+            completed_containers: Vec::new(),
+            files: Vec::new(),
+        };
+
+        let value = serde_json::to_value(manifest).unwrap();
+        assert_eq!(value["agent_transport"]["contract_version"], 1);
+        assert_eq!(value["agent_transport"]["state"], "disconnected-listening");
+        assert_eq!(value["agent_transport"]["server_port"], 1024);
+        assert_eq!(value["agent_transport"]["log_port"], 1025);
+    }
+
+    #[test]
+    fn manifest_separates_live_and_completed_containers_without_payload_hashes() {
+        let manifest = SnapshotManifest {
+            format_version: 1,
+            producer: "runtime-rs",
+            hypervisor: "cloud-hypervisor",
+            source_sandbox_id: "sandbox".to_string(),
+            agent_transport: SnapshotAgentTransportManifest {
+                contract_version: 1,
+                state: "disconnected-listening",
+                server_port: 1024,
+                log_port: 1025,
+            },
+            live_containers: vec![SnapshotLiveContainerManifest {
+                cri_name: "app".to_string(),
+                source_host_id: "host-app".to_string(),
+                snapshot_guest_id: "guest-app".to_string(),
+                readonly_disk: "containers/host-app/rootfs.vmdk".to_string(),
+                writable_disk: None,
+            }],
+            completed_containers: vec![SnapshotCompletedContainerManifest {
+                cri_name: "setup".to_string(),
+                exit_code: 0,
+            }],
+            files: vec![SnapshotFileManifest {
+                path: "clh/state.json".to_string(),
+                size: 42,
+            }],
+        };
+
+        let value = serde_json::to_value(manifest).unwrap();
+        assert!(value.get("containers").is_none());
+        assert_eq!(value["live_containers"][0]["cri_name"], "app");
+        assert_eq!(value["completed_containers"][0]["cri_name"], "setup");
+        assert_eq!(value["completed_containers"][0]["exit_code"], 0);
+        assert!(value["files"][0].get("sha256").is_none());
+    }
 }
 
 pub struct SandboxRestoreArgs {
@@ -1085,21 +1156,47 @@ impl VirtSandbox {
         fs::create_dir(&staging)?;
         fs::set_permissions(&staging, fs::Permissions::from_mode(0o700))?;
 
-        let container_ids = container_manager.container_ids().await;
-        let active_host_ids = container_ids
+        let inventory = container_manager.snapshot_inventory().await?;
+        let active_host_ids = inventory
+            .live_container_ids
             .iter()
             .map(|container_id| container_id.container_id.clone())
             .collect::<HashSet<_>>();
+        // These flags record completed stages so recovery reverses only work
+        // that actually happened.
         let mut paused_containers = Vec::new();
+        let mut monitor_suspended = false;
+        let mut agent_disconnected = false;
+        let mut disconnect_token = None;
         let mut vm_paused = false;
+        // Ordering is part of the snapshot protocol:
+        // 1. stop health RPCs and pause containers while the agent is reachable;
+        // 2. drain writes, disconnect, and let the guest agent return to listen;
+        // 3. pause the VM and capture a disconnected-listening checkpoint.
         let operation: Result<Vec<resource::rootfs::RootfsSnapshotArtifacts>> = async {
-            for container_id in &container_ids {
+            self.monitor.suspend().await;
+            monitor_suspended = true;
+            for container_id in &inventory.live_container_ids {
                 container_manager
                     .pause_container(container_id)
                     .await
                     .with_context(|| format!("pause container {}", container_id.container_id))?;
                 paused_containers.push(container_id.clone());
             }
+
+            let token = self
+                .agent
+                .prepare_disconnect()
+                .await
+                .context("prepare planned agent disconnect")?;
+            disconnect_token = Some(token);
+            agent_disconnected = true;
+            self.agent
+                .disconnect()
+                .await
+                .context("disconnect source agent")?;
+            tokio::time::sleep(SOURCE_AGENT_LISTEN_GRACE).await;
+
             self.hypervisor.pause_vm().await.context("pause VM")?;
             vm_paused = true;
 
@@ -1137,25 +1234,70 @@ impl VirtSandbox {
         }
         .await;
 
+        // Recover in the opposite dependency order. The VM must run before the
+        // agent can reconnect, and containers/monitor must remain paused until
+        // reconnectable RPCs have acquired the new healthy generation.
         let mut recovery_error: Option<anyhow::Error> = None;
+        let mut vm_ready = !vm_paused;
         if vm_paused {
-            if let Err(error) = self.hypervisor.resume_vm().await.context("resume VM") {
-                recovery_error = Some(error);
-            }
-        }
-        for container_id in paused_containers.iter().rev() {
-            if let Err(error) = container_manager
-                .resume_container(container_id)
-                .await
-                .with_context(|| format!("resume container {}", container_id.container_id))
-            {
-                recovery_error = Some(match recovery_error {
-                    Some(previous) => previous.context(error.to_string()),
-                    None => error,
-                });
+            match self.hypervisor.resume_vm().await.context("resume VM") {
+                Ok(()) => vm_ready = true,
+                Err(error) => recovery_error = Some(error),
             }
         }
 
+        let mut agent_ready = !agent_disconnected;
+        if agent_disconnected && vm_ready {
+            let reconnect_result: Result<()> = async {
+                let token = disconnect_token
+                    .ok_or_else(|| anyhow!("missing source agent disconnect token"))?;
+                let address = self
+                    .hypervisor
+                    .get_agent_socket()
+                    .await
+                    .context("get source agent socket")?;
+                self.agent
+                    .reconnect(&address, token)
+                    .await
+                    .context("reconnect source agent")?;
+                self.agent
+                    .check(agent::CheckRequest::new(""))
+                    .await
+                    .context("health-check reconnected source agent")?;
+                Ok(())
+            }
+            .await;
+            match reconnect_result {
+                Ok(()) => agent_ready = true,
+                Err(error) => {
+                    recovery_error = Some(match recovery_error {
+                        Some(previous) => previous.context(error.to_string()),
+                        None => error,
+                    });
+                }
+            }
+        }
+
+        if agent_ready {
+            for container_id in paused_containers.iter().rev() {
+                if let Err(error) = container_manager
+                    .resume_container(container_id)
+                    .await
+                    .with_context(|| format!("resume container {}", container_id.container_id))
+                {
+                    recovery_error = Some(match recovery_error {
+                        Some(previous) => previous.context(error.to_string()),
+                        None => error,
+                    });
+                }
+            }
+        }
+        if monitor_suspended && agent_ready {
+            self.monitor.resume();
+        }
+
+        // Never publish an artifact unless both capture and source recovery
+        // succeeded. A failed recovery is a failed snapshot transaction.
         let artifacts = match (operation, recovery_error) {
             (Ok(artifacts), None) => artifacts,
             (Err(primary), None) => {
@@ -1171,6 +1313,8 @@ impl VirtSandbox {
                 return Err(primary.context(format!("snapshot recovery failed: {recovery:#}")));
             }
         };
+
+        let agent_config = self.agent.agent_config().await;
 
         let publication: Result<()> = (|| {
             let clh_staging = staging.join("clh");
@@ -1194,10 +1338,10 @@ impl VirtSandbox {
                 .iter()
                 .map(|path| snapshot_file_manifest(&staging, path))
                 .collect::<Result<Vec<_>>>()?;
-            let containers = artifacts
+            let live_containers = artifacts
                 .iter()
                 .map(|artifact| {
-                    Ok(SnapshotContainerManifest {
+                    Ok(SnapshotLiveContainerManifest {
                         cri_name: artifact.cri_name.clone(),
                         source_host_id: artifact.source_host_id.clone(),
                         snapshot_guest_id: artifact.snapshot_guest_id.clone(),
@@ -1213,12 +1357,44 @@ impl VirtSandbox {
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
+            let mut container_names = HashSet::new();
+            for container in &live_containers {
+                if !container_names.insert(container.cri_name.as_str()) {
+                    return Err(anyhow!(
+                        "snapshot has duplicate live container name {}",
+                        container.cri_name
+                    ));
+                }
+            }
+            let completed_containers = inventory
+                .completed_containers
+                .iter()
+                .map(|container| {
+                    if !container_names.insert(container.cri_name.as_str()) {
+                        return Err(anyhow!(
+                            "snapshot container name {} is both live and completed",
+                            container.cri_name
+                        ));
+                    }
+                    Ok(SnapshotCompletedContainerManifest {
+                        cri_name: container.cri_name.clone(),
+                        exit_code: container.exit_code,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
             let manifest = SnapshotManifest {
                 format_version: 1,
                 producer: "runtime-rs",
                 hypervisor: "cloud-hypervisor",
                 source_sandbox_id: self.sid.clone(),
-                containers,
+                agent_transport: SnapshotAgentTransportManifest {
+                    contract_version: 1,
+                    state: "disconnected-listening",
+                    server_port: agent_config.server_port,
+                    log_port: agent_config.log_port,
+                },
+                live_containers,
+                completed_containers,
                 files,
             };
             let manifest_path = staging.join("kata-snapshot.json");

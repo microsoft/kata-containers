@@ -38,17 +38,19 @@ pub(crate) async fn handler_mux(
     match (req.method(), req.uri().path()) {
         (&Method::GET, AGENT_URL) => agent_url_handler(sandbox, req).await,
         (&Method::PUT, IP_TABLE_URL) | (&Method::GET, IP_TABLE_URL) => {
-            ip_table_handler(sandbox, req).await
+            ip_table_handler(instance, req).await
         }
         (&Method::PUT, IP6_TABLE_URL) | (&Method::GET, IP6_TABLE_URL) => {
-            ipv6_table_handler(sandbox, req).await
+            ipv6_table_handler(instance, req).await
         }
-        (&Method::POST, DIRECT_VOLUME_STATS_URL) => direct_volume_stats_handler(sandbox, req).await,
+        (&Method::POST, DIRECT_VOLUME_STATS_URL) => {
+            direct_volume_stats_handler(instance, req).await
+        }
         (&Method::POST, DIRECT_VOLUME_RESIZE_URL) => {
-            direct_volume_resize_handler(sandbox, req).await
+            direct_volume_resize_handler(instance, req).await
         }
         (&Method::GET, METRICS_URL) => metrics_url_handler(sandbox, req).await,
-        (&Method::PUT, AGENT_POLICY_URL) => set_agent_policy_handler(sandbox, req).await,
+        (&Method::PUT, AGENT_POLICY_URL) => set_agent_policy_handler(instance, req).await,
         (&Method::PUT, SNAPSHOT_URL) => snapshot_handler(instance, req).await,
         (_, SNAPSHOT_URL) => Response::builder()
             .status(StatusCode::METHOD_NOT_ALLOWED)
@@ -80,6 +82,9 @@ async fn snapshot_handler(
     let destination = PathBuf::from(destination);
     let snapshot_destination = destination.clone();
     let snapshot = tokio::spawn(async move {
+        // Snapshot is the exclusive writer; ordinary mutating task/sandbox
+        // requests hold the shared side. The spawned task also owns the
+        // transaction independently of HTTP client cancellation.
         let _operation = instance.operation_lock.write().await;
         instance
             .sandbox
@@ -121,18 +126,20 @@ async fn agent_url_handler(
 
 /// the ipv4 handler of iptable operation
 async fn ip_table_handler(
-    sandbox: Arc<dyn Sandbox>,
+    instance: Arc<RuntimeInstance>,
     req: Request<Incoming>,
 ) -> Result<Response<Full<Bytes>>> {
-    generic_ip_table_handler(sandbox, req, false).await
+    let _operation = instance.operation_lock.read().await;
+    generic_ip_table_handler(instance.sandbox.clone(), req, false).await
 }
 
 /// the ipv6 handler of iptable operation
 async fn ipv6_table_handler(
-    sandbox: Arc<dyn Sandbox>,
+    instance: Arc<RuntimeInstance>,
     req: Request<Incoming>,
 ) -> Result<Response<Full<Bytes>>> {
-    generic_ip_table_handler(sandbox, req, true).await
+    let _operation = instance.operation_lock.read().await;
+    generic_ip_table_handler(instance.sandbox.clone(), req, true).await
 }
 
 /// the generic iptable handler, for both ipv4 and ipv6
@@ -167,9 +174,10 @@ async fn generic_ip_table_handler(
 }
 
 async fn direct_volume_stats_handler(
-    sandbox: Arc<dyn Sandbox>,
+    instance: Arc<RuntimeInstance>,
     req: Request<Incoming>,
 ) -> Result<Response<Full<Bytes>>> {
+    let _operation = instance.operation_lock.read().await;
     let params = Url::parse(&req.uri().to_string())
         .map_err(|e| anyhow!(e))?
         .query_pairs()
@@ -178,7 +186,7 @@ async fn direct_volume_stats_handler(
     let volume_path = params
         .get(DIRECT_VOLUME_PATH_KEY)
         .context("shim-mgmt: volume path key not found in request params")?;
-    let result = sandbox.direct_volume_stats(volume_path).await;
+    let result = instance.sandbox.direct_volume_stats(volume_path).await;
     match result {
         Ok(stats) => Ok(Response::new(Full::new(Bytes::from(stats)))),
         _ => Err(anyhow!("handler: Failed to get volume stats")),
@@ -186,15 +194,16 @@ async fn direct_volume_stats_handler(
 }
 
 async fn direct_volume_resize_handler(
-    sandbox: Arc<dyn Sandbox>,
+    instance: Arc<RuntimeInstance>,
     req: Request<Incoming>,
 ) -> Result<Response<Full<Bytes>>> {
+    let _operation = instance.operation_lock.read().await;
     let body = req.into_body().collect().await?.to_bytes();
 
     // unserialize json body into resizeRequest struct
     let resize_req: ResizeVolumeRequest =
         serde_json::from_slice(&body).context("shim-mgmt: deserialize resizeRequest failed")?;
-    let result = sandbox.direct_volume_resize(resize_req).await;
+    let result = instance.sandbox.direct_volume_resize(resize_req).await;
 
     match result {
         Ok(_) => Ok(Response::new(Full::new(Bytes::from("")))),
@@ -219,14 +228,16 @@ async fn metrics_url_handler(
 
 /// The set agent policy handler, for setting agent policy
 async fn set_agent_policy_handler(
-    sandbox: Arc<dyn Sandbox>,
+    instance: Arc<RuntimeInstance>,
     req: Request<Incoming>,
 ) -> Result<Response<Full<Bytes>>> {
+    let _operation = instance.operation_lock.read().await;
     match *req.method() {
         Method::PUT => {
             let data = req.into_body().collect().await?.to_bytes();
             let policy: &str = str::from_utf8(&data)?;
-            sandbox
+            instance
+                .sandbox
                 .set_policy(policy)
                 .await
                 .context("set agent policy handler failed")?;
