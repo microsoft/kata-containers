@@ -3,16 +3,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::path::Path;
-use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use http_body_util::BodyExt;
 use hyper::StatusCode;
-use shim_interface::shim_mgmt::{client::MgmtClient, SNAPSHOT_URL};
+use shim_interface::shim_mgmt::{client::MgmtClient, SNAPSHOT_TIMEOUT, SNAPSHOT_URL};
 
 use crate::args::{SnapshotArgs, SnapshotCreateArgs, SnapshotSubCommand};
 
-const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_SNAPSHOT_PATH_BYTES: usize = 4096;
 
 pub fn handle_snapshot(args: SnapshotArgs) -> Result<()> {

@@ -16,6 +16,7 @@ protobuf = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "process", "fs"] }
+tokio-util = { workspace = true }
 oci-spec = { workspace = true }
 
 # Local dependencies

@@ -24,5 +24,7 @@ pub const METRICS_URL: &str = "/metrics";
 pub const AGENT_POLICY_URL: &str = "/policy";
 /// URL for creating a portable sandbox snapshot.
 pub const SNAPSHOT_URL: &str = "/snapshot";
+pub const SNAPSHOT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+pub const SNAPSHOT_DEADLINE_HEADER: &str = "x-kata-snapshot-deadline-ms";
 
 pub const ERR_NO_SHIM_SERVER: &str = "Failed to create shim management server";

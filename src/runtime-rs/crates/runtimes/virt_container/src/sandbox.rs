@@ -21,7 +21,7 @@ use common::{
 };
 use common::{
     types::{SandboxConfig, SandboxExitInfo, SandboxStatus},
-    ContainerManager, Sandbox, SandboxNetworkEnv,
+    ContainerManager, Sandbox, SandboxNetworkEnv, SnapshotRequest,
 };
 
 use containerd_shim_protos::events::task::{TaskExit, TaskOOM};
@@ -148,7 +148,12 @@ fn relative_snapshot_path(root: &Path, path: &Path) -> Result<String> {
     Ok(relative.to_string_lossy().to_string())
 }
 
-fn snapshot_file_manifest(root: &Path, path: &Path) -> Result<SnapshotFileManifest> {
+fn snapshot_file_manifest(
+    root: &Path,
+    path: &Path,
+    request: &SnapshotRequest,
+) -> Result<SnapshotFileManifest> {
+    request.check_cancelled()?;
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.file_type().is_file() {
         return Err(anyhow!(
@@ -160,6 +165,7 @@ fn snapshot_file_manifest(root: &Path, path: &Path) -> Result<SnapshotFileManife
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 1024 * 1024];
     loop {
+        request.check_cancelled()?;
         let read = file.read(&mut buffer)?;
         if read == 0 {
             break;
@@ -171,6 +177,37 @@ fn snapshot_file_manifest(root: &Path, path: &Path) -> Result<SnapshotFileManife
         size: metadata.len(),
         sha256: hex::encode(hasher.finalize()),
     })
+}
+
+#[cfg(test)]
+mod snapshot_manifest_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn hashes_snapshot_artifact_while_request_is_active() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("memory-ranges");
+        let data = vec![0x5a; 2 * 1024 * 1024 + 3];
+        fs::write(&path, &data).unwrap();
+        let request = SnapshotRequest::new(Duration::from_secs(60));
+        let manifest = snapshot_file_manifest(directory.path(), &path, &request).unwrap();
+        assert_eq!(manifest.path, "memory-ranges");
+        assert_eq!(manifest.size, data.len() as u64);
+        assert_eq!(manifest.sha256, hex::encode(Sha256::digest(&data)));
+    }
+
+    #[test]
+    fn cancelled_request_skips_manifest_hashing() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("not-created");
+        let request = SnapshotRequest::new(Duration::from_secs(60));
+        request.cancel();
+        let error = snapshot_file_manifest(directory.path(), &path, &request)
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("snapshot request cancelled"));
+    }
 }
 
 pub struct SandboxRestoreArgs {
@@ -1047,7 +1084,9 @@ impl VirtSandbox {
         &self,
         container_manager: Arc<dyn ContainerManager>,
         destination: &Path,
+        request: SnapshotRequest,
     ) -> Result<()> {
+        request.check_cancelled()?;
         if !destination.is_absolute() || destination == Path::new("/") {
             return Err(anyhow!(
                 "snapshot destination must be absolute and non-root"
@@ -1094,16 +1133,20 @@ impl VirtSandbox {
         let mut vm_paused = false;
         let operation: Result<Vec<resource::rootfs::RootfsSnapshotArtifacts>> = async {
             for container_id in &container_ids {
+                request.check_cancelled()?;
                 container_manager
                     .pause_container(container_id)
                     .await
                     .with_context(|| format!("pause container {}", container_id.container_id))?;
                 paused_containers.push(container_id.clone());
             }
+            request.check_cancelled()?;
             self.hypervisor.pause_vm().await.context("pause VM")?;
             vm_paused = true;
 
+            request.check_cancelled()?;
             self.save().await.context("persist sandbox state")?;
+            request.check_cancelled()?;
             let clh_staging = staging.join("clh");
             fs::create_dir(&clh_staging)?;
             fs::set_permissions(&clh_staging, fs::Permissions::from_mode(0o700))?;
@@ -1111,11 +1154,13 @@ impl VirtSandbox {
                 .save_vm(&clh_staging)
                 .await
                 .context("save VM snapshot")?;
+            request.check_cancelled()?;
             let artifacts = self
                 .resource_manager
                 .snapshot_rootfs_artifacts(&staging, destination, &active_host_ids)
                 .await
                 .context("package rootfs snapshot artifacts")?;
+            request.check_cancelled()?;
             resource::rootfs::snapshot::finalize_snapshot_config(&clh_staging, &artifacts)
                 .context("finalize snapshot config")?;
 
@@ -1172,7 +1217,12 @@ impl VirtSandbox {
             }
         };
 
-        let publication: Result<()> = (|| {
+        let publication_staging = staging.clone();
+        let destination = destination.to_path_buf();
+        let source_sandbox_id = self.sid.clone();
+        let publication = tokio::task::spawn_blocking(move || -> Result<()> {
+            request.check_cancelled()?;
+            let staging = publication_staging;
             let clh_staging = staging.join("clh");
             let mut file_paths = vec![
                 clh_staging.join("config.json"),
@@ -1192,7 +1242,7 @@ impl VirtSandbox {
             file_paths.dedup();
             let files = file_paths
                 .iter()
-                .map(|path| snapshot_file_manifest(&staging, path))
+                .map(|path| snapshot_file_manifest(&staging, path, &request))
                 .collect::<Result<Vec<_>>>()?;
             let containers = artifacts
                 .iter()
@@ -1202,13 +1252,13 @@ impl VirtSandbox {
                         source_host_id: artifact.source_host_id.clone(),
                         snapshot_guest_id: artifact.snapshot_guest_id.clone(),
                         readonly_disk: relative_snapshot_path(
-                            destination,
+                            &destination,
                             &artifact.readonly_disk.snapshot_path,
                         )?,
                         writable_disk: artifact
                             .writable_disk
                             .as_ref()
-                            .map(|disk| relative_snapshot_path(destination, &disk.snapshot_path))
+                            .map(|disk| relative_snapshot_path(&destination, &disk.snapshot_path))
                             .transpose()?,
                     })
                 })
@@ -1217,22 +1267,27 @@ impl VirtSandbox {
                 format_version: 1,
                 producer: "runtime-rs",
                 hypervisor: "cloud-hypervisor",
-                source_sandbox_id: self.sid.clone(),
+                source_sandbox_id,
                 containers,
                 files,
             };
             let manifest_path = staging.join("kata-snapshot.json");
             fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?)?;
             fs::set_permissions(&manifest_path, fs::Permissions::from_mode(0o600))?;
-            fs::rename(&staging, destination).with_context(|| {
-                format!(
-                    "publish snapshot {} to {}",
-                    staging.display(),
-                    destination.display()
-                )
+            request.publish(|| {
+                fs::rename(&staging, &destination).with_context(|| {
+                    format!(
+                        "publish snapshot {} to {}",
+                        staging.display(),
+                        destination.display()
+                    )
+                })
             })?;
             Ok(())
-        })();
+        })
+        .await
+        .context("join snapshot publication task")
+        .and_then(|result| result);
         if publication.is_err() {
             let _ = fs::remove_dir_all(&staging);
         }
@@ -1514,8 +1569,9 @@ impl Sandbox for VirtSandbox {
         &self,
         container_manager: Arc<dyn ContainerManager>,
         destination: &Path,
+        request: SnapshotRequest,
     ) -> Result<()> {
-        self.create_portable_snapshot(container_manager, destination)
+        self.create_portable_snapshot(container_manager, destination, request)
             .await
     }
 

@@ -9,7 +9,13 @@
 // clients. To be specific, a client first connect to the socket, then send
 // request to destined URL, and finally handle the request(or not)
 
-use std::{path::Path, path::PathBuf, time::Duration};
+use std::{
+    path::Path,
+    path::PathBuf,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use super::{SNAPSHOT_DEADLINE_HEADER, SNAPSHOT_URL};
 
 use crate::mgmt_socket_addr;
 use anyhow::{anyhow, Context, Result};
@@ -81,10 +87,18 @@ impl MgmtClient {
     /// The http PUT method for client
     pub async fn put(&self, uri: &str, data: Vec<u8>) -> Result<Response<Incoming>> {
         let url: hyper::Uri = Uri::new(&self.sock_path, uri).into();
-        let req = Request::builder()
-            .method(Method::PUT)
-            .uri(url)
-            .body(Full::new(Bytes::from(data)))?;
+        let mut builder = Request::builder().method(Method::PUT).uri(url);
+        if uri == SNAPSHOT_URL {
+            if let Some(timeout) = self.timeout {
+                let deadline = SystemTime::now()
+                    .checked_add(timeout)
+                    .context("snapshot deadline overflow")?
+                    .duration_since(UNIX_EPOCH)?
+                    .as_millis();
+                builder = builder.header(SNAPSHOT_DEADLINE_HEADER, deadline.to_string());
+            }
+        }
+        let req = builder.body(Full::new(Bytes::from(data)))?;
         self.send_request(req).await
     }
 
@@ -99,5 +113,71 @@ impl MgmtClient {
             // if client timeout is not set, request waits with no deadline
             None => resp.await.context(format!("{msg:?} failed")),
         }
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+    use hyper::{server::conn::http1, service::service_fn};
+    use hyper_util::rt::TokioIo;
+    use tokio::{net::UnixListener, sync::oneshot};
+
+    #[tokio::test]
+    async fn snapshot_client_sends_deadline_before_local_timeout() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let sock_path = temp_dir.path().join("mgmt.sock");
+        let listener = UnixListener::bind(&sock_path).unwrap();
+        let (deadline_tx, deadline_rx) = oneshot::channel();
+        let deadline_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(deadline_tx)));
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            http1::Builder::new()
+                .keep_alive(false)
+                .serve_connection(
+                    TokioIo::new(stream),
+                    service_fn(move |req: Request<Incoming>| {
+                        let deadline = req
+                            .headers()
+                            .get(SNAPSHOT_DEADLINE_HEADER)
+                            .unwrap()
+                            .to_str()
+                            .unwrap()
+                            .parse::<u64>()
+                            .unwrap();
+                        deadline_tx
+                            .lock()
+                            .unwrap()
+                            .take()
+                            .unwrap()
+                            .send(deadline)
+                            .unwrap();
+                        async move {
+                            Ok::<_, std::convert::Infallible>(Response::new(Full::new(
+                                Bytes::from("/snapshot"),
+                            )))
+                        }
+                    }),
+                )
+                .await
+                .unwrap();
+        });
+        let timeout = Duration::from_secs(1);
+        let client = MgmtClient {
+            sock_path,
+            client: Client::unix(),
+            timeout: Some(timeout),
+        };
+        let earliest = SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + timeout;
+        let response = client
+            .put(SNAPSHOT_URL, b"/snapshot".to_vec())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), hyper::StatusCode::OK);
+        let latest = SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + timeout;
+        let deadline = u128::from(deadline_rx.await.unwrap());
+        assert!(deadline >= earliest.as_millis());
+        assert!(deadline <= latest.as_millis());
+        server.await.unwrap();
     }
 }
