@@ -104,8 +104,8 @@ use tracing::instrument;
 pub(crate) const VIRTCONTAINER: &str = "virt_container";
 const VMM_START_TIMEOUT_SECS: i32 = 10_000;
 const SOURCE_AGENT_LISTEN_GRACE: Duration = Duration::from_secs(2);
-const SNAPSHOT_BASE_DIR: &str = "/run/vc/vm/snapshots";
 const SNAPSHOT_MANIFEST_FILE: &str = "kata-snapshot.json";
+const SNAPSHOT_MANIFEST_FORMAT_VERSION: u32 = 1;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -160,6 +160,7 @@ struct SnapshotAgentTransportManifest {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct SnapshotManifest {
+    runtime_version: String,
     format_version: u32,
     producer: String,
     hypervisor: String,
@@ -168,6 +169,22 @@ struct SnapshotManifest {
     live_containers: Vec<SnapshotLiveContainerManifest>,
     completed_containers: Vec<SnapshotCompletedContainerManifest>,
     files: Vec<SnapshotFileManifest>,
+}
+
+#[derive(Deserialize)]
+struct SnapshotRuntimeVersionManifest {
+    runtime_version: String,
+}
+
+#[derive(Deserialize)]
+struct SnapshotFormatVersionManifest {
+    format_version: u32,
+}
+
+fn kata_runtime_version() -> &'static str {
+    option_env!("RELEASE_VERSION")
+        .filter(|version| !version.is_empty())
+        .unwrap_or_else(|| include_str!("../../../../VERSION").trim())
 }
 
 struct SavedRestoreNetwork {
@@ -274,42 +291,53 @@ fn validated_snapshot_file(snapshot_dir: &Path, relative: &Path) -> Result<PathB
 
 fn restore_source_from_annotations(
     annotations: &std::collections::HashMap<String, String>,
+    snapshot_root: &Path,
 ) -> Result<Option<PathBuf>> {
-    let Some(value) = annotations.get(kata_types::annotations::KATA_ANNO_RESTORE_FROM) else {
+    let Some(value) = annotations.get(kata_types::annotations::KATA_ANNO_SNAPSHOT_NAME) else {
         return Ok(None);
     };
     if value.is_empty() {
-        return Err(anyhow!("restore-from annotation is empty"));
+        return Err(anyhow!("snapshot-name annotation is empty"));
     }
-    let annotation_path = Path::new(value);
-    let restore_source = if annotation_path.is_absolute() {
-        if annotation_path == Path::new("/")
-            || annotation_path
-                .components()
-                .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
-        {
-            return Err(anyhow!("restore-from path is not lexically clean"));
-        }
-        annotation_path.to_path_buf()
-    } else {
-        clean_relative_snapshot_path(annotation_path)?;
-        Path::new(SNAPSHOT_BASE_DIR).join(annotation_path)
-    };
-    let metadata = fs::symlink_metadata(&restore_source).with_context(|| {
-        format!(
-            "restore-from snapshot is unavailable: {}",
-            restore_source.display()
-        )
-    })?;
+    let snapshot_name = Path::new(value);
+    let mut components = snapshot_name.components();
+    if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+        return Err(anyhow!(
+            "snapshot-name must be a single path component: {value}"
+        ));
+    }
+    if !snapshot_root.is_absolute() {
+        return Err(anyhow!(
+            "snapshot_root must be an absolute path: {}",
+            snapshot_root.display()
+        ));
+    }
+    let root_metadata = fs::symlink_metadata(snapshot_root)
+        .with_context(|| format!("snapshot_root is unavailable: {}", snapshot_root.display()))?;
+    if !root_metadata.file_type().is_dir() {
+        return Err(anyhow!(
+            "snapshot_root is not a directory: {}",
+            snapshot_root.display()
+        ));
+    }
+    if snapshot_root.canonicalize()? != snapshot_root {
+        return Err(anyhow!(
+            "snapshot_root contains a symlink or non-canonical component: {}",
+            snapshot_root.display()
+        ));
+    }
+    let restore_source = snapshot_root.join(snapshot_name);
+    let metadata = fs::symlink_metadata(&restore_source)
+        .with_context(|| format!("snapshot is unavailable: {}", restore_source.display()))?;
     if !metadata.file_type().is_dir() {
         return Err(anyhow!(
-            "restore-from snapshot is not a directory: {}",
+            "snapshot is not a directory: {}",
             restore_source.display()
         ));
     }
     if restore_source.canonicalize()? != restore_source {
         return Err(anyhow!(
-            "restore-from path contains a symlink or non-canonical component: {}",
+            "snapshot path contains a symlink or non-canonical component: {}",
             restore_source.display()
         ));
     }
@@ -330,10 +358,42 @@ fn load_restore_manifest(snapshot_dir: &Path) -> Result<SnapshotManifest> {
             manifest_path.display()
         ));
     }
-    let manifest: SnapshotManifest = serde_json::from_reader(fs::File::open(&manifest_path)?)
-        .with_context(|| format!("parse snapshot manifest {}", manifest_path.display()))?;
-    if manifest.format_version != 1
-        || manifest.producer != "runtime-rs"
+    let manifest_data = fs::read(&manifest_path)
+        .with_context(|| format!("read snapshot manifest {}", manifest_path.display()))?;
+    let runtime_version: SnapshotRuntimeVersionManifest = serde_json::from_slice(&manifest_data)
+        .with_context(|| {
+            format!(
+                "parse snapshot manifest runtime version {}",
+                manifest_path.display()
+            )
+        })?;
+    if runtime_version.runtime_version != kata_runtime_version() {
+        return Err(anyhow!(
+            "snapshot Kata runtime version mismatch: snapshot version {}, current version {}",
+            runtime_version.runtime_version,
+            kata_runtime_version()
+        ));
+    }
+
+    let format_version: SnapshotFormatVersionManifest = serde_json::from_slice(&manifest_data)
+        .with_context(|| {
+            format!(
+                "parse snapshot manifest format version {}",
+                manifest_path.display()
+            )
+        })?;
+    let manifest: SnapshotManifest = match format_version.format_version {
+        SNAPSHOT_MANIFEST_FORMAT_VERSION => serde_json::from_slice(&manifest_data)
+            .with_context(|| format!("parse snapshot manifest {}", manifest_path.display()))?,
+        version => {
+            return Err(anyhow!(
+                "unsupported snapshot manifest format version {}; supported version is {}",
+                version,
+                SNAPSHOT_MANIFEST_FORMAT_VERSION
+            ))
+        }
+    };
+    if manifest.producer != "runtime-rs"
         || manifest.hypervisor != "cloud-hypervisor"
         || manifest.source_sandbox_id.is_empty()
     {
@@ -665,6 +725,69 @@ fn saved_restore_network(snapshot_dir: &Path) -> Result<SavedRestoreNetwork> {
 mod snapshot_manifest_tests {
     use super::*;
 
+    fn snapshot_annotations(name: &str) -> HashMap<String, String> {
+        HashMap::from([(
+            kata_types::annotations::KATA_ANNO_SNAPSHOT_NAME.to_string(),
+            name.to_string(),
+        )])
+    }
+
+    #[test]
+    fn restore_source_joins_snapshot_name_to_configured_root() {
+        let snapshot_root = tempfile::tempdir().unwrap();
+        let snapshot = snapshot_root.path().join("busybox-kata");
+        fs::create_dir(&snapshot).unwrap();
+
+        let restore_source = restore_source_from_annotations(
+            &snapshot_annotations("busybox-kata"),
+            snapshot_root.path(),
+        )
+        .unwrap();
+
+        assert_eq!(restore_source, Some(snapshot));
+    }
+
+    #[test]
+    fn restore_source_rejects_paths_in_snapshot_name() {
+        let snapshot_root = tempfile::tempdir().unwrap();
+
+        for snapshot_name in [
+            "",
+            ".",
+            "..",
+            "../busybox-kata",
+            "nested/busybox-kata",
+            "/tmp/busybox-kata",
+        ] {
+            assert!(restore_source_from_annotations(
+                &snapshot_annotations(snapshot_name),
+                snapshot_root.path(),
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn restore_source_rejects_unsafe_root_entries() {
+        let snapshot_root = tempfile::tempdir().unwrap();
+        let annotations = snapshot_annotations("busybox-kata");
+
+        assert!(restore_source_from_annotations(&annotations, Path::new("relative/root")).is_err());
+
+        fs::write(
+            snapshot_root.path().join("busybox-kata"),
+            b"not a directory",
+        )
+        .unwrap();
+        assert!(restore_source_from_annotations(&annotations, snapshot_root.path()).is_err());
+
+        fs::remove_file(snapshot_root.path().join("busybox-kata")).unwrap();
+        let target = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(target.path(), snapshot_root.path().join("busybox-kata"))
+            .unwrap();
+        assert!(restore_source_from_annotations(&annotations, snapshot_root.path()).is_err());
+    }
+
     fn write_restore_fixture(root: &Path) -> SnapshotManifest {
         let clh = root.join("clh");
         let container = root.join("containers/source");
@@ -699,7 +822,8 @@ mod snapshot_manifest_tests {
             "containers/source/rwlayer.img",
         ];
         SnapshotManifest {
-            format_version: 1,
+            runtime_version: kata_runtime_version().to_string(),
+            format_version: SNAPSHOT_MANIFEST_FORMAT_VERSION,
             producer: "runtime-rs".to_string(),
             hypervisor: "cloud-hypervisor".to_string(),
             source_sandbox_id: "source".to_string(),
@@ -734,8 +858,14 @@ mod snapshot_manifest_tests {
 
     #[test]
     fn agent_transport_contract_is_required_in_manifest() {
+        let expected_runtime_version = option_env!("RELEASE_VERSION")
+            .filter(|version| !version.is_empty())
+            .unwrap_or_else(|| include_str!("../../../../VERSION").trim());
+        assert_eq!(kata_runtime_version(), expected_runtime_version);
+
         let manifest = SnapshotManifest {
-            format_version: 1,
+            runtime_version: kata_runtime_version().to_string(),
+            format_version: SNAPSHOT_MANIFEST_FORMAT_VERSION,
             producer: "runtime-rs".to_string(),
             hypervisor: "cloud-hypervisor".to_string(),
             source_sandbox_id: "sandbox".to_string(),
@@ -751,6 +881,8 @@ mod snapshot_manifest_tests {
         };
 
         let value = serde_json::to_value(manifest).unwrap();
+        assert_eq!(value["runtime_version"], kata_runtime_version());
+        assert_eq!(value["format_version"], SNAPSHOT_MANIFEST_FORMAT_VERSION);
         assert_eq!(value["agent_transport"]["contract_version"], 1);
         assert_eq!(value["agent_transport"]["state"], "disconnected-listening");
         assert_eq!(value["agent_transport"]["server_port"], 1024);
@@ -760,7 +892,8 @@ mod snapshot_manifest_tests {
     #[test]
     fn manifest_separates_live_and_completed_containers_without_payload_hashes() {
         let manifest = SnapshotManifest {
-            format_version: 1,
+            runtime_version: kata_runtime_version().to_string(),
+            format_version: SNAPSHOT_MANIFEST_FORMAT_VERSION,
             producer: "runtime-rs".to_string(),
             hypervisor: "cloud-hypervisor".to_string(),
             source_sandbox_id: "sandbox".to_string(),
@@ -847,6 +980,49 @@ mod snapshot_manifest_tests {
         )
         .unwrap();
         assert!(load_restore_manifest(snapshot.path()).is_err());
+    }
+
+    #[test]
+    fn restore_manifest_dispatches_versions_before_full_parse() {
+        let snapshot = tempfile::tempdir().unwrap();
+        let manifest_path = snapshot.path().join(SNAPSHOT_MANIFEST_FILE);
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec(&serde_json::json!({
+                "runtime_version": "incompatible-runtime-version",
+                "format_version": "invalid"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_restore_manifest(snapshot.path()).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "snapshot Kata runtime version mismatch: snapshot version incompatible-runtime-version, current version {}",
+                kata_runtime_version()
+            )
+        );
+
+        fs::write(
+            manifest_path,
+            serde_json::to_vec(&serde_json::json!({
+                "runtime_version": kata_runtime_version(),
+                "format_version": SNAPSHOT_MANIFEST_FORMAT_VERSION + 1
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let error = load_restore_manifest(snapshot.path()).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "unsupported snapshot manifest format version {}; supported version is {}",
+                SNAPSHOT_MANIFEST_FORMAT_VERSION + 1,
+                SNAPSHOT_MANIFEST_FORMAT_VERSION
+            )
+        );
     }
 
     #[test]
@@ -1155,7 +1331,11 @@ impl VirtSandbox {
         sandbox_config: &SandboxConfig,
         inner: &mut SandboxInner,
     ) -> Result<bool> {
-        let Some(snapshot_dir) = restore_source_from_annotations(&sandbox_config.annotations)?
+        let runtime_config = self.resource_manager.config().await;
+        let Some(snapshot_dir) = restore_source_from_annotations(
+            &sandbox_config.annotations,
+            Path::new(&runtime_config.runtime.snapshot_root),
+        )?
         else {
             return Ok(false);
         };
@@ -1164,7 +1344,6 @@ impl VirtSandbox {
                 "sandbox OCI hooks are not supported for snapshot restore"
             ));
         }
-        let runtime_config = self.resource_manager.config().await;
         if runtime_config.runtime.hypervisor_name != HYPERVISOR_NAME_CH {
             return Err(anyhow!(
                 "snapshot restore requires cloud-hypervisor, configured {}",
@@ -2286,6 +2465,8 @@ impl VirtSandbox {
         fs::set_permissions(&staging, fs::Permissions::from_mode(0o700))?;
 
         let inventory = container_manager.snapshot_inventory().await?;
+        let runtime_config = self.resource_manager.config().await;
+        let snapshot_root = Path::new(&runtime_config.runtime.snapshot_root);
         let active_host_ids = inventory
             .live_containers
             .iter()
@@ -2343,8 +2524,12 @@ impl VirtSandbox {
                 .snapshot_rootfs_artifacts(&staging, destination, &active_host_ids)
                 .await
                 .context("package rootfs snapshot artifacts")?;
-            resource::rootfs::snapshot::finalize_snapshot_config(&clh_staging, &artifacts)
-                .context("finalize snapshot config")?;
+            resource::rootfs::snapshot::finalize_snapshot_config(
+                &clh_staging,
+                snapshot_root,
+                &artifacts,
+            )
+            .context("finalize snapshot config")?;
 
             let persist_source = PathBuf::from(kata_types::prefix_with_rootless_dir(
                 kata_types::config::KATA_PATH,
@@ -2575,7 +2760,8 @@ impl VirtSandbox {
                 })
                 .collect::<Result<Vec<_>>>()?;
             let manifest = SnapshotManifest {
-                format_version: 1,
+                runtime_version: kata_runtime_version().to_string(),
+                format_version: SNAPSHOT_MANIFEST_FORMAT_VERSION,
                 producer: "runtime-rs".to_string(),
                 hypervisor: "cloud-hypervisor".to_string(),
                 source_sandbox_id: self.sid.clone(),

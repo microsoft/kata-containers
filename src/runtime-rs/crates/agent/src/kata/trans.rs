@@ -815,6 +815,7 @@ impl From<CopyFileRequest> for agent::CopyFileRequest {
             gid: from.gid,
             offset: from.offset,
             data: from.data,
+            preserve_inode: from.preserve_inode,
             ..Default::default()
         }
     }
@@ -937,6 +938,21 @@ impl From<AddSwapPathRequest> for agent::AddSwapPathRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copy_file_preserves_inode_option() {
+        for preserve_inode in [false, true] {
+            let request = CopyFileRequest {
+                preserve_inode,
+                ..Default::default()
+            };
+
+            assert_eq!(
+                agent::CopyFileRequest::from(request).preserve_inode,
+                preserve_inode
+            );
+        }
+    }
 
     #[test]
     fn ip_address_round_trip_preserves_address_and_mask() {

@@ -27,14 +27,15 @@ fn matching_disk<'a>(
     })
 }
 
-fn is_external_restored_container_disk(path: &Path) -> bool {
-    let path = path.to_string_lossy();
-    path.contains("/restore/containers/")
-        || (path.starts_with("/run/vc/vm/snapshots/") && path.contains("/containers/"))
+fn is_external_restored_container_disk(path: &Path, snapshot_root: &Path) -> bool {
+    let path_string = path.to_string_lossy();
+    path_string.contains("/restore/containers/")
+        || (path.starts_with(snapshot_root) && path_string.contains("/containers/"))
 }
 
 pub fn finalize_snapshot_config(
     snapshot_dir: &Path,
+    snapshot_root: &Path,
     artifacts: &[RootfsSnapshotArtifacts],
 ) -> Result<()> {
     let config_path = snapshot_dir.join("config.json");
@@ -96,7 +97,7 @@ pub fn finalize_snapshot_config(
             // CLH keeps boot-disk entries in its saved static config after a
             // successful vm.remove-device. Omit those detached, inactive
             // restored disks from the next generation's restore config.
-            if !is_external_restored_container_disk(&live_path) {
+            if !is_external_restored_container_disk(&live_path, snapshot_root) {
                 retained_disks.push(disk);
             }
             continue;
@@ -184,7 +185,7 @@ mod tests {
             files: vec![vmdk.clone(), writable.clone()],
         }];
 
-        finalize_snapshot_config(snapshot.path(), &artifacts).unwrap();
+        finalize_snapshot_config(snapshot.path(), snapshot.path(), &artifacts).unwrap();
 
         let config: Value =
             serde_json::from_slice(&fs::read(snapshot.path().join("config.json")).unwrap())
@@ -228,7 +229,7 @@ mod tests {
             files: vec![vmdk.clone()],
         }];
 
-        finalize_snapshot_config(snapshot.path(), &artifacts).unwrap();
+        finalize_snapshot_config(snapshot.path(), snapshot.path(), &artifacts).unwrap();
 
         let config: Value =
             serde_json::from_slice(&fs::read(snapshot.path().join("config.json")).unwrap())
@@ -291,7 +292,7 @@ mod tests {
             },
         ];
 
-        finalize_snapshot_config(snapshot.path(), &artifacts).unwrap();
+        finalize_snapshot_config(snapshot.path(), snapshot.path(), &artifacts).unwrap();
 
         let config: Value =
             serde_json::from_slice(&fs::read(snapshot.path().join("config.json")).unwrap())
@@ -309,21 +310,37 @@ mod tests {
 
     #[test]
     fn removes_inactive_restored_container_disks() {
+        let configured_root = Path::new("/srv/custom-kata-snapshots");
+        assert!(is_external_restored_container_disk(
+            Path::new("/srv/custom-kata-snapshots/source/containers/deleted/rwlayer.img"),
+            configured_root,
+        ));
+        assert!(!is_external_restored_container_disk(
+            Path::new("/var/lib/kata/snapshots/source/containers/deleted/rwlayer.img"),
+            configured_root,
+        ));
+
         let snapshot = tempfile::tempdir().unwrap();
         fs::write(
             snapshot.path().join("config.json"),
             serde_json::to_vec(&serde_json::json!({
                 "memory": {},
-                "disks": [{
-                    "id": "stale-rw",
-                    "path": "/run/kata/sandbox/restore/containers/deleted/rwlayer.img"
-                }]
+                "disks": [
+                    {
+                        "id": "private-stale-rw",
+                        "path": "/run/kata/sandbox/restore/containers/deleted/rwlayer.img"
+                    },
+                    {
+                        "id": "custom-root-stale-ro",
+                        "path": "/srv/custom-kata-snapshots/source/containers/deleted/rootfs.vmdk"
+                    }
+                ]
             }))
             .unwrap(),
         )
         .unwrap();
 
-        finalize_snapshot_config(snapshot.path(), &[]).unwrap();
+        finalize_snapshot_config(snapshot.path(), configured_root, &[]).unwrap();
 
         let config: Value =
             serde_json::from_slice(&fs::read(snapshot.path().join("config.json")).unwrap())
