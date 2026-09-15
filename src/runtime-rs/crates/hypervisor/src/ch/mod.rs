@@ -121,6 +121,11 @@ impl Hypervisor for CloudHypervisor {
         inner.remove_device(device).await
     }
 
+    async fn remove_restored_device(&self, device_id: &str) -> Result<()> {
+        let mut inner = self.inner.write().await;
+        inner.remove_restored_device(device_id).await
+    }
+
     async fn update_device(&self, device: DeviceType) -> Result<()> {
         let mut inner = self.inner.write().await;
         inner.update_device(device).await
