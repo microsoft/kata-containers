@@ -8,7 +8,10 @@ use agent::Agent;
 use anyhow::{anyhow, Context, Result};
 use common::{
     error::{is_no_such_process_error, Error},
-    types::{ContainerID, ContainerProcess, ProcessExitStatus, ProcessStatus, ProcessType},
+    types::{
+        ContainerID, ContainerProcess, GuestContainerId, ProcessExitStatus, ProcessStatus,
+        ProcessType,
+    },
 };
 use hypervisor::device::device_manager::DeviceManager;
 use nix::sys::signal::Signal;
@@ -310,6 +313,13 @@ impl ContainerInner {
 
     pub async fn new_container_io(&self, process: &ContainerProcess) -> Result<ContainerIo> {
         Ok(ContainerIo::new(self.agent.clone(), process.clone()))
+    }
+
+    pub(crate) fn set_init_agent_container_id(
+        &mut self,
+        container_id: &GuestContainerId,
+    ) -> Result<()> {
+        self.init_process.set_agent_container_id(container_id)
     }
 
     pub async fn close_io(&mut self, process: &ContainerProcess) -> Result<()> {
