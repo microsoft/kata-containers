@@ -113,6 +113,7 @@ pub struct DeviceConfig {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ImageType {
+    FlatVmdk,
     FixedVhd,
     Qcow2,
     Raw,
@@ -150,6 +151,8 @@ pub struct DiskConfig {
     pub sparse: bool,
     #[serde(default)]
     pub image_type: ImageType,
+    #[serde(default)]
+    pub extent_anchor_path: Option<PathBuf>,
 }
 
 pub fn default_diskconfig_sparse() -> bool {
@@ -173,6 +176,7 @@ impl Default for DiskConfig {
             pci_segment: 0,
             sparse: default_diskconfig_sparse(),
             image_type: ImageType::default(),
+            extent_anchor_path: None,
         }
     }
 }

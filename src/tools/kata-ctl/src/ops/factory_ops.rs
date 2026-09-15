@@ -4,27 +4,28 @@
 //
 
 use anyhow::{Context, Result};
+use std::path::Path;
 use tokio::runtime::Runtime;
 use virt_container::factory;
 
 use crate::args::{FactoryArgs, FactorySubCommand};
 
-pub fn handle_factory(factory_args: FactoryArgs) -> Result<()> {
+pub fn handle_factory(factory_args: FactoryArgs, config_path: Option<&Path>) -> Result<()> {
     let rt = Runtime::new().context("failed to create Tokio runtime")?;
     rt.block_on(async {
         match &factory_args.command {
             FactorySubCommand::Init => {
-                factory::init_factory_command()
+                factory::init_factory_command(config_path)
                     .await
                     .context("failed to initialize factory")?;
             }
             FactorySubCommand::Destroy => {
-                factory::destroy_factory_command()
+                factory::destroy_factory_command(config_path)
                     .await
                     .context("failed to destroy factory")?;
             }
             FactorySubCommand::Status => {
-                factory::status_factory_command()
+                factory::status_factory_command(config_path)
                     .await
                     .context("failed to query factory status")?;
             }
