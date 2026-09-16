@@ -618,6 +618,10 @@ impl ErofsMultiLayerRootfs {
                         let device_config = &mut BlockConfigModern {
                             driver_option: block_driver.clone(),
                             source: BlockSourceFormat::Vmdk(vmdk),
+                            // Kata generates and owns this descriptor after validating each
+                            // extent. Generated metadata lives under /run while EROFS layers
+                            // live under /var/lib/containerd, making / their common anchor.
+                            extent_anchor_path: Some(PathBuf::from("/")),
                             path_on_host: erofs_path,
                             is_readonly: true,
                             blkdev_aio: BlockDeviceAio::new(&blkdev_info.block_device_aio),
@@ -761,6 +765,7 @@ impl ErofsMultiLayerRootfs {
                                 .context("failed to generate EROFS VMDK")?;
 
                         let is_vmdk = matches!(&source, BlockSourceFormat::Vmdk(_));
+                        let extent_anchor_path = is_vmdk.then(|| PathBuf::from("/"));
 
                         info!(
                             sl!(),
@@ -780,6 +785,7 @@ impl ErofsMultiLayerRootfs {
                         let device_config = &mut BlockConfigModern {
                             driver_option: block_driver.clone(),
                             source,
+                            extent_anchor_path,
                             path_on_host: erofs_path,
                             is_readonly: true, // EROFS layers are read-only, must set to avoid "resize" lock errors
                             blkdev_aio: BlockDeviceAio::new(&blkdev_info.block_device_aio),

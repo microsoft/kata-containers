@@ -172,6 +172,8 @@ pub struct DiskConfig {
     pub sparse: bool,
     #[serde(default)]
     pub image_type: ImageType,
+    #[serde(default)]
+    pub extent_anchor_path: Option<PathBuf>,
 }
 
 pub fn default_diskconfig_sparse() -> bool {
@@ -197,6 +199,7 @@ impl Default for DiskConfig {
             backing_files: false,
             sparse: default_diskconfig_sparse(),
             image_type: ImageType::default(),
+            extent_anchor_path: None,
         }
     }
 }

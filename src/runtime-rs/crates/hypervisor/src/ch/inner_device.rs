@@ -552,6 +552,7 @@ impl TryFrom<BlockConfigModern> for DiskConfig {
             sparse: true,
             image_type,
             backing_files,
+            extent_anchor_path: blkcfg.extent_anchor_path,
             ..Default::default()
         };
 
@@ -820,5 +821,26 @@ mod tests {
                 assert!(error.to_string().contains("must be normalized"));
             }
         }
+    }
+
+    #[test]
+    fn test_vmdk_extent_anchor_to_diskconfig() {
+        let disk = DiskConfig::try_from(BlockConfigModern {
+            path_on_host: "/run/kata/merged_fs.vmdk".to_string(),
+            source: BlockSourceFormat::Vmdk(VmdkConfig::default()),
+            extent_anchor_path: Some("/".into()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(disk.image_type, ImageType::FlatVmdk);
+        assert!(disk.backing_files);
+        assert_eq!(disk.extent_anchor_path, Some("/".into()));
+        let disk_json = serde_json::to_value(disk).unwrap();
+        assert_eq!(disk_json["image_type"], "FlatVmdk");
+        assert_eq!(disk_json["extent_anchor_path"], "/");
+
+        let raw = DiskConfig::try_from(BlockConfigModern::default()).unwrap();
+        assert!(raw.extent_anchor_path.is_none());
     }
 }
