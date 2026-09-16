@@ -27,6 +27,13 @@ The `factory init` command creates a VM template by launching a new VM, initiali
 sudo kata-ctl factory init
 ```
 
+If the runtime configuration is outside the default runtime-rs configuration
+paths, specify it explicitly:
+
+```bash
+sudo kata-ctl --config /path/to/configuration.toml factory init
+```
+
 ### Check the status of the VM template
 
 The `factory status` command checks whether a VM template currently exists by verifying the presence of template files (memory snapshot and device state). It will output "VM factory is on" if the template exists, or "VM factory is off" otherwise.

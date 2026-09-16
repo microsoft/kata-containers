@@ -187,7 +187,7 @@ pub fn close_factory(config: &mut FactoryConfig) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::RuntimeHandler;
+    use common::{config::load_config_from, RuntimeHandler};
     use kata_types::annotations::cri_containerd::SANDBOX_MEM_KEY;
 
     fn qemu_static_config(template_path: &Path) -> TomlConfig {
@@ -238,5 +238,62 @@ static_sandbox_resource_mgmt = true
         let limits = HashMap::from([(SANDBOX_MEM_KEY.to_string(), (512u64 << 20).to_string())]);
         let limited = sandbox_config(&config, limits);
         assert!(check_template_vm_config(&limited).is_err());
+    }
+
+    #[test]
+    fn load_factory_config_from_explicit_path() {
+        crate::VirtContainer::init().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("configuration.toml");
+        let template_path = dir.path().join("template");
+        fs::write(
+            &config_path,
+            format!(
+                r#"
+[runtime]
+name = "virt_container"
+hypervisor_name = "clh"
+agent_name = "kata"
+static_sandbox_resource_mgmt = true
+static_sandbox_default_workload_mem = 512
+static_sandbox_default_workload_vcpus = 1.5
+
+[agent.kata]
+
+[hypervisor.clh]
+path = "/bin/true"
+kernel = "/bin/true"
+image = "/bin/true"
+shared_fs = "none"
+
+[hypervisor.clh.factory]
+enable_template = true
+template_path = "{}"
+"#,
+                template_path.display()
+            ),
+        )
+        .unwrap();
+
+        let (loaded, _) = load_config_from(&HashMap::new(), &config_path).unwrap();
+        let (toml_config, factory_config) = validate_factory_config(loaded.clone()).unwrap();
+
+        assert!(factory_config.template);
+        assert_eq!(
+            factory_config.template_path,
+            template_path.to_string_lossy()
+        );
+        // The static workload defaults size the template like a sandbox without limits.
+        let hv = &factory_config.vm_config.hypervisor_config;
+        assert_eq!(hv.memory_info.default_memory, 512);
+        assert_eq!(hv.cpu_info.default_vcpus, 1.5);
+        assert_eq!(hv.cpu_info.default_maxvcpus, 2);
+        assert!(toml_config.hypervisor["clh"].shared_fs.shared_fs.is_none());
+
+        let unlimited = sandbox_config(&loaded, HashMap::new());
+        assert_eq!(
+            vm_config_value(&VmConfig::new(&unlimited)).unwrap(),
+            vm_config_value(&factory_config.vm_config).unwrap()
+        );
     }
 }
