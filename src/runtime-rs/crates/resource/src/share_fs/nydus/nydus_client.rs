@@ -17,6 +17,9 @@ use tokio::time::{timeout, Duration};
 use crate::share_fs::nydus::MountRequest;
 
 const HTTP_CLIENT_TIMEOUT_SECS: u64 = 30;
+// Rootfs cleanup treats unmount failures as best-effort. Keep this below the
+// 20-second CRI stop deadline so an unresponsive nydusd cannot block task exit.
+const HTTP_UMOUNT_TIMEOUT_SECS: u64 = 5;
 // Keep the per-probe timeout short relative to the total readiness timeout so a
 // single slow/hung probe cannot consume the whole budget and starve the retry
 // loop (which would make `max_attempts` largely ineffective).
@@ -101,15 +104,19 @@ impl NydusClient {
                 .context("failed to build HTTP request")?,
         };
 
-        let response = timeout(Duration::from_secs(timeout_secs), self.client.request(req))
-            .await
-            .context("timeout waiting for response")?
-            .context("failed to send HTTP request")?;
+        timeout(Duration::from_secs(timeout_secs), async {
+            let response = self
+                .client
+                .request(req)
+                .await
+                .context("failed to send HTTP request")?;
+            let status = response.status();
+            let body_bytes = response.into_body().collect().await?.to_bytes();
 
-        let status = response.status();
-        let body_bytes = response.into_body().collect().await?.to_bytes();
-
-        Ok((status, body_bytes.to_vec()))
+            Ok((status, body_bytes.to_vec()))
+        })
+        .await
+        .context("timeout waiting for response")?
     }
 
     pub async fn check_status(&self) -> Result<DaemonInfo> {
@@ -148,7 +155,9 @@ impl NydusClient {
             MOUNT_ENDPOINT,
             percent_encode_query_value(mountpoint)
         );
-        let (status, resp_body) = self.send_request(Method::DELETE, &path, None).await?;
+        let (status, resp_body) = self
+            .send_request_with_timeout(Method::DELETE, &path, None, HTTP_UMOUNT_TIMEOUT_SECS)
+            .await?;
 
         if status == StatusCode::NO_CONTENT {
             return Ok(());
