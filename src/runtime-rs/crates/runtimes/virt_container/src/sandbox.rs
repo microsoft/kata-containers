@@ -2860,6 +2860,12 @@ impl Sandbox for VirtSandbox {
     }
 
     async fn persist_runtime_state(&self) -> Result<()> {
+        let inner = self.inner.read().await;
+        if inner.state == SandboxState::Stopped || inner.cleaned {
+            return Ok(());
+        }
+
+        // Keep cleanup from removing the persistence directory while saving.
         self.save().await.map(drop)
     }
 
