@@ -225,23 +225,13 @@ impl AgentPolicy {
 
     async fn log_policy_data(&mut self, ep: &str, data: &str) {
         if let Some(log_file) = &mut self.log_file {
-            match ep {
-                "StatsContainerRequest" | "ReadStreamRequest" | "SetPolicyRequest" => {
-                    // - StatsContainerRequest and ReadStreamRequest are called
-                    //   relatively often, so we're not logging them, to avoid
-                    //   growing this log file too much.
-                    // - Confidential Containers Policy documents are relatively
-                    //   large, so we're not logging them here, for SetPolicyRequest.
-                    //   The Policy text can be obtained directly from the pod YAML.
-                }
-                _ => {
-                    let log_entry = format!("{{\"kind\":\"{ep}\",\"data\":{data}}}\n");
+            if !skip_log_entry(ep) {
+                let log_entry = format!("{{\"kind\":\"{ep}\",\"data\":{data}}}\n");
 
-                    if let Err(e) = log_file.write_all(log_entry.as_bytes()).await {
-                        warn!(sl!(), "policy: log_eval_input: write_all failed: {}", e);
-                    } else if let Err(e) = log_file.flush().await {
-                        warn!(sl!(), "policy: log_eval_input: flush failed: {}", e);
-                    }
+                if let Err(e) = log_file.write_all(log_entry.as_bytes()).await {
+                    warn!(sl!(), "policy: log_eval_input: write_all failed: {}", e);
+                } else if let Err(e) = log_file.flush().await {
+                    warn!(sl!(), "policy: log_eval_input: flush failed: {}", e);
                 }
             }
         }
@@ -342,6 +332,21 @@ impl std::convert::TryFrom<&CopyFileRequest> for PolicyCopyFileRequest {
             gid: req.gid,
             offset: req.offset,
         })
+    }
+}
+
+fn skip_log_entry(ep: &str) -> bool {
+    match ep {
+        "StatsContainerRequest" | "ReadStreamRequest" | "SetPolicyRequest" => {
+            // - StatsContainerRequest and ReadStreamRequest are called
+            //   relatively often, so we're not logging them, to avoid
+            //   growing the log too much.
+            // - Confidential Containers Policy documents are relatively
+            //   large, so we're not logging them here, for SetPolicyRequest.
+            //   The Policy text can be obtained directly from the pod YAML.
+            true
+        }
+        _ => false,
     }
 }
 
