@@ -60,9 +60,7 @@ default WriteStreamRequest := false
 # requests causing a policy failure*. This is an unsecure configuration
 # but is useful for allowing unsecure pods to start, then connect to
 # them and inspect OPA logs for the root cause of a failure.
-
 default AllowRequestsFailingPolicy := false
-#default AllowRequestsFailingPolicy := true
 
 # Constants
 S_NAME_KEY = "io.kubernetes.cri.sandbox-name"
@@ -1645,11 +1643,16 @@ allow_interactive_exec(p_container, i_process) if {
 }
 
 get_state_container(container_id):= p_container if {
-    #idx := get_state_val(container_id)
-    #p_container := policy_data.containers[idx]
+    print("get_state_container: container_id =", container_id)
+
+    state := get_state()
 
     some idx, p_container in policy_data.containers
-    p_container.container_id == container_id
+    key := sprintf("container_%v", [idx])
+    print("get_state_container: key =", key, "state =", state[key])
+    state[key] == container_id
+
+    print("get_state_container: true")
 }
 
 ExecProcessRequest if {
@@ -1660,8 +1663,8 @@ ExecProcessRequest if {
     print("ExecProcessRequest 1: p_command =", p_command)
     p_command == input.process.Args
 
-    #p_container := get_state_container(input.container_id)
-    #allow_interactive_exec(p_container, input.process)
+    p_container := get_state_container(input.container_id)
+    allow_interactive_exec(p_container, input.process)
 
     print("ExecProcessRequest 1: true")
 }
