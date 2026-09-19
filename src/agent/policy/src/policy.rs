@@ -37,16 +37,6 @@ macro_rules! sl {
     };
 }
 
-/// Types of Policy logs.
-#[derive(PartialEq)]
-enum LogType {
-    /// Log in POLICY_LOG_FILE.
-    JsonFile,
-
-    /// Log using slog.
-    SystemLog,
-}
-
 /// Singleton policy object.
 #[derive(Debug, Default)]
 pub struct AgentPolicy {
@@ -239,7 +229,7 @@ impl AgentPolicy {
 
     async fn log_policy_data(&mut self, ep: &str, data: &str) {
         if let Some(log_file) = &mut self.log_file {
-            if !skip_log_entry(ep, LogType::JsonFile) {
+            if !skip_json_log_entry(ep) {
                 let log_entry = format!("{{\"kind\":\"{ep}\",\"data\":{data}}}\n");
 
                 if let Err(e) = log_file.write_all(log_entry.as_bytes()).await {
@@ -349,7 +339,7 @@ impl std::convert::TryFrom<&CopyFileRequest> for PolicyCopyFileRequest {
     }
 }
 
-fn skip_log_entry(ep: &str, log_type: LogType) -> bool {
+fn skip_json_log_entry(ep: &str) -> bool {
     match ep {
         "StatsContainerRequest" | "ReadStreamRequest" | "SetPolicyRequest" => {
             // - StatsContainerRequest and ReadStreamRequest are called
@@ -360,18 +350,30 @@ fn skip_log_entry(ep: &str, log_type: LogType) -> bool {
             //   The Policy text can be obtained directly from the pod YAML.
             true
         }
-        "CreateContainerRequest" => {
-            // The rego prints from a rejected CreateContainer are easily available
-            // from the output of "kubectl describe pod". Don't log the same prints
-            // text into the system log too, because it is very large.
-            log_type == LogType::SystemLog
-        }
         _ => false,
     }
 }
 
+fn skip_slog_entry(ep: &str) -> bool {
+    if skip_json_log_entry(ep) {
+        true
+    } else {
+        match ep {
+            // - The rego prints from a rejected CreateContainer are easily available
+            //   from the output of "kubectl describe pod". Don't log the same text
+            //   into the system log too, because it is very large.
+            // - AllowRequestsFailingPolicy and GetDiagnosticDataRequest are expected
+            //   to be false for typical CoCo policies.
+            "CreateContainerRequest"
+            | "AllowRequestsFailingPolicy"
+            | "GetDiagnosticDataRequest" => true,
+            _ => false,
+        }
+    }
+}
+
 fn log_blocked_ep_prints(ep: &str, prints: &str) {
-    if !skip_log_entry(ep, LogType::SystemLog) {
+    if !skip_slog_entry(ep) {
         error!(sl!(), "policy: {ep} is blocked by policy: {prints}");
     }
 }
