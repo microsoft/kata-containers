@@ -37,6 +37,16 @@ macro_rules! sl {
     };
 }
 
+/// Types of Policy logs.
+#[derive(PartialEq)]
+enum LogType {
+    /// Log in POLICY_LOG_FILE.
+    JsonFile,
+
+    /// Log using slog.
+    SystemLog,
+}
+
 /// Singleton policy object.
 #[derive(Debug, Default)]
 pub struct AgentPolicy {
@@ -206,9 +216,13 @@ impl AgentPolicy {
             }
         };
 
-        if !allow && self.allow_failures {
-            warn!(sl!(), "policy: ignoring error for {ep}");
-            allow = true;
+        if !allow {
+            if self.allow_failures {
+                warn!(sl!(), "policy: ignoring error for {ep}");
+                allow = true;
+            } else {
+                log_blocked_ep_prints(ep, &prints);
+            }
         }
 
         Ok((allow, prints))
@@ -225,7 +239,7 @@ impl AgentPolicy {
 
     async fn log_policy_data(&mut self, ep: &str, data: &str) {
         if let Some(log_file) = &mut self.log_file {
-            if !skip_log_entry(ep) {
+            if !skip_log_entry(ep, LogType::JsonFile) {
                 let log_entry = format!("{{\"kind\":\"{ep}\",\"data\":{data}}}\n");
 
                 if let Err(e) = log_file.write_all(log_entry.as_bytes()).await {
@@ -335,7 +349,7 @@ impl std::convert::TryFrom<&CopyFileRequest> for PolicyCopyFileRequest {
     }
 }
 
-fn skip_log_entry(ep: &str) -> bool {
+fn skip_log_entry(ep: &str, log_type: LogType) -> bool {
     match ep {
         "StatsContainerRequest" | "ReadStreamRequest" | "SetPolicyRequest" => {
             // - StatsContainerRequest and ReadStreamRequest are called
@@ -346,7 +360,19 @@ fn skip_log_entry(ep: &str) -> bool {
             //   The Policy text can be obtained directly from the pod YAML.
             true
         }
+        "CreateContainerRequest" => {
+            // The rego prints from a rejected CreateContainer are easily available
+            // from the output of "kubectl describe pod". Don't log the same prints
+            // text into the system log too, because it is very large.
+            log_type == LogType::SystemLog
+        }
         _ => false,
+    }
+}
+
+fn log_blocked_ep_prints(ep: &str, prints: &str) {
+    if !skip_log_entry(ep, LogType::SystemLog) {
+        error!(sl!(), "policy: {ep} is blocked by policy: {prints}");
     }
 }
 

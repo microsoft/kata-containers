@@ -49,5 +49,5 @@ teardown(){
 	kubectl delete pod "$pod_name"
 
 	delete_tmp_policy_settings_dir "${policy_settings_dir}"
-	teardown_common "${node}" "${node_start_time:-}"
+	#teardown_common "${node}" "${node_start_time:-}"
 }

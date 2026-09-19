@@ -60,7 +60,9 @@ default WriteStreamRequest := false
 # requests causing a policy failure*. This is an unsecure configuration
 # but is useful for allowing unsecure pods to start, then connect to
 # them and inspect OPA logs for the root cause of a failure.
+
 default AllowRequestsFailingPolicy := false
+#default AllowRequestsFailingPolicy := true
 
 # Constants
 S_NAME_KEY = "io.kubernetes.cri.sandbox-name"
@@ -101,6 +103,7 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     i_namespace := i_oci.Annotations[S_NAMESPACE_KEY]
     print("CreateContainerRequest: p_namespace =", p_namespace, "i_namespace =", i_namespace)
     add_namespace_to_state := allow_namespace(p_namespace, i_namespace)
+
     ops_builder2 := concat_op_if_not_null(ops_builder1, add_namespace_to_state)
 
     print("CreateContainerRequest: p Version =", p_oci.Version, "i Version =", i_oci.Version)
@@ -120,15 +123,17 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     ret := allow_linux(ops_builder2, p_oci, i_oci)
     ret.allowed
 
+    # TODO
     # save to policy state
     # key: input.container_id
     # val: index of p_container in the policy_data.containers array
-    print("CreateContainerRequest: adding container_id=", input.container_id, " to state")
-    add_p_container_to_state := state_allows(input.container_id, idx)
 
+    key := sprintf("container_%v", [idx])
+    print("CreateContainerRequest: adding container state: key = ", key, "container_id =", input.container_id)
+    add_p_container_to_state := state_allows(key, input.container_id)
     ops := concat_op_if_not_null(ret.ops, add_p_container_to_state)
 
-    print("CreateContainerRequest: true")
+    print("CreateContainerRequest: true, ops =", ops)
 }
 
 allow_create_container_input if {
@@ -1640,8 +1645,11 @@ allow_interactive_exec(p_container, i_process) if {
 }
 
 get_state_container(container_id):= p_container if {
-    idx := get_state_val(container_id)
-    p_container := policy_data.containers[idx]
+    #idx := get_state_val(container_id)
+    #p_container := policy_data.containers[idx]
+
+    some idx, p_container in policy_data.containers
+    p_container.container_id == container_id
 }
 
 ExecProcessRequest if {
@@ -1652,8 +1660,8 @@ ExecProcessRequest if {
     print("ExecProcessRequest 1: p_command =", p_command)
     p_command == input.process.Args
 
-    p_container := get_state_container(input.container_id)
-    allow_interactive_exec(p_container, input.process)
+    #p_container := get_state_container(input.container_id)
+    #allow_interactive_exec(p_container, input.process)
 
     print("ExecProcessRequest 1: true")
 }
@@ -1784,12 +1792,14 @@ GetDiagnosticDataRequest if {
 }
 
 RemoveContainerRequest:= {"ops": ops, "allowed": true} if {
-    print("RemoveContainerRequest: input =", input)
+    #print("RemoveContainerRequest: input =", input)
 
     # Delete input.container_id from p_state
-    ops_builder1 := []
-    del_container := state_del_key(input.container_id)
-    ops := concat_op_if_not_null(ops_builder1, del_container)
+    #ops_builder1 := []
+    #del_container := state_del_key(input.container_id)
+    #ops := concat_op_if_not_null(ops_builder1, del_container)
 
-    print("RemoveContainerRequest: true")
+    #print("RemoveContainerRequest: true")
+    ops := []
+    true
 }
