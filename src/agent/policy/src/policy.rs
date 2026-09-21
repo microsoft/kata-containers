@@ -148,7 +148,9 @@ impl AgentPolicy {
     /// Ask regorus if an API call should be allowed or not.
     pub async fn allow_request(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
         debug!(sl!(), "policy check: {ep}");
-        self.log_eval_input(ep, ep_input).await;
+
+        // Log policy evaluation input information into POLICY_LOG_FILE.
+        self.log_eval_to_file(ep, ep_input).await;
 
         let query = format!("data.agent_policy.{ep}");
         self.engine.set_input_json(ep_input)?;
@@ -185,7 +187,8 @@ impl AgentPolicy {
             regorus::Value::Object(obj) => {
                 let json_str = serde_json::to_string(obj)?;
 
-                self.log_eval_input(ep, &json_str).await;
+                // Log policy evaluation output information into POLICY_LOG_FILE.
+                self.log_eval_to_file(ep, &json_str).await;
 
                 let metadata_response: MetadataResponse = serde_json::from_str(&json_str)?;
 
@@ -223,7 +226,7 @@ impl AgentPolicy {
         Ok(())
     }
 
-    async fn log_eval_input(&mut self, ep: &str, input: &str) {
+    async fn log_eval_to_file(&mut self, ep: &str, input: &str) {
         if let Some(log_file) = &mut self.log_file {
             match ep {
                 "StatsContainerRequest" | "ReadStreamRequest" | "SetPolicyRequest" => {
@@ -238,9 +241,9 @@ impl AgentPolicy {
                     let log_entry = format!("{{\"kind\":\"{ep}\",\"request\":{input}}}\n");
 
                     if let Err(e) = log_file.write_all(log_entry.as_bytes()).await {
-                        warn!(sl!(), "policy: log_eval_input: write_all failed: {}", e);
+                        warn!(sl!(), "policy: log_eval_to_file: write_all failed: {}", e);
                     } else if let Err(e) = log_file.flush().await {
-                        warn!(sl!(), "policy: log_eval_input: flush failed: {}", e);
+                        warn!(sl!(), "policy: log_eval_to_file: flush failed: {}", e);
                     }
                 }
             }
