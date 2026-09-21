@@ -1,0 +1,8 @@
+[
+  {
+    "allowed": false,
+    "description": "remove container with missing container_id",
+    "kind": "RemoveContainerRequest",
+    "request": {}
+  }
+]
