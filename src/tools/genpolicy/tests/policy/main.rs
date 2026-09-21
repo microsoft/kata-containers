@@ -15,7 +15,7 @@ mod tests {
     use json_patch::{patch, Patch};
     use protocols::agent::{
         AddARPNeighborsRequest, CreateContainerRequest, CreateSandboxRequest, ExecProcessRequest,
-        RemoveContainerRequest, UpdateInterfaceRequest, UpdateRoutesRequest,
+        UpdateInterfaceRequest, UpdateRoutesRequest,
     };
     use serde::{Deserialize, Serialize};
 
@@ -31,7 +31,7 @@ mod tests {
         CreateContainerRequest(CreateContainerRequest),
         CreateSandboxRequest(CreateSandboxRequest),
         ExecProcessRequest(ExecProcessRequest),
-        RemoveContainerRequest(RemoveContainerRequest),
+        RemoveContainerRequest(serde_json::Value),
         UpdateInterfaceRequest(UpdateInterfaceRequest),
         UpdateRoutesRequest(UpdateRoutesRequest),
         AddARPNeighborsRequest(AddARPNeighborsRequest),
@@ -299,6 +299,11 @@ mod tests {
     #[tokio::test]
     async fn test_create_sandbox() {
         runtests("createsandbox").await;
+    }
+
+    #[tokio::test]
+    async fn test_remove_container() {
+        runtests("removecontainer").await;
     }
 
     #[tokio::test]
