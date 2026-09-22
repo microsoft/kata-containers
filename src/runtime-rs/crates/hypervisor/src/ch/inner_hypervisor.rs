@@ -329,6 +329,24 @@ impl CloudHypervisorInner {
             .with_context(|| format!("set permissions on {}", config_path.display()))
     }
 
+    /// CLH copy-on-write restore rejects file-backed guest RAM, which shared=true creates.
+    fn make_snapshot_memory_private(config_path: &Path) -> Result<()> {
+        let data =
+            fs::read(config_path).with_context(|| format!("read {}", config_path.display()))?;
+        let mut config: Value = serde_json::from_slice(&data)
+            .with_context(|| format!("parse {}", config_path.display()))?;
+        let memory = config
+            .get_mut("memory")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| anyhow!("snapshot config missing memory section"))?;
+        memory.insert("shared".to_string(), Value::Bool(false));
+
+        fs::write(config_path, serde_json::to_vec(&config)?)
+            .with_context(|| format!("write {}", config_path.display()))?;
+        fs::set_permissions(config_path, fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("set permissions on {}", config_path.display()))
+    }
+
     fn restore_memory_layout(config_path: &Path) -> Result<RestoreMemoryLayout> {
         let data =
             fs::read(config_path).with_context(|| format!("read {}", config_path.display()))?;
@@ -397,6 +415,14 @@ impl CloudHypervisorInner {
                     .context("make restored file-backed memory private")?;
             }
             RestoreMemoryLayout::SnapshotRanges => {
+                // The memory layout (including any hotplug window) must stay as
+                // captured; only the RAM backing may change at restore time.
+                if self.config.memory_info.memory_restore_mode
+                    == kata_types::config::hypervisor::MemoryRestoreMode::CopyOnWrite
+                {
+                    Self::make_snapshot_memory_private(&dst_config)
+                        .context("make restored snapshot memory private")?;
+                }
                 let src_memory = snapshot_dir.join("memory-ranges");
                 fs::metadata(&src_memory).with_context(|| {
                     format!(
@@ -1531,6 +1557,42 @@ mod tests {
             fs::read_link(vm_path.join("memory-ranges")).unwrap(),
             memory_ranges
         );
+    }
+
+    #[test]
+    fn test_prepare_cow_workload_restore_keeps_memory_layout() {
+        let root = Builder::new().prefix("clh-cow-restore").tempdir().unwrap();
+        let snapshot_dir = root.path().join("snapshot");
+        let vm_path = root.path().join("vm");
+        write_restore_artifacts(
+            &snapshot_dir,
+            serde_json::json!({
+                "memory": {
+                    "size": 134217728,
+                    "shared": true,
+                    "hotplug_method": "Acpi",
+                    "hotplug_size": 1073741824_u64,
+                },
+                "vsock": { "socket": "snapshot.sock" },
+            }),
+        );
+        fs::write(snapshot_dir.join("memory-ranges"), b"snapshot memory").unwrap();
+
+        let mut clh = CloudHypervisorInner {
+            id: "restored-cow".to_string(),
+            vm_path: vm_path.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        clh.config.memory_info.memory_restore_mode =
+            kata_types::config::hypervisor::MemoryRestoreMode::CopyOnWrite;
+        clh.prepare_restore_files(&snapshot_dir).unwrap();
+
+        let config: Value =
+            serde_json::from_slice(&fs::read(vm_path.join(CLH_SNAPSHOT_CONFIG_FILE)).unwrap())
+                .unwrap();
+        assert_eq!(config["memory"]["shared"], false);
+        assert_eq!(config["memory"]["hotplug_method"], "Acpi");
+        assert_eq!(config["memory"]["hotplug_size"], 1073741824_u64);
     }
 
     #[actix_rt::test]
