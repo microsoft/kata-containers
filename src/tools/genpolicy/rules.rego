@@ -82,7 +82,7 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
 
     # check sandbox name
     sandbox_name = i_oci.Annotations[S_NAME_KEY]
-    add_sandbox_name_to_state := state_allows("sandbox_name", sandbox_name)
+    add_sandbox_name_to_state := state_allows_log("sandbox_name", sandbox_name)
     ops_builder1 := concat_op_if_not_null(ops_builder, add_sandbox_name_to_state)
 
     # Check if any element from the policy_data.containers array allows the input request.
@@ -126,7 +126,7 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     key := get_state_container_key(idx)
     value := input.container_id
     print("CreateContainerRequest: adding container state: key = ", key, "value =", value)
-    add_p_container_to_state := state_allows(key, value)
+    add_p_container_to_state := state_allows_log(key, value)
     ops := concat_op_if_not_null(ret.ops, add_p_container_to_state)
 
     print("CreateContainerRequest: true, ops =", ops)
@@ -164,55 +164,56 @@ allow_create_container_input if {
 
 allow_namespace(p_namespace, i_namespace) = add_namespace if {
     p_namespace == i_namespace
-    add_namespace := state_allows("namespace", i_namespace)
+    add_namespace := state_allows_log("namespace", i_namespace)
     print("allow_namespace 1: input namespace matches policy data")
 }
 
 allow_namespace(p_namespace, i_namespace) = add_namespace if {
     p_namespace == ""
     print("allow_namespace 2: no namespace found on policy data")
-    add_namespace := state_allows("namespace", i_namespace)
+    add_namespace := state_allows_log("namespace", i_namespace)
+}
+
+state_allows_log(key, value) = action if {
+    state := get_state()
+    print("state_allows_log: key =", key, ", state[key] =", state[key], ", input value =", value)
+    action := state_allows(key, value, state)
 }
 
 # key hasn't been seen before, save key, value pair to state
-state_allows(key, value) = action if {
-  state := get_state()
-  print("state_allows 1: state[key] =", state[key], "value =", value)
-  not state[key]
-  print("state_allows 1: saving to state key =", key, "value =", value)
-  path := get_state_path(key)
-  action := {
-    "op": "add",
-    "path": path,
-    "value": value,
-  }
+state_allows(key, value, state) = action if {
+    not state[key]
+    path := get_state_path(key)
+    print("state_allows 1: true, saving value to path =", path)
+    action := {
+        "op": "add",
+        "path": path,
+        "value": value,
+    }
 }
 
 # value matches what's in state, allow it
-state_allows(key, value) = action if {
-  print("state_allows 2: start")
-  state := get_state()
-  print("state_allows 2: state[key] =", state[key], "value =", value)
-  value == state[key]
-  print("state_allows 2: found key =", key, "value =", value, " in state")
-  action := null
+state_allows(key, value, state) = action if {
+    value == state[key]
+    print("state_allows 2: true, found key + value in state")
+    action := null
 }
 
 # delete key=value from state
 state_del_key(key) = action if {
-  print("state_del_key: ", key)
-  state := get_state()
-  print("state_del_key: deleting from state key =", key)
-  path := get_state_path(key)
-  action := {
-    "op": "remove",
-    "path": path,
-  }
+    print("state_del_key: ", key)
+    state := get_state()
+    print("state_del_key: deleting from state key =", key)
+    path := get_state_path(key)
+    action := {
+        "op": "remove",
+        "path": path,
+    }
 }
 
 # helper functions to interact with the state
 get_state() = state if {
-  state := data["pstate"]
+    state := data["pstate"]
 }
 
 get_state_val(key) = value if {
@@ -660,7 +661,7 @@ allow_network_namespace(state_ops, network_ns) := {"ops": ops, "allowed": true} 
 
     network_ns_path = ""
 
-    add_network_namespace_to_state := state_allows("network_namespace", network_ns_path)
+    add_network_namespace_to_state := state_allows_log("network_namespace", network_ns_path)
     ops := concat_op_if_not_null(state_ops, add_network_namespace_to_state)
 
     print("allow_network_namespace 1: true")
@@ -670,7 +671,7 @@ allow_network_namespace(state_ops, network_ns) := {"ops": ops, "allowed": true} 
 allow_network_namespace(state_ops, network_ns) := {"ops": ops, "allowed": true} if {
     count(network_ns) == 1
 
-    add_network_namespace_to_state := state_allows("network_namespace", network_ns[0].Path)
+    add_network_namespace_to_state := state_allows_log("network_namespace", network_ns[0].Path)
     ops := concat_op_if_not_null(state_ops, add_network_namespace_to_state)
 
     print("allow_network_namespace 2: true")
@@ -1630,7 +1631,7 @@ CreateSandboxRequest := {"ops": [add_sandbox_to_state], "allowed": true} if {
 
     state := get_state()
     not state["sandbox_created"]
-    add_sandbox_to_state := state_allows("sandbox_created", true)
+    add_sandbox_to_state := state_allows_log("sandbox_created", true)
 }
 
 allow_exec(p_container, i_process) if {
