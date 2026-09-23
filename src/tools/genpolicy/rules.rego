@@ -1114,8 +1114,8 @@ allow_mount_log(p_oci, i_mount, i_storages, bundle_id, sandbox_id) := p_index if
 
 allow_mount(p_oci, i_mount, i_storages, bundle_id, sandbox_id):= p_index if {
     some p_index, p_mount in p_oci.Mounts
-
     print("allow_mount 1: p_mount =", p_mount)
+
     # check_mount expects a regex in the source field, other p_mounts are not eligible for this rule.
     p_mount.source != ""
     check_mount(p_mount, i_mount, bundle_id, sandbox_id)
@@ -1199,36 +1199,27 @@ check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
 }
 
 mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
-    regex1 := p_mount.source
-    print("mount_source_allows 1: regex1 =", regex1)
-
-    regex2 := replace(regex1, "$(sfprefix)", policy_data.common.sfprefix)
-    print("mount_source_allows 1: regex2 =", regex2)
-
-    regex3 := replace(regex2, "$(cpath)", policy_data.common.cpath)
-    print("mount_source_allows 1: regex3 =", regex3)
-
-    regex4 := replace(regex3, "$(bundle-id)", bundle_id)
-    print("mount_source_allows 1: regex4 =", regex4)
-    regex.match(regex4, i_mount.source)
-
-    print("mount_source_allows 1: true")
+    mount_source_allows_by_id(p_mount, i_mount, "$(bundle-id)", bundle_id)
 }
 mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
+    mount_source_allows_by_id(p_mount, i_mount, "$(sandbox-id)", sandbox_id)
+}
+
+mount_source_allows_by_id(p_mount, i_mount, id_placeholder, id) if {
     regex1 := p_mount.source
-    print("mount_source_allows 2: regex1 =", regex1)
+    print("mount_source_allows_by_id: regex1 =", regex1)
 
     regex2 := replace(regex1, "$(sfprefix)", policy_data.common.sfprefix)
-    print("mount_source_allows 2: regex2 =", regex2)
+    print("mount_source_allows_by_id: regex2 =", regex2)
 
     regex3 := replace(regex2, "$(cpath)", policy_data.common.cpath)
-    print("mount_source_allows 2: regex3 =", regex3)
+    print("mount_source_allows_by_id: regex3 =", regex3)
 
-    regex4 := replace(regex3, "$(sandbox-id)", sandbox_id)
-    print("mount_source_allows 2: regex4 =", regex4)
+    regex4 := replace(regex3, id_placeholder, id)
+    print("mount_source_allows_by_id: regex4 =", regex4)
     regex.match(regex4, i_mount.source)
 
-    print("mount_source_allows 2: true")
+    print("mount_source_allows_by_id: true")
 }
 
 ######################################################################
