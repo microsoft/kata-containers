@@ -1372,8 +1372,15 @@ impl VirtSandbox {
                 },
             })
             .collect();
+        // PoC: always defer a restored VM's resume to the first claim-time wake.
+        let defer_activation = true;
         self.restore_context
-            .begin(&manifest.source_sandbox_id, live_slots, completed_slots)
+            .begin(
+                &manifest.source_sandbox_id,
+                live_slots,
+                completed_slots,
+                defer_activation,
+            )
             .await?;
         let private_dir = self.restore_private_dir();
         let result: Result<()> = async {
@@ -1437,6 +1444,13 @@ impl VirtSandbox {
                 .await
                 .context("restore workload VM paused")?;
             self.restore_context.prepared_paused().await?;
+            // Deferred activation keeps the VM paused until a claim-time wake.
+            // Report the sandbox READY so the member is claimable and so the
+            // Task-API per-container start() calls no-op instead of re-running
+            // the restore.
+            if self.restore_context.defer_activation().await {
+                inner.state = SandboxState::Running;
+            }
             inner.created_at = Some(SystemTime::now());
             self.save()
                 .await
@@ -1481,7 +1495,26 @@ impl VirtSandbox {
         &self,
         container_manager: Arc<dyn ContainerManager>,
         target_id: &str,
+        force: bool,
     ) -> Result<bool> {
+        // Deferred activation: keep the VM paused at sandbox/container start and
+        // resume only on a claim-time wake (force=true). Report the pause
+        // container running so the pod is claimable; workloads report running
+        // via the container manager's deferred-start branch.
+        if !force
+            && self.restore_context.defer_activation().await
+            && self.restore_context.is_prepared_paused().await
+        {
+            if HostContainerId::new(target_id) == self.restore_context.target_sandbox_id() {
+                if let Some(pause_id) = self.restore_context.target_pause_id().await {
+                    let _ = container_manager
+                        .mark_restored_container_running(&pause_id)
+                        .await;
+                }
+                return Ok(true);
+            }
+            return Ok(false);
+        }
         let _activation_guard = self.restore_context.activation_guard().await;
         if !self
             .restore_context
@@ -1627,6 +1660,12 @@ impl VirtSandbox {
             self.start_oom_watcher();
             self.monitor.start(&self.sid, self.agent.clone());
             self.restore_context.activate().await?;
+            // Replay the agent-side resume for workloads that were adopted
+            // synthetically while the VM was paused (deferred activation).
+            container_manager
+                .finalize_deferred_restored_containers()
+                .await
+                .context("finalize deferred restored containers")?;
             self.inner.write().await.state = SandboxState::Running;
             self.save().await.context("persist active restored sandbox")?;
             Ok(())
@@ -3027,8 +3066,22 @@ impl Sandbox for VirtSandbox {
         container_manager: Arc<dyn ContainerManager>,
         target_id: &str,
     ) -> Result<bool> {
-        self.activate_restore_transaction(container_manager, target_id)
+        self.activate_restore_transaction(container_manager, target_id, false)
             .await
+    }
+
+    async fn wake_restore(&self, container_manager: Arc<dyn ContainerManager>) -> Result<()> {
+        // No-op unless this is a deferred restore still paused; the first exec
+        // (claim-time wake) resumes the VM and replays deferred adoptions.
+        if !(self.restore_context.defer_activation().await
+            && self.restore_context.is_prepared_paused().await)
+        {
+            return Ok(());
+        }
+        let sid = self.sid.clone();
+        self.activate_restore_transaction(container_manager, &sid, true)
+            .await?;
+        Ok(())
     }
 
     async fn persist_runtime_state(&self) -> Result<()> {

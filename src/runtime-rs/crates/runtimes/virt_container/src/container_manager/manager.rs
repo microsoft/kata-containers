@@ -48,6 +48,9 @@ pub struct VirtContainerManager {
     agent: Arc<dyn Agent>,
     hypervisor: Arc<dyn Hypervisor>,
     vmm_master_tid: OnceCell<u32>,
+    // Set when a deferred-paused sandbox container is torn down, so state_process
+    // reports it Stopped instead of the cached-tid Running.
+    sandbox_stopped: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for VirtContainerManager {
@@ -125,6 +128,7 @@ impl VirtContainerManager {
             agent,
             hypervisor,
             vmm_master_tid: OnceCell::new(),
+            sandbox_stopped: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -279,9 +283,34 @@ impl ContainerManager for VirtContainerManager {
         match process.process_type {
             ProcessType::Container => {
                 let mut containers = self.containers.write().await;
-                let mut c = containers
-                    .remove(container_id)
-                    .ok_or_else(|| Error::ContainerNotFound(container_id.to_string()))?;
+                let mut c = match containers.remove(container_id) {
+                    Some(c) => c,
+                    None => {
+                        // Deferred-paused sandbox container is not in the map;
+                        // report a synthetic stopped state so kubelet finishes
+                        // deletion instead of looping on ContainerNotFound.
+                        if container_id == &self.sid
+                            && self.sandbox_stopped.load(std::sync::atomic::Ordering::SeqCst)
+                        {
+                            return Ok(ProcessStateInfo {
+                                container_id: self.sid.clone(),
+                                exec_id: String::new(),
+                                pid: PID {
+                                    pid: self.get_vmm_master_tid().await?,
+                                },
+                                bundle: String::new(),
+                                stdin: None,
+                                stdout: None,
+                                stderr: None,
+                                terminal: false,
+                                status: ProcessStatus::Stopped,
+                                exit_status: 0,
+                                exited_at: None,
+                            });
+                        }
+                        return Err(Error::ContainerNotFound(container_id.to_string()).into());
+                    }
+                };
                 let adopted_live = self
                     .restore_context
                     .resolve_guest_id(&host_id)
@@ -393,6 +422,22 @@ impl ContainerManager for VirtContainerManager {
 
     #[instrument]
     async fn kill_process(&self, req: &KillRequest) -> Result<()> {
+        // A deferred restore that is still paused never dialed the agent, so
+        // there is no live guest process to signal. Complete the container
+        // locally so the waiter publishes TaskExit and kubelet can finish
+        // teardown; the frozen VM is reclaimed when the sandbox stops.
+        if is_termination_signal(req.signal) && self.restore_context.is_prepared_paused().await {
+            let container_id = req.process.container_id();
+            if container_id == self.sid {
+                self.sandbox_stopped
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            let containers = self.containers.read().await;
+            if let Some(container) = containers.get(container_id) {
+                container.complete_locally(128 + req.signal as i32).await;
+            }
+            return Ok(());
+        }
         if self
             .restore_context
             .is_synthetic_completed(&HostContainerId::new(req.process.container_id()))
@@ -499,9 +544,21 @@ impl ContainerManager for VirtContainerManager {
 
         let containers = self.containers.read().await;
         let container_id = &process.container_id.container_id;
-        let c = containers
-            .get(container_id)
-            .ok_or_else(|| Error::ContainerNotFound(container_id.clone()))?;
+        let c = match containers.get(container_id) {
+            Some(c) => c,
+            None => {
+                // A deferred restore still paused never dialed the agent, so its
+                // sandbox container has no waitable process. Report a synthetic
+                // exit so the WaitProcess handler can stop the sandbox and finish
+                // teardown instead of looping on ContainerNotFound.
+                if container_id == &self.sid && self.restore_context.is_prepared_paused().await {
+                    self.sandbox_stopped
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                    return Ok(ProcessExitStatus::new());
+                }
+                return Err(Error::ContainerNotFound(container_id.clone()).into());
+            }
+        };
         let (watcher, status) = c.wait_process(process).await.context("wait")?;
         drop(containers);
 
@@ -605,11 +662,36 @@ impl ContainerManager for VirtContainerManager {
         Ok(())
     }
 
+    async fn finalize_deferred_restored_containers(&self) -> Result<()> {
+        for host_id in self.restore_context.take_deferred_starts().await {
+            let Some(guest_id) = self.restore_context.resolve_guest_id(&host_id).await else {
+                continue;
+            };
+            self.prepare_restored_container(&host_id, &guest_id).await?;
+            self.agent
+                .resume_container(agent::ContainerID {
+                    container_id: guest_id.into_string(),
+                })
+                .await
+                .context("resume deferred restored container")?;
+        }
+        Ok(())
+    }
+
     #[instrument]
     async fn start_process(&self, process: &ContainerProcess) -> Result<PID> {
         if process.exec_id().is_empty() {
             let host_id = HostContainerId::new(process.container_id());
             if let Some(guest_id) = self.restore_context.resolve_guest_id(&host_id).await {
+                // Deferred activation: the VM is still paused, so report the
+                // container running without touching the agent and replay the
+                // guest resume on wake.
+                if self.restore_context.defer_activation().await
+                    && self.restore_context.is_prepared_paused().await
+                {
+                    self.restore_context.record_deferred_start(&host_id).await;
+                    return self.mark_restored_container_running(&host_id).await;
+                }
                 // Keep the guest cgroup paused until mount refresh and I/O/wait
                 // setup succeed. Publish Running only after ResumeContainer.
                 self.prepare_restored_container(&host_id, &guest_id).await?;
@@ -669,6 +751,11 @@ impl ContainerManager for VirtContainerManager {
             c.state_process(process).await.context("state process")
         } else if container_id == &self.sid {
             let vmm_pid = self.get_vmm_master_tid().await?;
+            let status = if self.sandbox_stopped.load(std::sync::atomic::Ordering::SeqCst) {
+                ProcessStatus::Stopped
+            } else {
+                ProcessStatus::Running
+            };
             Ok(ProcessStateInfo {
                 container_id: self.sid.clone(),
                 exec_id: String::new(),
@@ -678,7 +765,7 @@ impl ContainerManager for VirtContainerManager {
                 stdout: None,
                 stderr: None,
                 terminal: false,
-                status: ProcessStatus::Running,
+                status,
                 exit_status: 0,
                 exited_at: None,
             })

@@ -810,6 +810,15 @@ impl RuntimeHandlerManager {
                     }
                 }
 
+                // Claim-time wake: the first exec resumes a deferred-activation
+                // restore that was left paused at sandbox start.
+                if process_id.process_type == ProcessType::Exec {
+                    sandbox
+                        .wake_restore(cm.clone())
+                        .await
+                        .context("wake restored sandbox")?;
+                }
+
                 let restored = sandbox
                     .activate_restore(cm.clone(), process_id.container_id())
                     .await
