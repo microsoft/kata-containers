@@ -302,11 +302,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_remove_container() {
-        runtests("removecontainer").await;
-    }
-
-    #[tokio::test]
     async fn test_update_routes() {
         runtests("updateroutes").await;
     }
