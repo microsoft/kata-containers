@@ -1109,23 +1109,20 @@ is_ip_other_byte(component) if {
 
 allow_mount_log(p_oci, i_mount, i_storages, bundle_id, sandbox_id) := p_index if {
     print("-------- allow_mount_log: i_mount =", i_mount)
-    p_index := allow_mount(p_oci, i_mount, i_storages, bundle_id, sandbox_id)
+
+    some p_index, p_mount in p_oci.Mounts
+    print("allow_mount_log: p_mount =", p_mount)
+    allow_mount(i_mount, i_storages, bundle_id, sandbox_id, p_mount)
 }
 
-allow_mount(p_oci, i_mount, i_storages, bundle_id, sandbox_id):= p_index if {
-    some p_index, p_mount in p_oci.Mounts
-    print("allow_mount 1: p_mount =", p_mount)
-
+allow_mount(i_mount, i_storages, bundle_id, sandbox_id, p_mount) if {
     # check_mount expects a regex in the source field, other p_mounts are not eligible for this rule.
     p_mount.source != ""
     check_mount(p_mount, i_mount, bundle_id, sandbox_id)
 
-    print("allow_mount 1: true, p_index =", p_index)
+    print("allow_mount 1: true")
 }
-allow_mount(p_oci, i_mount, i_storages, bundle_id, sandbox_id):= p_index if {
-    some p_index, p_mount in p_oci.Mounts
-    print("allow_mount 2: p_mount =", p_mount)
-
+allow_mount(i_mount, i_storages, bundle_id, sandbox_id, p_mount) if {
     p_mount.destination == i_mount.destination
     p_mount.type_ == i_mount.type_
     p_mount.options == i_mount.options
@@ -1139,7 +1136,7 @@ allow_mount(p_oci, i_mount, i_storages, bundle_id, sandbox_id):= p_index if {
     i_storage.driver in {"blk", "scsi"}
     i_storage.mount_point == i_mount.source
 
-    print("allow_mount 2: true, p_index =", p_index)
+    print("allow_mount 2: true")
 }
 
 check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
