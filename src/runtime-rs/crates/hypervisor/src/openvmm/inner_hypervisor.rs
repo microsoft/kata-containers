@@ -220,7 +220,10 @@ impl OpenVmmInner {
             initrd: None,
             cmdline,
             enable_serial: false,
+            isolation: openvmm_defs::config::LinuxIsolationConfig::None,
             boot_mode: openvmm_defs::config::LinuxDirectBootMode::Acpi,
+            // Use the loader's built-in SMBIOS identity defaults.
+            smbios: Box::default(),
         };
 
         // Set up virtio-console for guest output, piped to journalctl.

@@ -280,7 +280,11 @@ impl VmmInstance {
                         // otherwise. This makes the same shim binary work on
                         // both classes of host without a rebuild.
                         let hypervisor = match std::fs::File::open("/dev/mshv") {
-                            Ok(mshv) => hypervisor_resources::MshvHandle { mshv }.into_resource(),
+                            Ok(mshv) => hypervisor_resources::MshvHandle {
+                                mshv,
+                                snp_disable_cpuid_offload: false,
+                            }
+                            .into_resource(),
                             Err(mshv_err) => match std::fs::OpenOptions::new()
                                 .read(true)
                                 .write(true)
