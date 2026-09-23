@@ -1199,24 +1199,28 @@ check_mount(p_mount, i_mount, bundle_id, sandbox_id) if {
 }
 
 mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
-    mount_source_allows_by_id(p_mount, i_mount, "$(bundle-id)", bundle_id)
-}
-mount_source_allows(p_mount, i_mount, bundle_id, sandbox_id) if {
-    mount_source_allows_by_id(p_mount, i_mount, "$(sandbox-id)", sandbox_id)
-}
-
-mount_source_allows_by_id(p_mount, i_mount, id_placeholder, id) if {
     regex1 := p_mount.source
-    print("mount_source_allows_by_id: regex1 =", regex1)
+    print("mount_source_allows: regex1 =", regex1)
 
     regex2 := replace(regex1, "$(sfprefix)", policy_data.common.sfprefix)
-    print("mount_source_allows_by_id: regex2 =", regex2)
+    print("mount_source_allows: regex2 =", regex2)
 
     regex3 := replace(regex2, "$(cpath)", policy_data.common.cpath)
-    print("mount_source_allows_by_id: regex3 =", regex3)
+    print("mount_source_allows: regex3 =", regex3)
 
+    mount_source_allows2(i_mount, bundle_id, sandbox_id, regex3)
+}
+
+mount_source_allows2(i_mount, bundle_id, sandbox_id, regex3) if {
+    mount_source_allows_by_id(i_mount, "$(bundle-id)", bundle_id, regex3)
+}
+mount_source_allows2(i_mount, bundle_id, sandbox_id, regex3) if {
+    mount_source_allows_by_id(i_mount, "$(sandbox-id)", sandbox_id, regex3)
+}
+
+mount_source_allows_by_id(i_mount, id_placeholder, id, regex3) if {
     regex4 := replace(regex3, id_placeholder, id)
-    print("mount_source_allows_by_id: regex4 =", regex4)
+    print("mount_source_allows_by_id:", id_placeholder, "=", id, ", regex4 =", regex4)
     regex.match(regex4, i_mount.source)
 
     print("mount_source_allows_by_id: true")
