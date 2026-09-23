@@ -251,30 +251,29 @@ allow_anno(p_container, i_oci) if {
     print("allow_anno 2: i Annotations =", i_oci.Annotations)
 
     every i_key, i_value in i_oci.Annotations {
-        allow_anno_key_value(i_key, i_value, p_container)
+        allow_anno_key_value_log(i_key, i_value, p_container)
     }
 
     print("allow_anno 2: true")
 }
 
-allow_anno_key_value(i_key, i_value, p_container) if {
-    print("allow_anno_key_value 1: i key =", i_key)
+allow_anno_key_value_log(i_key, i_value, p_container) if {
+    print("allow_anno_key_value_log: i key =", i_key, "i_value =", i_value)
+    allow_anno_key_value(i_key, i_value, p_container)
+}
 
+allow_anno_key_value(i_key, i_value, p_container) if {
     startswith(i_key, "io.kubernetes.cri.")
 
     print("allow_anno_key_value 1: true")
 }
 allow_anno_key_value(i_key, i_value, p_container) if {
-    print("allow_anno_key_value 2: i key =", i_key)
-
     some p_key, _ in p_container.OCI.Annotations
     p_key == i_key
 
     print("allow_anno_key_value 2: true")
 }
 allow_anno_key_value(i_key, i_value, p_container) if {
-    print("allow_anno_key_value 3: i key =", i_key, "i_value =", i_value)
-
     some p_key_regex, p_value_regex in p_container.runtime_anno_patterns
     print("allow_anno_key_value 3: p_key_regex =", p_key_regex, "p_value_regex =", p_value_regex)
 
