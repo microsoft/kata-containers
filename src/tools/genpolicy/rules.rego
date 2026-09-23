@@ -812,7 +812,7 @@ allow_by_bundle_or_sandbox_id(p_oci, i_oci, p_storages, i_storages) if {
 
     # Match each input mount with a Policy mount.
     # Reject possible attempts to match multiple input mounts with a single Policy mount.
-    p_matches := { p_index | some i_index; p_index = allow_mount(p_oci, i_oci.Mounts[i_index], i_storages, bundle_id, sandbox_id) }
+    p_matches := { p_index | some i_index; p_index = allow_mount_log(p_oci, i_oci.Mounts[i_index], i_storages, bundle_id, sandbox_id) }
 
     print("allow_by_bundle_or_sandbox_id: p_matches =", p_matches)
     count(p_matches) == count(i_oci.Mounts)
@@ -1107,9 +1107,12 @@ is_ip_other_byte(component) if {
     number <= 255
 }
 
-allow_mount(p_oci, i_mount, i_storages, bundle_id, sandbox_id):= p_index if {
-    print("-------- allow_mount 1: i_mount =", i_mount)
+allow_mount_log(p_oci, i_mount, i_storages, bundle_id, sandbox_id) := p_index if {
+    print("-------- allow_mount_log: i_mount =", i_mount)
+    p_index := allow_mount(p_oci, i_mount, i_storages, bundle_id, sandbox_id)
+}
 
+allow_mount(p_oci, i_mount, i_storages, bundle_id, sandbox_id):= p_index if {
     some p_index, p_mount in p_oci.Mounts
 
     print("allow_mount 1: p_mount =", p_mount)
@@ -1120,8 +1123,6 @@ allow_mount(p_oci, i_mount, i_storages, bundle_id, sandbox_id):= p_index if {
     print("allow_mount 1: true, p_index =", p_index)
 }
 allow_mount(p_oci, i_mount, i_storages, bundle_id, sandbox_id):= p_index if {
-    print("-------- allow_mount 2: i_mount =", i_mount)
-
     some p_index, p_mount in p_oci.Mounts
     print("allow_mount 2: p_mount =", p_mount)
 
