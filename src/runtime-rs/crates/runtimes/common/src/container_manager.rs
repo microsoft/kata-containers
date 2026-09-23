@@ -39,6 +39,9 @@ pub trait ContainerManager: Send + Sync {
     ) -> Result<()>;
     async fn mark_restored_container_running(&self, host_id: &HostContainerId) -> Result<PID>;
     async fn complete_synthetic_init(&self, process_id: &ContainerProcess) -> Result<()>;
+    // Replay the agent-side resume for containers adopted synthetically while a
+    // deferred-activation VM was paused.
+    async fn finalize_deferred_restored_containers(&self) -> Result<()>;
 
     // utility
     async fn pid(&self) -> Result<PID>;

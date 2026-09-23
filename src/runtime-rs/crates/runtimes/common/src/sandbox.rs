@@ -72,6 +72,10 @@ pub trait Sandbox: Send + Sync {
         target_id: &str,
     ) -> Result<bool>;
 
+    // Claim-time wake: resume a restored VM that was left paused by deferred
+    // activation. No-op for non-deferred or already-active restores.
+    async fn wake_restore(&self, container_manager: Arc<dyn ContainerManager>) -> Result<()>;
+
     async fn persist_runtime_state(&self) -> Result<()>;
 
     // set agent policy

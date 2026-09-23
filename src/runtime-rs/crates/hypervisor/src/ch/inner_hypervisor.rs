@@ -329,6 +329,30 @@ impl CloudHypervisorInner {
             .with_context(|| format!("set permissions on {}", config_path.display()))
     }
 
+    /// Rewrite the cloned restore config so CLH can map the snapshot copy-on-write.
+    /// is_restore_cow_supported rejects any hotplug region and is_restore_cow_compatible
+    /// rejects shared (file-backed) guest RAM, so drop both here. The snapshot memory
+    /// content is layout-agnostic, so a snapshot captured from a shared+hotplug source
+    /// still restores into private, fixed-size RAM — which lets clones share the golden
+    /// memory-ranges instead of each copying it.
+    fn make_snapshot_memory_cow_eligible(config_path: &Path) -> Result<()> {
+        let data =
+            fs::read(config_path).with_context(|| format!("read {}", config_path.display()))?;
+        let mut config: Value = serde_json::from_slice(&data)
+            .with_context(|| format!("parse {}", config_path.display()))?;
+        let memory = config
+            .get_mut("memory")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| anyhow!("snapshot config missing memory section"))?;
+        memory.insert("shared".to_string(), Value::Bool(false));
+        memory.insert("hotplug_size".to_string(), Value::Null);
+
+        fs::write(config_path, serde_json::to_vec(&config)?)
+            .with_context(|| format!("write {}", config_path.display()))?;
+        fs::set_permissions(config_path, fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("set permissions on {}", config_path.display()))
+    }
+
     fn restore_memory_layout(config_path: &Path) -> Result<RestoreMemoryLayout> {
         let data =
             fs::read(config_path).with_context(|| format!("read {}", config_path.display()))?;
@@ -397,6 +421,15 @@ impl CloudHypervisorInner {
                     .context("make restored file-backed memory private")?;
             }
             RestoreMemoryLayout::SnapshotRanges => {
+                // Make the restored guest RAM copy-on-write eligible (private,
+                // non-resizable) when copyonwrite is requested, so CLH maps the
+                // golden memory-ranges shared across clones instead of copying it.
+                if self.config.memory_info.memory_restore_mode
+                    == kata_types::config::hypervisor::MemoryRestoreMode::CopyOnWrite
+                {
+                    Self::make_snapshot_memory_cow_eligible(&dst_config)
+                        .context("make restored snapshot memory cow-eligible")?;
+                }
                 let src_memory = snapshot_dir.join("memory-ranges");
                 fs::metadata(&src_memory).with_context(|| {
                     format!(

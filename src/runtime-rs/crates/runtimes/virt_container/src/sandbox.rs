@@ -95,7 +95,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use strum::Display;
 use tokio::sync::{mpsc::Sender, watch, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
@@ -280,6 +280,21 @@ fn validated_snapshot_file(snapshot_dir: &Path, relative: &Path) -> Result<PathB
         ));
     }
     Ok(path)
+}
+
+fn defer_activation_from_annotations(
+    annotations: &std::collections::HashMap<String, String>,
+) -> Result<bool> {
+    match annotations
+        .get(kata_types::annotations::KATA_ANNO_RESTORE_DEFER_ACTIVATION)
+        .map(String::as_str)
+    {
+        None | Some("false") => Ok(false),
+        Some("true") => Ok(true),
+        Some(other) => Err(anyhow!(
+            "restore-defer-activation must be \"true\" or \"false\", got {other:?}"
+        )),
+    }
 }
 
 fn restore_source_from_annotations(
@@ -722,6 +737,18 @@ mod snapshot_manifest_tests {
             kata_types::annotations::KATA_ANNO_SNAPSHOT_NAME.to_string(),
             name.to_string(),
         )])
+    }
+
+    #[test]
+    fn defer_activation_annotation_defaults_to_eager() {
+        let key = kata_types::annotations::KATA_ANNO_RESTORE_DEFER_ACTIVATION.to_string();
+        assert!(!defer_activation_from_annotations(&HashMap::new()).unwrap());
+        let with = |v: &str| HashMap::from([(key.clone(), v.to_string())]);
+        assert!(!defer_activation_from_annotations(&with("false")).unwrap());
+        assert!(defer_activation_from_annotations(&with("true")).unwrap());
+        for bad in ["", "yes", "TRUE", "1"] {
+            assert!(defer_activation_from_annotations(&with(bad)).is_err());
+        }
     }
 
     #[test]
@@ -1372,8 +1399,14 @@ impl VirtSandbox {
                 },
             })
             .collect();
+        let defer_activation = defer_activation_from_annotations(&sandbox_config.annotations)?;
         self.restore_context
-            .begin(&manifest.source_sandbox_id, live_slots, completed_slots)
+            .begin(
+                &manifest.source_sandbox_id,
+                live_slots,
+                completed_slots,
+                defer_activation,
+            )
             .await?;
         let private_dir = self.restore_private_dir();
         let result: Result<()> = async {
@@ -1437,6 +1470,13 @@ impl VirtSandbox {
                 .await
                 .context("restore workload VM paused")?;
             self.restore_context.prepared_paused().await?;
+            // Deferred activation keeps the VM paused until a claim-time wake.
+            // Report the sandbox READY so the member is claimable and so the
+            // Task-API per-container start() calls no-op instead of re-running
+            // the restore.
+            if self.restore_context.defer_activation().await {
+                inner.state = SandboxState::Running;
+            }
             inner.created_at = Some(SystemTime::now());
             self.save()
                 .await
@@ -1481,7 +1521,26 @@ impl VirtSandbox {
         &self,
         container_manager: Arc<dyn ContainerManager>,
         target_id: &str,
+        force: bool,
     ) -> Result<bool> {
+        // Deferred activation: keep the VM paused at sandbox/container start and
+        // resume only on a claim-time wake (force=true). Report the pause
+        // container running so the pod is claimable; workloads report running
+        // via the container manager's deferred-start branch.
+        if !force
+            && self.restore_context.defer_activation().await
+            && self.restore_context.is_prepared_paused().await
+        {
+            if HostContainerId::new(target_id) == self.restore_context.target_sandbox_id() {
+                if let Some(pause_id) = self.restore_context.target_pause_id().await {
+                    let _ = container_manager
+                        .mark_restored_container_running(&pause_id)
+                        .await;
+                }
+                return Ok(true);
+            }
+            return Ok(false);
+        }
         let _activation_guard = self.restore_context.activation_guard().await;
         if !self
             .restore_context
@@ -1494,11 +1553,20 @@ impl VirtSandbox {
             return Ok(true);
         }
 
+        fn lap(mark: &mut Instant) -> u128 {
+            let elapsed = mark.elapsed().as_micros();
+            *mark = Instant::now();
+            elapsed
+        }
+        let started = Instant::now();
+        let mut mark = started;
+
         let result: Result<()> = async {
             self.hypervisor
                 .resume_vm()
                 .await
                 .context("resume restored VM")?;
+            let resume_vm_us = lap(&mut mark);
             let address = self
                 .hypervisor
                 .get_agent_socket()
@@ -1512,6 +1580,7 @@ impl VirtSandbox {
                 .check(agent::CheckRequest::new(""))
                 .await
                 .context("health-check restored agent")?;
+            let agent_connect_us = lap(&mut mark);
 
             self.agent
                 .reseed_random_dev(agent::ReseedRandomDevRequest {
@@ -1527,6 +1596,7 @@ impl VirtSandbox {
                 })
                 .await
                 .context("synchronize restored guest time")?;
+            let guest_sync_us = lap(&mut mark);
 
             let before = self.agent.list_interfaces(agent::Empty::new()).await?;
             let source_interfaces = before
@@ -1604,6 +1674,7 @@ impl VirtSandbox {
                 .activate_restore_network()
                 .await
                 .context("activate restored network")?;
+            let network_us = lap(&mut mark);
 
             let pause_guest_id = self.restore_context.source_pause_guest_id().await?;
             if let Some(target_pause_id) = self.restore_context.target_pause_id().await {
@@ -1627,8 +1698,31 @@ impl VirtSandbox {
             self.start_oom_watcher();
             self.monitor.start(&self.sid, self.agent.clone());
             self.restore_context.activate().await?;
+            let pause_resume_us = lap(&mut mark);
+            // Replay the agent-side resume for workloads that were adopted
+            // synthetically while the VM was paused (deferred activation).
+            container_manager
+                .finalize_deferred_restored_containers()
+                .await
+                .context("finalize deferred restored containers")?;
+            let thaw_us = lap(&mut mark);
             self.inner.write().await.state = SandboxState::Running;
             self.save().await.context("persist active restored sandbox")?;
+            let persist_us = lap(&mut mark);
+            // Parsed by capture_boot_metrics.sh; keep the key=value format stable.
+            info!(
+                sl!(),
+                "restore activation timing: deferred={} resume_vm_us={} agent_connect_us={} guest_sync_us={} network_us={} pause_resume_us={} thaw_us={} persist_us={} total_us={}",
+                force,
+                resume_vm_us,
+                agent_connect_us,
+                guest_sync_us,
+                network_us,
+                pause_resume_us,
+                thaw_us,
+                persist_us,
+                started.elapsed().as_micros()
+            );
             Ok(())
         }
         .await;
@@ -3027,8 +3121,22 @@ impl Sandbox for VirtSandbox {
         container_manager: Arc<dyn ContainerManager>,
         target_id: &str,
     ) -> Result<bool> {
-        self.activate_restore_transaction(container_manager, target_id)
+        self.activate_restore_transaction(container_manager, target_id, false)
             .await
+    }
+
+    async fn wake_restore(&self, container_manager: Arc<dyn ContainerManager>) -> Result<()> {
+        // No-op unless this is a deferred restore still paused; the first exec
+        // (claim-time wake) resumes the VM and replays deferred adoptions.
+        if !(self.restore_context.defer_activation().await
+            && self.restore_context.is_prepared_paused().await)
+        {
+            return Ok(());
+        }
+        let sid = self.sid.clone();
+        self.activate_restore_transaction(container_manager, &sid, true)
+            .await?;
+        Ok(())
     }
 
     async fn persist_runtime_state(&self) -> Result<()> {

@@ -36,6 +36,8 @@ pub mod thirdparty;
 pub const KATA_ANNO_PREFIX: &str = "io.katacontainers.";
 /// Selects a packaged VM snapshot beneath the configured snapshot root.
 pub const KATA_ANNO_SNAPSHOT_NAME: &str = "io.katacontainers.snapshot-name";
+/// "true" keeps a restored VM paused until the first exec (claim-time wake); default eager restore.
+pub const KATA_ANNO_RESTORE_DEFER_ACTIVATION: &str = "io.katacontainers.restore-defer-activation";
 /// Prefix for Kata configuration annotations
 pub const KATA_ANNO_CFG_PREFIX: &str = "io.katacontainers.config.";
 /// Prefix for Kata container annotations
@@ -1035,6 +1037,8 @@ impl Annotation {
                 }
             } else {
                 match key.as_str() {
+                    // Consumed by the sandbox restore path, not a config override.
+                    KATA_ANNO_SNAPSHOT_NAME | KATA_ANNO_RESTORE_DEFER_ACTIVATION => {}
                     // update agent config
                     KATA_ANNO_CFG_KERNEL_MODULES => {
                         let kernel_mod: Vec<String> =

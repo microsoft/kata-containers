@@ -89,6 +89,14 @@ struct RestoreState {
     host_to_guest: HashMap<HostContainerId, GuestContainerId>,
     // Inbound guest event routing back to containerd IDs.
     guest_to_host: HashMap<GuestContainerId, HostContainerId>,
+    // Keep the restored VM paused at sandbox start and resume it only on a
+    // claim-time wake (the first exec).
+    #[serde(default)]
+    defer_activation: bool,
+    // Adopted-live containers whose agent-side resume was skipped while the VM
+    // was paused; replayed on wake.
+    #[serde(default)]
+    deferred_starts: Vec<HostContainerId>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -115,6 +123,8 @@ impl RestoreContext {
                 completed_slots: HashMap::new(),
                 host_to_guest: HashMap::new(),
                 guest_to_host: HashMap::new(),
+                defer_activation: false,
+                deferred_starts: Vec::new(),
             }),
             activation_lock: Mutex::new(()),
         }
@@ -125,6 +135,7 @@ impl RestoreContext {
         source_sandbox_id: &str,
         live_slots: Vec<RestoreLiveSlot>,
         completed_slots: Vec<RestoreCompletedSlot>,
+        defer_activation: bool,
     ) -> Result<()> {
         if source_sandbox_id.is_empty() {
             return Err(anyhow!("snapshot restore identity is incomplete"));
@@ -133,6 +144,7 @@ impl RestoreContext {
         if state.activation != RestoreActivation::Cold {
             return Err(anyhow!("restore is already initialized"));
         }
+        state.defer_activation = defer_activation;
         let mut live_by_name = HashMap::new();
         for slot in live_slots {
             if slot.cri_name.is_empty()
@@ -195,6 +207,31 @@ impl RestoreContext {
         self.state.lock().await.activation != RestoreActivation::Cold
     }
 
+    pub(crate) async fn defer_activation(&self) -> bool {
+        self.state.lock().await.defer_activation
+    }
+
+    pub(crate) async fn is_prepared_paused(&self) -> bool {
+        self.state.lock().await.activation == RestoreActivation::PreparedPaused
+    }
+
+    pub(crate) fn target_sandbox_id(&self) -> HostContainerId {
+        self.target_sandbox_id.clone()
+    }
+
+    /// Record an adopted-live container whose guest resume was skipped while the
+    /// VM stayed paused, so wake can replay it.
+    pub(crate) async fn record_deferred_start(&self, host_id: &HostContainerId) {
+        let mut state = self.state.lock().await;
+        if !state.deferred_starts.contains(host_id) {
+            state.deferred_starts.push(host_id.clone());
+        }
+    }
+
+    pub(crate) async fn take_deferred_starts(&self) -> Vec<HostContainerId> {
+        std::mem::take(&mut self.state.lock().await.deferred_starts)
+    }
+
     pub(crate) async fn classify_create(
         &self,
         target_id: &HostContainerId,
@@ -213,8 +250,14 @@ impl RestoreContext {
             return Err(anyhow!("incoming restore container identity is incomplete"));
         }
         // Pause may be adopted while CLH is still prepared-paused. Workloads
-        // must wait until guest network identity is replaced and verified.
-        if !is_pause && state.activation != RestoreActivation::Active {
+        // must wait until guest network identity is replaced and verified,
+        // unless activation is deferred to a claim-time wake: then workloads are
+        // adopted synthetically while paused and their guest resume is replayed
+        // on wake.
+        if !is_pause
+            && state.activation != RestoreActivation::Active
+            && !(state.defer_activation && state.activation == RestoreActivation::PreparedPaused)
+        {
             return Err(anyhow!("restored sandbox is not active"));
         }
         if let Some(slot) = state.completed_slots.get_mut(cri_name) {
@@ -819,6 +862,7 @@ mod tests {
                 "source",
                 vec![live_slot("POD", "source-pause", "pause")],
                 Vec::new(),
+                false,
             )
             .await
             .unwrap();
@@ -851,6 +895,7 @@ mod tests {
                     live_slot("app", "source-app", "app"),
                 ],
                 Vec::new(),
+                false,
             )
             .await
             .unwrap();
@@ -859,6 +904,41 @@ mod tests {
             .classify_create(&host("target-app"), "app", false, &identity("app"))
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn defer_allows_workload_adoption_while_paused() {
+        let context = RestoreContext::new("target");
+        context
+            .begin(
+                "source",
+                vec![
+                    live_slot("POD", "source-pause", "pause"),
+                    live_slot("app", "source-app", "app"),
+                ],
+                Vec::new(),
+                true,
+            )
+            .await
+            .unwrap();
+        context.prepared_paused().await.unwrap();
+        // Deferred activation adopts workloads synthetically while still paused.
+        assert_eq!(
+            context
+                .classify_create(&host("target-app"), "app", false, &identity("app"))
+                .await
+                .unwrap(),
+            RestoreCreateAction::AdoptLive {
+                guest_id: GuestContainerId::new("source-app"),
+                is_pause: false,
+            }
+        );
+        context.record_deferred_start(&host("target-app")).await;
+        assert_eq!(
+            context.take_deferred_starts().await,
+            vec![host("target-app")]
+        );
+        assert!(context.take_deferred_starts().await.is_empty());
     }
 
     #[tokio::test]
@@ -872,6 +952,7 @@ mod tests {
                     live_slot("app", "source-app", "app"),
                 ],
                 Vec::new(),
+                false,
             )
             .await
             .unwrap();
@@ -938,6 +1019,7 @@ mod tests {
                     exit_code: 0,
                     identity: identity("setup"),
                 }],
+                false,
             )
             .await
             .unwrap();
@@ -1010,6 +1092,7 @@ mod tests {
                     exit_code: 42,
                     identity: identity("setup"),
                 }],
+                false,
             )
             .await
             .unwrap();
@@ -1065,6 +1148,7 @@ mod tests {
                 "source",
                 vec![live_slot("POD", "source-pause", "pause")],
                 Vec::new(),
+                false,
             )
             .await
             .unwrap();
