@@ -739,21 +739,22 @@ allow_readonly_paths(p_oci, i_oci) if {
 # Input is allowed to have more readonly paths than the policy.
 allow_readonly_paths_array(p_array, i_array, masked_paths) if {
     every p_elem in p_array {
-        allow_readonly_path(p_elem, i_array, masked_paths)
+        allow_readonly_path_log(p_elem, i_array, masked_paths)
     }
 }
 
-allow_readonly_path(p_elem, i_array, masked_paths) if {
-    print("allow_readonly_path 1: p_elem =", p_elem)
+allow_readonly_path_log(p_elem, i_array, masked_paths) if {
+    print("allow_readonly_path_log: p_elem =", p_elem)
+    allow_readonly_path(p_elem, i_array, masked_paths)
+}
 
+allow_readonly_path(p_elem, i_array, masked_paths) if {
     some i_elem in i_array
     p_elem == i_elem
 
     print("allow_readonly_path 1: true")
 }
 allow_readonly_path(p_elem, i_array, masked_paths) if {
-    print("allow_readonly_path 2: p_elem =", p_elem)
-
     some i_masked in masked_paths
     p_elem == i_masked
 
