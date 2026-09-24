@@ -18,11 +18,6 @@ path = "@OPENVMMPATH@"
 kernel = "@KERNELPATH_AZURE_GPUS@"
 image = "@IMAGEPATH_AZURE_GPUS@"
 
-# OpenVMM cannot hot-plug devices, so discover kubelet-allocated VFIO devices
-# and attach them through a PCIe root port before the guest boots.
-cold_plug_vfio = "root-port"
-hot_plug_vfio = "no-port"
-
 # rootfs filesystem type:
 #   - ext4 (default)
 #   - xfs
@@ -157,6 +152,14 @@ virtio_fs_extra_args = @DEFVIRTIOFSEXTRAARGS@
 #  - always
 #    Metadata, data, and pathname lookup are cached in guest and never expire.
 virtio_fs_cache = "@DEFVIRTIOFSCACHE@"
+
+# Enable cold-plugging of VFIO devices to a PCIe port type.
+# Accepted values: "no-port" (default, disabled), "root-port".
+# When set to "root-port", devices discovered via CDI / Pod Resources
+# are cold-plugged before VM boot.
+# The current OpenVMM VM service requires legacy /dev/vfio/<group> nodes;
+# cdev-only IOMMUFD hosts are not supported.
+cold_plug_vfio = "root-port"
 
 # Reclaim guest freed memory.
 # Enabling this will result in the VM balloon device having f_reporting=on set.
@@ -430,10 +433,6 @@ enable_debug = false
 # (default: false)
 keep_abnormal = false
 
-# Kubelet Pod Resources API socket used to discover the devices allocated to
-# this pod while preparing the sandbox VM.
-pod_resource_api_sock = "/var/lib/kubelet/pod-resources/kubelet.sock"
-
 # Internetworking model
 # Determines how the VM should be connected to the
 # the container network interface
@@ -462,6 +461,16 @@ internetworking_model = "@DEFNETWORKMODEL_OPENVMM@"
 name = "@RUNTIMENAME@"
 hypervisor_name = "@HYPERVISOR_NAME_OPENVMM@"
 agent_name = "@PROJECT_TYPE@"
+
+# VFIO Mode
+# Determines how VFIO devices should be presented to the container.
+# OpenVMM supports only guest-kernel mode. The VFIO device is managed
+# by whichever driver in the VM kernel claims it, so it appears as one
+# or more device nodes or network interfaces depending on the device.
+# The vfio mode requires a guest IOMMU and is not supported by the
+# current OpenVMM VM service topology.
+#
+vfio_mode = "@DEFVFIOMODE@"
 
 # disable guest seccomp
 # Determines whether container seccomp profiles are passed to the virtual
@@ -540,6 +549,16 @@ enable_pprof = false
 #   does not yet support sandbox sizing annotations.
 # - When running single containers using a tool like ctr, container sizing information will be available.
 static_sandbox_resource_mgmt = @DEFSTATICRESOURCEMGMT_OPENVMM_AZURE@
+
+# kubelet_root_dir is the kubelet root directory used to match ConfigMap/Secret
+# volume paths for propagation. Override for distros that use a different path
+# (e.g. k0s: /var/lib/k0s/kubelet).
+kubelet_root_dir = "@DEFKUBELETROOTDIR@"
+
+# pod_resource_api_sock specifies the unix socket for the Kubelet's PodResource API endpoint.
+# When set (together with a non-"no-port" cold_plug_vfio), the runtime can cold-plug
+# devices discovered via the Pod Resources API. Path is typically under kubelet root-dir.
+pod_resource_api_sock = "@DEFPODRESOURCEAPISOCK_OPENVMM@"
 
 # If specified, sandbox_bind_mounts identifieds host paths to be mounted(ro, rw) into the sandboxes shared path.
 # This is only valid if filesystem sharing is utilized. The provided path(s) will be bindmounted into the shared fs directory.
