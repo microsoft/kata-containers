@@ -411,6 +411,28 @@ impl RuntimeHandlerManager {
             );
             return Ok(CleanupOutcome::Done);
         }
+
+        let result = Self::cleanup_sandbox(&inner).await;
+        // keep_abnormal leaves everything in place, the restore workspace included.
+        if let Ok(CleanupOutcome::Skipped) = result {
+            return result;
+        }
+
+        // A restore can own disk storage before state.json exists or loads.
+        #[cfg(feature = "virt")]
+        let workspace = virt_container::sandbox::cleanup_restore_workspace(&inner.id)
+            .context("remove restore workspace");
+        #[cfg(not(feature = "virt"))]
+        let workspace: Result<()> = Ok(());
+        match (result, workspace) {
+            (Err(error), Err(workspace_error)) => {
+                Err(error.context(format!("{workspace_error:#}")))
+            }
+            (result, workspace) => result.and_then(|outcome| workspace.map(|()| outcome)),
+        }
+    }
+
+    async fn cleanup_sandbox(inner: &RuntimeHandlerManagerInner) -> Result<CleanupOutcome> {
         let sender = inner.msg_sender.clone();
         let sandbox_state = persist::from_disk::<SandboxState>(&inner.id)
             .context("failed to load the sandbox state")?;
