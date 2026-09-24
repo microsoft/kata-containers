@@ -94,6 +94,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fs;
+use std::fs::File;
+use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -2157,6 +2159,32 @@ impl VirtSandbox {
         Ok(configs)
     }
 
+    /// Reseeds a template-restored guest's RNG, which clones share with the snapshot.
+    async fn reseed_rng(
+        agent: &dyn Agent,
+        config: &HypervisorConfig,
+        boot_from_template: bool,
+    ) -> Result<()> {
+        if !boot_from_template {
+            return Ok(());
+        }
+        if config.security_info.confidential_guest {
+            return Err(anyhow!(
+                "VM templating is not supported for confidential guests"
+            ));
+        }
+        let mut data = vec![0; 512];
+        File::open("/dev/urandom")
+            .context("open host entropy source")?
+            .read_exact(&mut data)
+            .context("read host entropy")?;
+        agent
+            .reseed_random_dev(agent::ReseedRandomDevRequest { data })
+            .await
+            .context("reseed guest RNG")?;
+        Ok(())
+    }
+
     async fn set_agent_policy(&self) -> Result<()> {
         // TODO: Exclude policy-related items from the annotations.
         let toml_config = self.resource_manager.config().await;
@@ -2989,6 +3017,12 @@ impl Sandbox for VirtSandbox {
             .start(&address)
             .await
             .context(format!("connect to address {:?}", &address))?;
+        Self::reseed_rng(
+            self.agent.as_ref(),
+            &self.hypervisor.hypervisor_config().await,
+            self.is_factory_enabled(),
+        )
+        .await?;
         self.set_agent_policy().await.context("set agent policy")?;
 
         self.resource_manager
