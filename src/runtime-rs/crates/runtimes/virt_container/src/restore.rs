@@ -8,7 +8,7 @@ use oci_spec::runtime as oci;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::sync::{Mutex, MutexGuard};
 
 pub(crate) const OCI_IDENTITY_VERSION: u32 = 1;
@@ -89,6 +89,9 @@ struct RestoreState {
     host_to_guest: HashMap<HostContainerId, GuestContainerId>,
     // Inbound guest event routing back to containerd IDs.
     guest_to_host: HashMap<GuestContainerId, HostContainerId>,
+    // Recorded here because a shim-restored resource manager has no snapshot_root.
+    #[serde(default)]
+    workspace: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -115,6 +118,7 @@ impl RestoreContext {
                 completed_slots: HashMap::new(),
                 host_to_guest: HashMap::new(),
                 guest_to_host: HashMap::new(),
+                workspace: None,
             }),
             activation_lock: Mutex::new(()),
         }
@@ -123,6 +127,7 @@ impl RestoreContext {
     pub(crate) async fn begin(
         &self,
         source_sandbox_id: &str,
+        workspace: &Path,
         live_slots: Vec<RestoreLiveSlot>,
         completed_slots: Vec<RestoreCompletedSlot>,
     ) -> Result<()> {
@@ -179,7 +184,12 @@ impl RestoreContext {
         state.source_sandbox_id = Some(source_sandbox_id.to_string());
         state.live_slots = live_by_name;
         state.completed_slots = completed_by_name;
+        state.workspace = Some(workspace.to_path_buf());
         Ok(())
+    }
+
+    pub(crate) async fn workspace(&self) -> Option<PathBuf> {
+        self.state.lock().await.workspace.clone()
     }
 
     pub(crate) async fn prepared_paused(&self) -> Result<()> {
@@ -760,6 +770,8 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    const WORKSPACE: &str = "/var/lib/kata/snapshots/.restore/target";
+
     fn identity(value: &str) -> RestoreIdentity {
         RestoreIdentity {
             oci_identity_version: OCI_IDENTITY_VERSION,
@@ -817,6 +829,7 @@ mod tests {
         context
             .begin(
                 "source",
+                Path::new(WORKSPACE),
                 vec![live_slot("POD", "source-pause", "pause")],
                 Vec::new(),
             )
@@ -846,6 +859,7 @@ mod tests {
         context
             .begin(
                 "source",
+                Path::new(WORKSPACE),
                 vec![
                     live_slot("POD", "source-pause", "pause"),
                     live_slot("app", "source-app", "app"),
@@ -867,6 +881,7 @@ mod tests {
         context
             .begin(
                 "source",
+                Path::new(WORKSPACE),
                 vec![
                     live_slot("POD", "source-pause", "pause"),
                     live_slot("app", "source-app", "app"),
@@ -929,6 +944,7 @@ mod tests {
         context
             .begin(
                 "source",
+                Path::new(WORKSPACE),
                 vec![
                     live_slot("POD", "source-pause", "pause"),
                     live_slot("app", "source-app", "app"),
@@ -1004,6 +1020,7 @@ mod tests {
         context
             .begin(
                 "source",
+                Path::new(WORKSPACE),
                 vec![live_slot("POD", "source-pause", "pause")],
                 vec![RestoreCompletedSlot {
                     cri_name: "setup".to_string(),
@@ -1063,6 +1080,7 @@ mod tests {
         context
             .begin(
                 "source",
+                Path::new(WORKSPACE),
                 vec![live_slot("POD", "source-pause", "pause")],
                 Vec::new(),
             )
@@ -1089,6 +1107,7 @@ mod tests {
             restored.resolve_host_id(&guest("source-pause")).await,
             Some(host("target"))
         );
+        assert_eq!(restored.workspace().await, Some(PathBuf::from(WORKSPACE)));
     }
 
     #[test]
