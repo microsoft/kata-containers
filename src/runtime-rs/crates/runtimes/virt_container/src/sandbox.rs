@@ -56,7 +56,8 @@ use hypervisor::{
 use hypervisor::{qemu::Qemu, HYPERVISOR_QEMU};
 use hypervisor::{
     utils::{
-        get_hvsock_path, remove_vmm_user_runtime_dir, uses_native_ccw_bus, vmm_user_runtime_dir,
+        create_dir_all_with_inherit_owner, get_hvsock_path, remove_dir_all_if_exists,
+        remove_vmm_user_runtime_dir, uses_native_ccw_bus, vmm_user_runtime_dir,
     },
     HybridVsockConfig, DEFAULT_GUEST_VSOCK_CID,
 };
@@ -93,9 +94,11 @@ use runtime_spec as spec;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
 use std::io::Read;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -109,6 +112,8 @@ pub(crate) const VIRTCONTAINER: &str = "virt_container";
 const VMM_START_TIMEOUT_SECS: i32 = 10_000;
 const SNAPSHOT_MANIFEST_FILE: &str = "kata-snapshot.json";
 const SNAPSHOT_MANIFEST_FORMAT_VERSION: u32 = 1;
+const RESTORE_WORKSPACE_DIR: &str = ".restore";
+const RESTORE_WORKSPACE_RECORD: &str = "restore-workspace";
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -300,6 +305,11 @@ fn restore_source_from_annotations(
     if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
         return Err(anyhow!(
             "snapshot-name must be a single path component: {value}"
+        ));
+    }
+    if value == RESTORE_WORKSPACE_DIR {
+        return Err(anyhow!(
+            "snapshot-name {value} is reserved for restore workspaces"
         ));
     }
     if !snapshot_root.is_absolute() {
@@ -509,6 +519,23 @@ fn prepare_restore_source(
     // Immutable snapshot state remains caller-owned. The target gets a private
     // CLH config and private writable disks so one restore cannot mutate the
     // source artifact or another clone.
+    let private_parent = private_dir
+        .parent()
+        .ok_or_else(|| anyhow!("private restore directory has no parent"))?;
+    fs::create_dir_all(private_parent).with_context(|| {
+        format!(
+            "create private restore workspace {}",
+            private_parent.display()
+        )
+    })?;
+    let parent_metadata = fs::symlink_metadata(private_parent)?;
+    if parent_metadata.file_type().is_symlink() || !parent_metadata.is_dir() {
+        return Err(anyhow!(
+            "private restore workspace is not a directory: {}",
+            private_parent.display()
+        ));
+    }
+    fs::set_permissions(private_parent, fs::Permissions::from_mode(0o700))?;
     fs::create_dir(private_dir)
         .with_context(|| format!("create private restore directory {}", private_dir.display()))?;
     fs::set_permissions(private_dir, fs::Permissions::from_mode(0o700))?;
@@ -610,6 +637,72 @@ fn prepare_restore_source(
     }
     fs::write(&private_config_path, serde_json::to_vec(&config)?)?;
     Ok(restore_source)
+}
+
+fn private_restore_dir(snapshot_root: &Path, sid: &str) -> PathBuf {
+    snapshot_root.join(RESTORE_WORKSPACE_DIR).join(sid)
+}
+
+fn sandbox_run_dir(sid: &str) -> Result<PathBuf> {
+    kata_sys_util::validate::verify_id(sid).context("verify sandbox ID")?;
+    Ok(PathBuf::from(kata_types::prefix_with_rootless_dir(
+        kata_types::config::KATA_PATH,
+    ))
+    .join(sid))
+}
+
+// Written before the workspace exists, so a shim that dies mid-restore still leaves a cleanup trail.
+fn record_restore_workspace(run_dir: &Path, workspace: &Path) -> Result<()> {
+    create_dir_all_with_inherit_owner(run_dir, 0o750)
+        .with_context(|| format!("create sandbox run directory {}", run_dir.display()))?;
+    let staging = run_dir.join(format!(".{RESTORE_WORKSPACE_RECORD}.partial"));
+    fs::write(&staging, workspace.as_os_str().as_bytes())
+        .context("write restore workspace record")?;
+    fs::rename(&staging, run_dir.join(RESTORE_WORKSPACE_RECORD))
+        .context("publish restore workspace record")
+}
+
+fn recorded_restore_workspace(run_dir: &Path, sid: &str) -> Result<Option<PathBuf>> {
+    let record = run_dir.join(RESTORE_WORKSPACE_RECORD);
+    let workspace = match fs::read(&record) {
+        Ok(bytes) => PathBuf::from(OsStr::from_bytes(&bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error).with_context(|| format!("read {}", record.display())),
+    };
+    // The record drives a recursive delete, so accept only `<absolute root>/.restore/<sid>`.
+    let valid = workspace.is_absolute()
+        && workspace
+            .components()
+            .all(|component| matches!(component, Component::RootDir | Component::Normal(_)))
+        && workspace.file_name() == Some(OsStr::new(sid))
+        && workspace.parent().and_then(Path::file_name) == Some(OsStr::new(RESTORE_WORKSPACE_DIR));
+    if !valid {
+        return Err(anyhow!(
+            "invalid restore workspace record {}",
+            workspace.display()
+        ));
+    }
+    Ok(Some(workspace))
+}
+
+fn remove_restore_workspace(run_dir: &Path, workspace: Option<&Path>) -> Result<()> {
+    if let Some(workspace) = workspace {
+        remove_dir_all_if_exists(workspace)
+            .with_context(|| format!("remove restore workspace {}", workspace.display()))?;
+    }
+    match fs::remove_file(run_dir.join(RESTORE_WORKSPACE_RECORD)) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            Err(error).context("remove restore workspace record")
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Remove the recorded restore workspace without loading sandbox state or config.
+pub fn cleanup_restore_workspace(sid: &str) -> Result<()> {
+    let run_dir = sandbox_run_dir(sid)?;
+    let workspace = recorded_restore_workspace(&run_dir, sid)?;
+    remove_restore_workspace(&run_dir, workspace.as_deref())
 }
 
 fn restored_rootfs_configs(
@@ -743,6 +836,58 @@ mod snapshot_manifest_tests {
     }
 
     #[test]
+    fn private_restore_storage_is_beneath_snapshot_root() {
+        assert_eq!(
+            private_restore_dir(Path::new("/var/lib/kata/snapshots"), "sandbox-id"),
+            Path::new("/var/lib/kata/snapshots/.restore/sandbox-id")
+        );
+    }
+
+    #[test]
+    fn restore_workspace_record_drives_cleanup() {
+        let root = tempfile::tempdir().unwrap();
+        let run_dir = root.path().join("run/sandbox-id");
+        let workspace = private_restore_dir(&root.path().join("snapshots"), "sandbox-id");
+
+        record_restore_workspace(&run_dir, &workspace).unwrap();
+        fs::create_dir_all(workspace.join("containers/source")).unwrap();
+        fs::write(workspace.join("containers/source/rwlayer.img"), b"rw").unwrap();
+        assert_eq!(
+            recorded_restore_workspace(&run_dir, "sandbox-id").unwrap(),
+            Some(workspace.clone())
+        );
+
+        remove_restore_workspace(&run_dir, Some(&workspace)).unwrap();
+        assert!(!workspace.exists());
+        assert_eq!(
+            recorded_restore_workspace(&run_dir, "sandbox-id").unwrap(),
+            None
+        );
+        remove_restore_workspace(&run_dir, None).unwrap();
+    }
+
+    #[test]
+    fn restore_workspace_record_rejects_unexpected_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let run_dir = root.path().join("run/sandbox-id");
+        fs::create_dir_all(&run_dir).unwrap();
+        for recorded in [
+            "relative/.restore/sandbox-id",
+            "/var/lib/kata/snapshots/.restore/other-id",
+            "/var/lib/kata/snapshots/sandbox-id",
+            "/var/lib/kata/snapshots/.restore/../.restore/sandbox-id",
+            "/",
+        ] {
+            fs::write(run_dir.join(RESTORE_WORKSPACE_RECORD), recorded).unwrap();
+            assert!(
+                recorded_restore_workspace(&run_dir, "sandbox-id").is_err(),
+                "accepted {}",
+                recorded
+            );
+        }
+    }
+
+    #[test]
     fn restore_source_rejects_paths_in_snapshot_name() {
         let snapshot_root = tempfile::tempdir().unwrap();
 
@@ -753,6 +898,7 @@ mod snapshot_manifest_tests {
             "../busybox-kata",
             "nested/busybox-kata",
             "/tmp/busybox-kata",
+            RESTORE_WORKSPACE_DIR,
         ] {
             assert!(restore_source_from_annotations(
                 &snapshot_annotations(snapshot_name),
@@ -1014,29 +1160,23 @@ mod snapshot_manifest_tests {
 
     #[test]
     fn prepare_restore_source_clones_writable_and_rewrites_by_id() {
-        let snapshot = tempfile::tempdir().unwrap();
-        let private_parent = tempfile::tempdir().unwrap();
-        let manifest = write_restore_fixture(snapshot.path());
-        let restore_source = prepare_restore_source(
-            snapshot.path(),
-            &private_parent.path().join("restore"),
-            &manifest,
-        )
-        .unwrap();
+        let snapshot_root = tempfile::tempdir().unwrap();
+        let snapshot = snapshot_root.path().join("source-snapshot");
+        fs::create_dir(&snapshot).unwrap();
+        let manifest = write_restore_fixture(&snapshot);
+        let private_dir = private_restore_dir(snapshot_root.path(), "target-sandbox");
+        let restore_source = prepare_restore_source(&snapshot, &private_dir, &manifest).unwrap();
 
         let config: serde_json::Value =
             serde_json::from_slice(&fs::read(restore_source.join("config.json")).unwrap()).unwrap();
         assert_eq!(
             config["disks"][0]["path"],
             snapshot
-                .path()
                 .join("containers/source/rootfs.vmdk")
                 .display()
                 .to_string()
         );
-        let private_writable = private_parent
-            .path()
-            .join("restore/containers/source/rwlayer.img");
+        let private_writable = private_dir.join("containers/source/rwlayer.img");
         assert_eq!(
             config["disks"][1]["path"],
             private_writable.display().to_string()
@@ -1308,14 +1448,6 @@ impl VirtSandbox {
         self.hypervisor.clone()
     }
 
-    fn restore_private_dir(&self) -> PathBuf {
-        PathBuf::from(kata_types::prefix_with_rootless_dir(
-            kata_types::config::KATA_PATH,
-        ))
-        .join(&self.sid)
-        .join("restore")
-    }
-
     async fn start_restore_if_requested(
         &self,
         sandbox_config: &SandboxConfig,
@@ -1375,12 +1507,14 @@ impl VirtSandbox {
                 },
             })
             .collect();
+        let private_dir =
+            private_restore_dir(Path::new(&runtime_config.runtime.snapshot_root), &self.sid);
+        let run_dir = sandbox_run_dir(&self.sid)?;
         self.restore_context
             .begin(&manifest.source_sandbox_id, live_slots, completed_slots)
             .await?;
-        let private_dir = self.restore_private_dir();
         let result: Result<()> = async {
-            fs::create_dir_all(private_dir.parent().unwrap())?;
+            record_restore_workspace(&run_dir, &private_dir)?;
             let restore_source = prepare_restore_source(&snapshot_dir, &private_dir, &manifest)?;
             self.resource_manager
                 .register_restored_rootfs(restored_rootfs_configs(
@@ -1455,7 +1589,7 @@ impl VirtSandbox {
                 )));
             }
             let _ = self.resource_manager.cleanup().await;
-            let _ = fs::remove_dir_all(&private_dir);
+            let _ = remove_restore_workspace(&run_dir, Some(&private_dir));
             return Err(error);
         }
 
@@ -1645,15 +1779,8 @@ impl VirtSandbox {
                 )));
             }
             let _ = self.resource_manager.cleanup().await;
-            let private_restore = self.restore_private_dir();
-            if private_restore.exists() {
-                fs::remove_dir_all(&private_restore).with_context(|| {
-                    format!(
-                        "remove private restore directory {} after activation error",
-                        private_restore.display()
-                    )
-                })?;
-            }
+            cleanup_restore_workspace(&self.sid)
+                .context("remove private restore storage after activation error")?;
             return Err(error);
         }
         Ok(true)
@@ -2518,6 +2645,11 @@ impl VirtSandbox {
             .file_name()
             .ok_or_else(|| anyhow!("snapshot destination has no filename"))?
             .to_string_lossy();
+        if file_name == RESTORE_WORKSPACE_DIR {
+            return Err(anyhow!(
+                "snapshot destination name {RESTORE_WORKSPACE_DIR} is reserved"
+            ));
+        }
         // Keep an incomplete transaction invisible at the requested path. The
         // sibling staging tree is renamed there only after source recovery.
         let staging = parent.join(format!(".{file_name}.partial-{}", uuid::Uuid::new_v4()));
@@ -3289,17 +3421,42 @@ impl Sandbox for VirtSandbox {
             .rootless_user
             .map(|user| user.uid);
 
-        info!(sl!(), "delete hypervisor");
-        self.hypervisor
-            .cleanup()
-            .await
-            .context("delete hypervisor")?;
+        // Hypervisor cleanup deletes the run directory that holds the workspace record.
+        let workspace = sandbox_run_dir(&self.sid).and_then(|run_dir| {
+            let workspace = recorded_restore_workspace(&run_dir, &self.sid)?;
+            Ok((run_dir, workspace))
+        });
 
-        info!(sl!(), "resource clean up");
-        self.resource_manager
-            .cleanup()
-            .await
-            .context("resource clean up")?;
+        let teardown: Result<()> = async {
+            info!(sl!(), "delete hypervisor");
+            self.hypervisor
+                .cleanup()
+                .await
+                .context("delete hypervisor")?;
+
+            info!(sl!(), "resource clean up");
+            self.resource_manager
+                .cleanup()
+                .await
+                .context("resource clean up")
+        }
+        .await;
+
+        // `cleaned` blocks retries, so remove the large restore workspace even if teardown failed.
+        let workspace = workspace
+            .and_then(|(run_dir, workspace)| {
+                remove_restore_workspace(&run_dir, workspace.as_deref())
+            })
+            .context("remove private restore storage");
+        match (teardown, workspace) {
+            (Err(error), Err(workspace_error)) => {
+                return Err(error.context(format!("{workspace_error:#}")))
+            }
+            (teardown, workspace) => {
+                teardown?;
+                workspace?;
+            }
+        }
 
         if let Some(uid) = rootless_uid {
             let path = vmm_user_runtime_dir(uid);
