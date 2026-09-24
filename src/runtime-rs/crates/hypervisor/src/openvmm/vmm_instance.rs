@@ -10,6 +10,7 @@ use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -35,6 +36,7 @@ pub(crate) struct VmmInstance {
     /// Persistent ttrpc async client for the OpenVMM `vmservice.VM` service,
     /// established once the process is launched and reused for every RPC.
     client: Option<VmClient>,
+    console_task: Option<JoinHandle<()>>,
 }
 
 impl std::fmt::Debug for VmmInstance {
@@ -55,6 +57,7 @@ impl VmmInstance {
             wait_task: None,
             exit_notify: Some(exit_notify),
             client: None,
+            console_task: None,
         }
     }
 
@@ -260,6 +263,15 @@ impl VmmInstance {
             .map_err(|e| anyhow!("openvmm remove_pcie_device RPC failed: {:?}", e))
     }
 
+    /// Log the guest virtio-console output relayed by OpenVMM.
+    pub(crate) async fn start_console_logger(&mut self, socket_path: &str) -> Result<()> {
+        let console = tokio::net::UnixStream::connect(socket_path)
+            .await
+            .with_context(|| format!("failed to connect to openvmm console {socket_path}"))?;
+        self.console_task = Some(tokio::spawn(log_console(console)));
+        Ok(())
+    }
+
     pub(crate) async fn stop(&mut self) -> Result<()> {
         let has_client = self.client.is_some();
         if has_client {
@@ -301,6 +313,9 @@ impl VmmInstance {
         if let Some(socket_path) = self.ttrpc_socket_path.take() {
             let _ = std::fs::remove_file(socket_path);
         }
+        if let Some(console_task) = self.console_task.take() {
+            console_task.abort();
+        }
         self.client = None;
         self.pid = None;
 
@@ -339,6 +354,20 @@ impl VmmInstance {
         self.client
             .as_ref()
             .context("openvmm TTRPC client not connected")
+    }
+}
+
+async fn log_console(console: tokio::net::UnixStream) {
+    let mut lines = BufReader::new(console).lines();
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => info!(sl!(), "vm console: {:?}", line),
+            Ok(None) => break,
+            Err(err) => {
+                warn!(sl!(), "openvmm: failed reading the VM console: {:?}", err);
+                break;
+            }
+        }
     }
 }
 

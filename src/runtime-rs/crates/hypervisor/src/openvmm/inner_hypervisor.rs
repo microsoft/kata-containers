@@ -19,10 +19,10 @@ use super::vmm_instance::OPENVMM_READY_TIMEOUT;
 use super::vmservice;
 use super::{
     OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE, OPENVMM_BLOCK_HOTPLUG_PORT_COUNT,
-    OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_NET_PCI_FIRST_DEVICE, OPENVMM_NET_PCI_MAX_COUNT,
-    OPENVMM_ROOTFS_PCI_DEVICE, OPENVMM_SHAREFS_PCI_DEVICE, OPENVMM_VFIO_COLDPLUG_FIRST_DEVICE,
-    OPENVMM_VFIO_COLDPLUG_FUNCTION, OPENVMM_VFIO_COLDPLUG_PORT_COUNT,
-    OPENVMM_VFIO_COLDPLUG_PORT_PREFIX, OPENVMM_VSOCK_PCI_DEVICE,
+    OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_CONSOLE_PCI_FUNCTION, OPENVMM_NET_PCI_FIRST_DEVICE,
+    OPENVMM_NET_PCI_MAX_COUNT, OPENVMM_ROOTFS_PCI_DEVICE, OPENVMM_SHAREFS_PCI_DEVICE,
+    OPENVMM_VFIO_COLDPLUG_FIRST_DEVICE, OPENVMM_VFIO_COLDPLUG_FUNCTION,
+    OPENVMM_VFIO_COLDPLUG_PORT_COUNT, OPENVMM_VFIO_COLDPLUG_PORT_PREFIX, OPENVMM_VSOCK_PCI_DEVICE,
 };
 use crate::device::driver::vfio_device::{DeviceAddress, VfioDevice, VfioDeviceModern};
 use crate::device::pci_path::{PciPath, PciSlot};
@@ -149,10 +149,6 @@ fn build_kernel_cmdline(
     params.to_string()
 }
 
-fn adapt_cmdline_for_rpc(cmdline: String) -> String {
-    cmdline.replace("console=hvc0", "console=ttyS0")
-}
-
 /// VMBus and the Hyper-V enlightenments need a synthetic interrupt controller,
 /// which MSHV always provides and KVM only provides on x86_64.
 fn host_has_synic() -> bool {
@@ -241,6 +237,35 @@ fn agent_vsock_pcie_port(socket_path: &str) -> vmservice::PciePort {
         false,
         Some(vsock_device_kind(socket_path.to_string())),
     )
+}
+
+/// Build a virtio-console-pci endpoint (guest hvc0) relayed over a Unix socket
+/// that OpenVMM listens on.
+fn console_device_kind(socket_path: String) -> vmservice::PcieDeviceKind {
+    virtio_pcie_device(vmservice::virtio_device::Kind::Console(
+        vmservice::VirtioConsole {
+            backend: MessageField::some(vmservice::SerialBackend {
+                kind: Some(vmservice::serial_backend::Kind::Relay(
+                    vmservice::SerialRelay {
+                        socket_path,
+                        connect: false,
+                        ..Default::default()
+                    },
+                )),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    ))
+}
+
+fn console_pcie_port(socket_path: &str) -> Result<vmservice::PciePort> {
+    Ok(make_pcie_port(
+        "console",
+        PciSlot::new_with_function(OPENVMM_VSOCK_PCI_DEVICE, OPENVMM_CONSOLE_PCI_FUNCTION)?,
+        false,
+        Some(console_device_kind(socket_path.to_string())),
+    ))
 }
 
 /// Build a vhost-user-fs endpoint (virtiofsd backend reached over a Unix socket).
@@ -698,7 +723,6 @@ impl OpenVmmInner {
             &self.config.boot_info.kernel_verity_params,
             &self.config.boot_info.rootfs_type,
         )?;
-        let cmdline = adapt_cmdline_for_rpc(cmdline);
 
         info!(sl!(), "openvmm: kernel={}", self.config.boot_info.kernel);
         info!(sl!(), "openvmm: image={}", self.config.boot_info.image);
@@ -894,10 +918,10 @@ impl OpenVmmInner {
         }
 
         let ttrpc_socket_path = format!("{}/openvmm.sock", self.run_dir);
-        let serial_socket_path = format!("{}/serial.sock", self.run_dir);
+        let console_socket_path = format!("{}/console.sock", self.run_dir);
         let _ = std::fs::remove_file(&vsock_socket_path);
         let _ = std::fs::remove_file(&ttrpc_socket_path);
-        let _ = std::fs::remove_file(&serial_socket_path);
+        let _ = std::fs::remove_file(&console_socket_path);
 
         // virtio-vsock-pci carries the Kata agent channel (replacing the
         // Hyper-V socket). OpenVMM binds a listener at this UDS and relays it to
@@ -905,6 +929,7 @@ impl OpenVmmInner {
         // the hybrid-vsock "hvsock://" scheme (see get_agent_socket).
         root_ports
             .push(agent_vsock_port.unwrap_or_else(|| agent_vsock_pcie_port(&vsock_socket_path)));
+        root_ports.push(console_pcie_port(&console_socket_path)?);
 
         // Pre-declare empty, hotplug-capable ports (hp0..) for block volumes
         // that are hot-added after resume. Their device numbers match the
@@ -993,15 +1018,6 @@ impl OpenVmmInner {
                 disable_vmbus: !with_synic,
                 disable_hv: !with_synic,
                 pcie: MessageField::some(pcie),
-                serial_config: MessageField::some(vmservice::SerialConfig {
-                    ports: vec![vmservice::serial_config::Config {
-                        port: 0,
-                        socket_path: serial_socket_path,
-                        connect: false,
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                }),
                 BootConfig: Some(vmservice::vmconfig::BootConfig::DirectBoot(
                     vmservice::DirectBoot {
                         kernel_path: self.config.boot_info.kernel.clone(),
@@ -1029,6 +1045,14 @@ impl OpenVmmInner {
                 )
                 .await
                 .context("failed to launch standalone OpenVMM")?;
+
+            // Attach while the VM is still paused so no boot output is lost.
+            if self.config.debug_info.enable_debug {
+                self.vmm_instance
+                    .start_console_logger(&console_socket_path)
+                    .await
+                    .context("failed to attach to the OpenVMM console")?;
+            }
 
             info!(sl!(), "openvmm: resuming VM");
             self.vmm_instance
@@ -1415,19 +1439,51 @@ mod tests {
     fn processor_config_pins_the_gicv2m_spi_pool_on_aarch64() {
         let config = processor_config(4);
         assert_eq!(config.processor_count, 4);
-        match config.arch_config {
-            Some(vmservice::processor_config::Arch_config::Aarch64(aarch64)) => {
-                assert!(cfg!(target_arch = "aarch64"));
-                let Some(vmservice::processor_aarch64config::Gic_msi_config::MsiV2m(v2m)) =
-                    aarch64.gic_msi_config
-                else {
-                    panic!("aarch64 guests must use GICv2m");
-                };
-                assert_eq!(v2m.spi_count, Some(OPENVMM_GIC_V2M_SPI_COUNT));
-            }
-            None => assert!(!cfg!(target_arch = "aarch64")),
-            other => panic!("unexpected arch config {other:?}"),
+        if !cfg!(target_arch = "aarch64") {
+            assert!(config.arch_config.is_none());
+            return;
         }
+        let Some(vmservice::processor_config::Arch_config::Aarch64(aarch64)) = config.arch_config
+        else {
+            panic!("aarch64 guests must carry an aarch64 topology override");
+        };
+        let Some(vmservice::processor_aarch64config::Gic_msi_config::MsiV2m(v2m)) =
+            aarch64.gic_msi_config
+        else {
+            panic!("aarch64 guests must use GICv2m");
+        };
+        assert_eq!(v2m.spi_count, Some(OPENVMM_GIC_V2M_SPI_COUNT));
+    }
+
+    #[test]
+    fn console_shares_the_vsock_device_at_function_one() {
+        let port = console_pcie_port("/run/kata/test/console.sock").unwrap();
+        assert_eq!(port.name, "console");
+        assert!(!port.hotplug);
+        assert_eq!(
+            port.devfn,
+            Some(
+                u32::from(OPENVMM_VSOCK_PCI_DEVICE) << 3 | u32::from(OPENVMM_CONSOLE_PCI_FUNCTION)
+            )
+        );
+        let attachment = port.attached.as_ref().unwrap();
+        let vmservice::pcie_attachment::Kind::Device(device) = attachment.kind.as_ref().unwrap()
+        else {
+            panic!("console port must contain a device");
+        };
+        let Some(vmservice::pcie_device_kind::Kind::Virtio(virtio)) = device.kind.as_ref() else {
+            panic!("console port must contain a virtio device");
+        };
+        let Some(vmservice::virtio_device::Kind::Console(console)) = virtio.kind.as_ref() else {
+            panic!("console port must contain a virtio-console");
+        };
+        let Some(vmservice::serial_backend::Kind::Relay(relay)) =
+            console.backend.as_ref().unwrap().kind.as_ref()
+        else {
+            panic!("virtio-console must use a socket relay");
+        };
+        assert_eq!(relay.socket_path, "/run/kata/test/console.sock");
+        assert!(!relay.connect);
     }
 
     #[test]

@@ -48,10 +48,12 @@ use crate::{DeviceType, Hypervisor, MemoryConfig, RestoreVmRequest, VcpuThreadId
 // complex reserves it. Cold-plug devices use fixed device numbers 1..=7; block
 // hotplug ports use device numbers 8..=31 (hp0..hp23). VFIO cold-plug ports
 // share devices 8..=23 at function 1, after the corresponding function-zero
-// block ports make those multifunction devices discoverable.
+// block ports make those multifunction devices discoverable. The virtio-console
+// port shares the vsock device at function 1 for the same reason.
 pub(crate) const OPENVMM_ROOTFS_PCI_DEVICE: u8 = 1;
 pub(crate) const OPENVMM_SHAREFS_PCI_DEVICE: u8 = 2;
 pub(crate) const OPENVMM_VSOCK_PCI_DEVICE: u8 = 3;
+pub(crate) const OPENVMM_CONSOLE_PCI_FUNCTION: u8 = 1;
 pub(crate) const OPENVMM_NET_PCI_FIRST_DEVICE: u8 = 4;
 pub(crate) const OPENVMM_NET_PCI_MAX_COUNT: u8 = 4;
 pub(crate) const OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE: u8 = 8;
