@@ -106,6 +106,7 @@ const VMM_START_TIMEOUT_SECS: i32 = 10_000;
 const SOURCE_AGENT_LISTEN_GRACE: Duration = Duration::from_secs(2);
 const SNAPSHOT_MANIFEST_FILE: &str = "kata-snapshot.json";
 const SNAPSHOT_MANIFEST_FORMAT_VERSION: u32 = 1;
+const RESTORE_WORKSPACE_DIR: &str = ".restore";
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -506,6 +507,23 @@ fn prepare_restore_source(
     // Immutable snapshot state remains caller-owned. The target gets a private
     // CLH config and private writable disks so one restore cannot mutate the
     // source artifact or another clone.
+    let private_parent = private_dir
+        .parent()
+        .ok_or_else(|| anyhow!("private restore directory has no parent"))?;
+    fs::create_dir_all(private_parent).with_context(|| {
+        format!(
+            "create private restore workspace {}",
+            private_parent.display()
+        )
+    })?;
+    let parent_metadata = fs::symlink_metadata(private_parent)?;
+    if parent_metadata.file_type().is_symlink() || !parent_metadata.is_dir() {
+        return Err(anyhow!(
+            "private restore workspace is not a directory: {}",
+            private_parent.display()
+        ));
+    }
+    fs::set_permissions(private_parent, fs::Permissions::from_mode(0o700))?;
     fs::create_dir(private_dir)
         .with_context(|| format!("create private restore directory {}", private_dir.display()))?;
     fs::set_permissions(private_dir, fs::Permissions::from_mode(0o700))?;
@@ -607,6 +625,10 @@ fn prepare_restore_source(
     }
     fs::write(&private_config_path, serde_json::to_vec(&config)?)?;
     Ok(restore_source)
+}
+
+fn private_restore_dir(snapshot_root: &Path, sid: &str) -> PathBuf {
+    snapshot_root.join(RESTORE_WORKSPACE_DIR).join(sid)
 }
 
 fn restored_rootfs_configs(
@@ -737,6 +759,14 @@ mod snapshot_manifest_tests {
         .unwrap();
 
         assert_eq!(restore_source, Some(snapshot));
+    }
+
+    #[test]
+    fn private_restore_storage_is_beneath_snapshot_root() {
+        assert_eq!(
+            private_restore_dir(Path::new("/var/lib/kata/snapshots"), "sandbox-id"),
+            Path::new("/var/lib/kata/snapshots/.restore/sandbox-id")
+        );
     }
 
     #[test]
@@ -1011,29 +1041,23 @@ mod snapshot_manifest_tests {
 
     #[test]
     fn prepare_restore_source_clones_writable_and_rewrites_by_id() {
-        let snapshot = tempfile::tempdir().unwrap();
-        let private_parent = tempfile::tempdir().unwrap();
-        let manifest = write_restore_fixture(snapshot.path());
-        let restore_source = prepare_restore_source(
-            snapshot.path(),
-            &private_parent.path().join("restore"),
-            &manifest,
-        )
-        .unwrap();
+        let snapshot_root = tempfile::tempdir().unwrap();
+        let snapshot = snapshot_root.path().join("source-snapshot");
+        fs::create_dir(&snapshot).unwrap();
+        let manifest = write_restore_fixture(&snapshot);
+        let private_dir = private_restore_dir(snapshot_root.path(), "target-sandbox");
+        let restore_source = prepare_restore_source(&snapshot, &private_dir, &manifest).unwrap();
 
         let config: serde_json::Value =
             serde_json::from_slice(&fs::read(restore_source.join("config.json")).unwrap()).unwrap();
         assert_eq!(
             config["disks"][0]["path"],
             snapshot
-                .path()
                 .join("containers/source/rootfs.vmdk")
                 .display()
                 .to_string()
         );
-        let private_writable = private_parent
-            .path()
-            .join("restore/containers/source/rwlayer.img");
+        let private_writable = private_dir.join("containers/source/rwlayer.img");
         assert_eq!(
             config["disks"][1]["path"],
             private_writable.display().to_string()
@@ -1305,12 +1329,20 @@ impl VirtSandbox {
         self.hypervisor.clone()
     }
 
-    fn restore_private_dir(&self) -> PathBuf {
-        PathBuf::from(kata_types::prefix_with_rootless_dir(
-            kata_types::config::KATA_PATH,
-        ))
-        .join(&self.sid)
-        .join("restore")
+    async fn restore_private_dir(&self) -> PathBuf {
+        let runtime_config = self.resource_manager.config().await;
+        private_restore_dir(Path::new(&runtime_config.runtime.snapshot_root), &self.sid)
+    }
+
+    async fn remove_restore_private_dir(&self) -> Result<()> {
+        let private_dir = self.restore_private_dir().await;
+        match fs::remove_dir_all(&private_dir) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error).with_context(|| {
+                format!("remove private restore directory {}", private_dir.display())
+            }),
+        }
     }
 
     async fn start_restore_if_requested(
@@ -1375,9 +1407,9 @@ impl VirtSandbox {
         self.restore_context
             .begin(&manifest.source_sandbox_id, live_slots, completed_slots)
             .await?;
-        let private_dir = self.restore_private_dir();
+        let private_dir =
+            private_restore_dir(Path::new(&runtime_config.runtime.snapshot_root), &self.sid);
         let result: Result<()> = async {
-            fs::create_dir_all(private_dir.parent().unwrap())?;
             let restore_source = prepare_restore_source(&snapshot_dir, &private_dir, &manifest)?;
             self.resource_manager
                 .register_restored_rootfs(restored_rootfs_configs(
@@ -1642,15 +1674,9 @@ impl VirtSandbox {
                 )));
             }
             let _ = self.resource_manager.cleanup().await;
-            let private_restore = self.restore_private_dir();
-            if private_restore.exists() {
-                fs::remove_dir_all(&private_restore).with_context(|| {
-                    format!(
-                        "remove private restore directory {} after activation error",
-                        private_restore.display()
-                    )
-                })?;
-            }
+            self.remove_restore_private_dir()
+                .await
+                .context("remove private restore storage after activation error")?;
             return Err(error);
         }
         Ok(true)
@@ -3224,6 +3250,12 @@ impl Sandbox for VirtSandbox {
             .cleanup()
             .await
             .context("resource clean up")?;
+
+        if self.restore_context.is_restore().await {
+            self.remove_restore_private_dir()
+                .await
+                .context("remove private restore storage")?;
+        }
 
         if let Some(uid) = rootless_uid {
             let path = vmm_user_runtime_dir(uid);
