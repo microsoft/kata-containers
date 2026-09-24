@@ -10,6 +10,7 @@ use kata_types::mount::{
 };
 
 pub mod rawblock_volume;
+pub mod smb_volume;
 pub mod spdk_volume;
 pub mod vfio_volume;
 
