@@ -84,7 +84,8 @@
       "x86_64": ["shim-v2-rust", "cloud-hypervisor", "virtiofsd", "kernel", "kernel-debug", "rootfs-image-mariner"]
     },
     "openvmm-azure-runtime-rs": {
-      "x86_64": ["shim-v2-rust", "openvmm", "virtiofsd", "kernel", "kernel-debug", "rootfs-image-mariner"]
+      "x86_64":  ["shim-v2-rust", "openvmm", "virtiofsd", "kernel", "kernel-debug", "rootfs-image-mariner"],
+      "aarch64": ["shim-v2-rust", "openvmm", "virtiofsd", "kernel", "kernel-debug", "rootfs-image-mariner"]
     },
     "clh-azure-gpus": {
       "x86_64": ["shim-v2-go", "cloud-hypervisor", "virtiofsd", "kernel-azure-gpus", "rootfs-image-azure-gpus"]

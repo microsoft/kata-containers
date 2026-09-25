@@ -208,6 +208,7 @@ jobs:
           - rootfs-image-confidential
           - rootfs-image-coco-extension
           - rootfs-image-devkit-extension
+          - rootfs-image-mariner
           - rootfs-image-nvidia-gpu
           - rootfs-image-nvidia
           - rootfs-image-nvidia-gpu-extension
