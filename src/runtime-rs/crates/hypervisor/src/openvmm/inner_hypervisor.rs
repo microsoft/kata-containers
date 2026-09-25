@@ -189,12 +189,16 @@ fn virtio_pcie_device(kind: vmservice::virtio_device::Kind) -> vmservice::PcieDe
 }
 
 /// Build a virtio-blk-pci endpoint backed by a host file or block device node.
+/// Host block devices bypass the host page cache; regular files use it.
 pub(super) fn blk_device_kind(path: String, read_only: bool) -> vmservice::PcieDeviceKind {
+    let direct = fs::metadata(&path)
+        .map(|metadata| metadata.file_type().is_block_device())
+        .unwrap_or(false);
     virtio_pcie_device(vmservice::virtio_device::Kind::Blk(vmservice::VirtioBlk {
         backend: MessageField::some(vmservice::DiskBackend {
             kind: Some(vmservice::disk_backend::Kind::File(vmservice::FileDisk {
                 path,
-                direct: false,
+                direct,
                 ..Default::default()
             })),
             ..Default::default()
@@ -1426,6 +1430,23 @@ mod tests {
             .to_string();
         assert!(error.contains("requires legacy group node"));
         assert!(error.contains("/dev/vfio/devices/vfio7"));
+    }
+
+    #[test]
+    fn regular_file_disks_keep_the_host_page_cache() {
+        let image = tempfile::NamedTempFile::new().unwrap();
+        let kind = blk_device_kind(image.path().to_string_lossy().into_owned(), true);
+        let Some(vmservice::pcie_device_kind::Kind::Virtio(virtio)) = kind.kind else {
+            panic!("expected a virtio device");
+        };
+        let Some(vmservice::virtio_device::Kind::Blk(blk)) = virtio.kind else {
+            panic!("expected a virtio-blk device");
+        };
+        assert!(blk.read_only);
+        let Some(vmservice::disk_backend::Kind::File(file)) = blk.backend.unwrap().kind else {
+            panic!("expected a file disk backend");
+        };
+        assert!(!file.direct);
     }
 
     #[test]
