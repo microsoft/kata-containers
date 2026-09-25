@@ -21,8 +21,10 @@ use super::{
     OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE, OPENVMM_BLOCK_HOTPLUG_PORT_COUNT,
     OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_CONSOLE_PCI_FUNCTION, OPENVMM_NET_PCI_FIRST_DEVICE,
     OPENVMM_NET_PCI_MAX_COUNT, OPENVMM_ROOTFS_PCI_DEVICE, OPENVMM_SHAREFS_PCI_DEVICE,
-    OPENVMM_VFIO_COLDPLUG_FIRST_DEVICE, OPENVMM_VFIO_COLDPLUG_FUNCTION,
-    OPENVMM_VFIO_COLDPLUG_PORT_COUNT, OPENVMM_VFIO_COLDPLUG_PORT_PREFIX, OPENVMM_VSOCK_PCI_DEVICE,
+    OPENVMM_VFIO_COLDPLUG_DEVICE_COUNT, OPENVMM_VFIO_COLDPLUG_FIRST_DEVICE,
+    OPENVMM_VFIO_COLDPLUG_FUNCTION, OPENVMM_VFIO_COLDPLUG_PORT_COUNT,
+    OPENVMM_VFIO_COLDPLUG_PORT_COUNT_WITH_COHERENT_GPU, OPENVMM_VFIO_COLDPLUG_PORT_PREFIX,
+    OPENVMM_VSOCK_PCI_DEVICE,
 };
 use crate::device::driver::vfio_device::{DeviceAddress, VfioDevice, VfioDeviceModern};
 use crate::device::pci_path::{PciPath, PciSlot};
@@ -31,10 +33,14 @@ use crate::utils::{get_jailer_root, get_sandbox_path};
 use crate::{DeviceType, MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
 
 const OPENVMM_STANDALONE_VIRTIO_FS: &str = "virtio-fs";
-const OPENVMM_PCIE_LOW_MMIO_BASE: u64 = 0xc000_0000;
-const OPENVMM_PCIE_LOW_MMIO_END: u64 = 0xd400_0000;
-const OPENVMM_PCIE_HIGH_MMIO_BASE: u64 = 0x0020_3d30_0000;
-const OPENVMM_PCIE_HIGH_MMIO_END: u64 = 0x200f_3d30_0000;
+// Size-only windows let OpenVMM route them around the arch-specific chipset
+// ranges; the low one covers the MMIO32 BARs and bridge windows of 8 GPUs and
+// 6 NVSwitches, the high one their 64-bit BARs.
+const OPENVMM_RC0_LOW_MMIO_SIZE: u64 = 640 << 20;
+const OPENVMM_RC0_HIGH_MMIO_SIZE: u64 = 4 << 40;
+// Every ACS control but egress control; without ACS on the upstream port the
+// NVIDIA driver disables peer-to-peer DMA (and with it NVLink).
+const OPENVMM_PCIE_PORT_ACS: u32 = 0x5f;
 const OPENVMM_LEGACY_VFIO_DIR: &str = "/dev/vfio";
 const OPENVMM_COHERENT_BAR_MIN_SIZE: u64 = 1 << 30;
 const OPENVMM_GPU_RC_FIRST_BUS: u8 = 128;
@@ -127,6 +133,7 @@ struct PlannedVfioDevice {
 struct VfioPciePlan {
     assignments: Vec<VfioPcieAssignment>,
     devices: Vec<PlannedVfioDevice>,
+    rc0_port_count: u8,
 }
 
 fn build_kernel_cmdline(
@@ -336,8 +343,18 @@ fn make_pcie_port(
         hotplug,
         attached,
         devfn: Some(u32::from(slot.devfn())),
+        acs_capabilities_supported: Some(OPENVMM_PCIE_PORT_ACS),
         ..Default::default()
     }
+}
+
+/// The guest slot of the `index`th rc0 VFIO cold-plug port: functions 1 and
+/// up of the block hotplug devices, whose function 0 is always present.
+fn vfio_coldplug_slot(index: u8) -> Result<PciSlot> {
+    PciSlot::new_with_function(
+        OPENVMM_VFIO_COLDPLUG_FIRST_DEVICE + index % OPENVMM_VFIO_COLDPLUG_DEVICE_COUNT,
+        OPENVMM_VFIO_COLDPLUG_FUNCTION + index / OPENVMM_VFIO_COLDPLUG_DEVICE_COUNT,
+    )
 }
 
 fn validate_legacy_vfio_backend(device: &VfioDevice, vfio_dir: &Path) -> Result<()> {
@@ -463,11 +480,24 @@ where
 
     all_bdfs.sort();
     all_bdfs.dedup();
+    let all_bdfs = all_bdfs
+        .into_iter()
+        .map(|host_bdf| {
+            let bar = coherent_bar(&host_bdf)?;
+            Ok((host_bdf, bar))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    // Coherent GPUs get their own root complexes, so rc0 only needs a few
+    // ports for NVSwitches and NICs; empty ports still cost MMIO32 and SPIs.
+    let rc0_port_count = if all_bdfs.iter().any(|(_, bar)| bar.is_some()) {
+        OPENVMM_VFIO_COLDPLUG_PORT_COUNT_WITH_COHERENT_GPU
+    } else {
+        OPENVMM_VFIO_COLDPLUG_PORT_COUNT
+    };
     let mut assignments = Vec::with_capacity(all_bdfs.len());
     let mut rc0_index = 0u8;
     let mut gpu_index = 0u8;
-    for host_bdf in all_bdfs {
-        let coherent_bar = coherent_bar(&host_bdf)?;
+    for (host_bdf, coherent_bar) in all_bdfs {
         let (port_name, slot, pci_path, location) = if let Some(coherent_bar) = coherent_bar {
             let max_gpu_rcs = (u16::from(u8::MAX) + 1 - u16::from(OPENVMM_GPU_RC_FIRST_BUS))
                 / u16::from(OPENVMM_GPU_RC_BUS_SPAN);
@@ -494,18 +524,15 @@ where
                 },
             )
         } else {
-            if rc0_index >= OPENVMM_VFIO_COLDPLUG_PORT_COUNT {
+            if rc0_index >= rc0_port_count {
                 return Err(anyhow!(
                     "openvmm: too many ordinary VFIO devices (limit {})",
-                    OPENVMM_VFIO_COLDPLUG_PORT_COUNT
+                    rc0_port_count
                 ));
             }
             let index = rc0_index;
             rc0_index += 1;
-            let slot = PciSlot::new_with_function(
-                OPENVMM_VFIO_COLDPLUG_FIRST_DEVICE + index,
-                OPENVMM_VFIO_COLDPLUG_FUNCTION,
-            )?;
+            let slot = vfio_coldplug_slot(index)?;
             let pci_path = PciPath::new(vec![slot, PciSlot::new(0)])
                 .context("openvmm: failed to build VFIO guest PCI path")?;
             (
@@ -557,6 +584,7 @@ where
     Ok(VfioPciePlan {
         assignments,
         devices,
+        rc0_port_count,
     })
 }
 
@@ -566,10 +594,8 @@ fn make_pcie_root_complex(root_ports: Vec<vmservice::PciePort>) -> vmservice::Pc
         segment: 0,
         start_bus: 0,
         end_bus: 127,
-        low_mmio: OPENVMM_PCIE_LOW_MMIO_END - OPENVMM_PCIE_LOW_MMIO_BASE,
-        high_mmio: OPENVMM_PCIE_HIGH_MMIO_END - OPENVMM_PCIE_HIGH_MMIO_BASE,
-        low_mmio_base: Some(OPENVMM_PCIE_LOW_MMIO_BASE),
-        high_mmio_base: Some(OPENVMM_PCIE_HIGH_MMIO_BASE),
+        low_mmio: OPENVMM_RC0_LOW_MMIO_SIZE,
+        high_mmio: OPENVMM_RC0_HIGH_MMIO_SIZE,
         preserve_bars: false,
         root_ports,
         ..Default::default()
@@ -950,11 +976,8 @@ impl OpenVmmInner {
             ));
         }
 
-        for index in 0..OPENVMM_VFIO_COLDPLUG_PORT_COUNT {
-            let slot = PciSlot::new_with_function(
-                OPENVMM_VFIO_COLDPLUG_FIRST_DEVICE + index,
-                OPENVMM_VFIO_COLDPLUG_FUNCTION,
-            )?;
+        for index in 0..vfio_plan.rc0_port_count {
+            let slot = vfio_coldplug_slot(index)?;
             let device_kind = vfio_plan
                 .assignments
                 .iter()
@@ -1318,28 +1341,33 @@ mod tests {
 
     #[test]
     fn vfio_assignments_enforce_capacity_and_primary_membership() {
-        let sixteen = (0..OPENVMM_VFIO_COLDPLUG_PORT_COUNT)
+        let full = (0..OPENVMM_VFIO_COLDPLUG_PORT_COUNT)
             .map(|index| format!("0000:{index:02x}:00.0"))
             .collect::<Vec<_>>();
-        let sixteen_device = PendingVfioDevice::new(
+        let full_device = PendingVfioDevice::new(
             Arc::new(Mutex::new(VfioDeviceModern::default())),
             "/dev/vfio/16".to_string(),
-            sixteen[0].clone(),
-            sixteen.clone(),
+            full[0].clone(),
+            full.clone(),
         )
         .unwrap();
-        assert!(plan_vfio_devices(vec![sixteen_device]).is_ok());
+        let plan = plan_vfio_devices(vec![full_device]).unwrap();
+        assert_eq!(plan.rc0_port_count, OPENVMM_VFIO_COLDPLUG_PORT_COUNT);
+        assert_eq!(
+            plan.assignments.last().unwrap().pci_path.to_string(),
+            "17.2/00"
+        );
 
-        let mut seventeen = sixteen;
-        seventeen.push("0000:10:00.0".to_string());
-        let seventeen_device = PendingVfioDevice::new(
+        let mut overfull = full;
+        overfull.push("0000:ff:00.0".to_string());
+        let overfull_device = PendingVfioDevice::new(
             Arc::new(Mutex::new(VfioDeviceModern::default())),
             "/dev/vfio/17".to_string(),
-            seventeen[0].clone(),
-            seventeen,
+            overfull[0].clone(),
+            overfull,
         )
         .unwrap();
-        assert!(plan_vfio_devices(vec![seventeen_device]).is_err());
+        assert!(plan_vfio_devices(vec![overfull_device]).is_err());
         assert!(pending_vfio_device("0000:02:00.0", &["0000:01:00.0"]).is_err());
     }
 
@@ -1370,19 +1398,22 @@ mod tests {
 
     #[test]
     fn duplicate_handles_do_not_exhaust_vfio_capacity() {
-        let sixteen = (0..OPENVMM_VFIO_COLDPLUG_PORT_COUNT)
+        let full = (0..OPENVMM_VFIO_COLDPLUG_PORT_COUNT)
             .map(|index| format!("0000:{index:02x}:00.0"))
             .collect::<Vec<_>>();
         let device = PendingVfioDevice::new(
             Arc::new(Mutex::new(VfioDeviceModern::default())),
             "/dev/vfio/16".to_string(),
-            sixteen[0].clone(),
-            sixteen,
+            full[0].clone(),
+            full,
         )
         .unwrap();
         let plan = plan_vfio_devices(vec![device.clone(), device]).unwrap();
 
-        assert_eq!(plan.assignments.len(), 16);
+        assert_eq!(
+            plan.assignments.len(),
+            usize::from(OPENVMM_VFIO_COLDPLUG_PORT_COUNT)
+        );
         assert_eq!(plan.devices.len(), 2);
         assert_eq!(
             plan.devices[0].primary_pci_path,
@@ -1501,15 +1532,41 @@ mod tests {
     }
 
     #[test]
-    fn pcie_root_complex_uses_gpu_sized_fixed_mmio_windows() {
+    fn pcie_root_complex_uses_size_only_mmio_windows() {
         let root = make_pcie_root_complex(Vec::new());
-        assert_eq!(root.low_mmio_base, Some(OPENVMM_PCIE_LOW_MMIO_BASE));
-        assert_eq!(root.low_mmio, 320 * 1024 * 1024);
-        assert_eq!(root.high_mmio_base, Some(OPENVMM_PCIE_HIGH_MMIO_BASE));
-        assert_eq!(
-            root.high_mmio,
-            OPENVMM_PCIE_HIGH_MMIO_END - OPENVMM_PCIE_HIGH_MMIO_BASE
-        );
+        assert_eq!(root.low_mmio_base, None);
+        assert_eq!(root.low_mmio, 640 * 1024 * 1024);
+        assert_eq!(root.high_mmio_base, None);
+        assert_eq!(root.high_mmio, 4 << 40);
         assert!(!root.preserve_bars);
+    }
+
+    #[test]
+    fn root_ports_advertise_acs() {
+        let port = make_pcie_port("hp0", PciSlot::new(8), true, None);
+        assert_eq!(port.acs_capabilities_supported, Some(0x5f));
+    }
+
+    #[test]
+    fn coherent_gpus_shrink_the_rc0_vfio_pool() {
+        let plan = plan_vfio_devices_with(
+            vec![pending_vfio_device("0000:02:00.0", &["0000:02:00.0"]).unwrap()],
+            |_| {
+                Ok(Some(CoherentBar {
+                    index: 2,
+                    hpa: 0x4400_0000_0000,
+                    size: 0x2e_41f0_0000,
+                }))
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            plan.rc0_port_count,
+            OPENVMM_VFIO_COLDPLUG_PORT_COUNT_WITH_COHERENT_GPU
+        );
+        assert_eq!(
+            plan_vfio_devices(Vec::new()).unwrap().rc0_port_count,
+            OPENVMM_VFIO_COLDPLUG_PORT_COUNT
+        );
     }
 }
