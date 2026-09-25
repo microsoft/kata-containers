@@ -906,6 +906,7 @@ shims:
     enabled: ~
     supportedArches:
       - amd64
+      - arm64
     allowedHypervisorAnnotations: []
     containerd:
       snapshotter: ""
