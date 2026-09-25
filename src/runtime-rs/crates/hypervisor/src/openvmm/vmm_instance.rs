@@ -25,6 +25,9 @@ use protobuf::MessageField;
 pub(super) const OPENVMM_READY_TIMEOUT: Duration = Duration::from_secs(20);
 const OPENVMM_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const OPENVMM_RPC_TIMEOUT: Duration = Duration::from_secs(30);
+// CreateVM pins all guest RAM for VFIO DMA and resets every assigned device,
+// which takes minutes for multi-GPU VMs with >100 GiB of memory.
+const OPENVMM_CREATE_VM_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Wrapper around an external OpenVMM process, providing VM lifecycle control.
 pub(crate) struct VmmInstance {
@@ -360,7 +363,10 @@ impl VmmInstance {
 
     async fn create_vm(client: &VmClient, request: vmservice::CreateVMRequest) -> Result<()> {
         client
-            .create_vm(rpc_ctx(), &request)
+            .create_vm(
+                ttrpc::context::with_timeout(OPENVMM_CREATE_VM_TIMEOUT.as_nanos() as i64),
+                &request,
+            )
             .await
             .map(|_| ())
             .map_err(|e| anyhow!("openvmm create_vm RPC failed: {:?}", e))
