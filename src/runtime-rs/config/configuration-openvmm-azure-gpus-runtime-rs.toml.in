@@ -157,8 +157,8 @@ virtio_fs_cache = "@DEFVIRTIOFSCACHE@"
 # Accepted values: "no-port" (default, disabled), "root-port".
 # When set to "root-port", devices discovered via CDI / Pod Resources
 # are cold-plugged before VM boot.
-# The current OpenVMM VM service requires legacy /dev/vfio/<group> nodes;
-# cdev-only IOMMUFD hosts are not supported.
+# Coherent GPUs (nvgrace_gpu_vfio_pci) are assigned through their VFIO cdev
+# and iommufd; other devices need their legacy /dev/vfio/<group> node.
 cold_plug_vfio = "root-port"
 
 # Reclaim guest freed memory.

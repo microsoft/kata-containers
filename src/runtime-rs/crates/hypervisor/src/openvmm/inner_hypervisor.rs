@@ -26,7 +26,7 @@ use super::{
     OPENVMM_VFIO_COLDPLUG_PORT_COUNT_WITH_COHERENT_GPU, OPENVMM_VFIO_COLDPLUG_PORT_PREFIX,
     OPENVMM_VSOCK_PCI_DEVICE,
 };
-use crate::device::driver::vfio_device::{DeviceAddress, VfioDevice, VfioDeviceModern};
+use crate::device::driver::vfio_device::{DeviceAddress, VfioDeviceModern};
 use crate::device::pci_path::{PciPath, PciSlot};
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
@@ -41,12 +41,17 @@ const OPENVMM_RC0_HIGH_MMIO_SIZE: u64 = 4 << 40;
 // Every ACS control but egress control; without ACS on the upstream port the
 // NVIDIA driver disables peer-to-peer DMA (and with it NVLink).
 const OPENVMM_PCIE_PORT_ACS: u32 = 0x5f;
-const OPENVMM_LEGACY_VFIO_DIR: &str = "/dev/vfio";
 const OPENVMM_COHERENT_BAR_MIN_SIZE: u64 = 1 << 30;
 const OPENVMM_GPU_RC_FIRST_BUS: u8 = 128;
 const OPENVMM_GPU_RC_BUS_SPAN: u8 = 16;
 const OPENVMM_GPU_HIGH_MMIO_SIZE: u64 = 2 << 40;
 const OPENVMM_GPU_LOW_MMIO_SIZE: u64 = 64 << 20;
+// Memoryless NUMA nodes per coherent GPU, bound to it through SRAT Generic
+// Initiator affinity; the NVIDIA driver onlines its coherent memory into them.
+// Three per GPU keeps four GPUs within the guest MAX_NUMNODES of 16.
+const OPENVMM_GPU_GI_NODES: u32 = 3;
+// All coherent GPUs share one iommufd context, and so one DMA address space.
+const OPENVMM_GPU_IOMMUFD_ID: &str = "iommu";
 // Under GICv2m every PCIe MSI consumes an SPI; the platform default is too small
 // for the hotplug ports plus the MSI-X vectors of several GB200 GPUs.
 const OPENVMM_GIC_V2M_SPI_COUNT: u32 = 512;
@@ -298,23 +303,18 @@ fn vhost_user_fs_device_kind(socket_path: String, tag: String) -> vmservice::Pci
     ))
 }
 
+/// Build a VFIO endpoint. Devices behind an SMMU are assigned through their
+/// VFIO cdev bound to the shared iommufd context; the others use the legacy
+/// group/container path.
 fn vfio_device_kind(
     host_pci_address: String,
-    coherent_bar: Option<&CoherentBar>,
+    iommufd_id: Option<&str>,
 ) -> vmservice::PcieDeviceKind {
     vmservice::PcieDeviceKind {
         kind: Some(vmservice::pcie_device_kind::Kind::Vfio(
             vmservice::VfioDevice {
                 host_pci_address,
-                bar_addresses: coherent_bar
-                    .map(|bar| {
-                        vec![vmservice::VfioBarAddress {
-                            bar_index: bar.index,
-                            source: Some(vmservice::vfio_bar_address::Source::Fixed(bar.hpa)),
-                            ..Default::default()
-                        }]
-                    })
-                    .unwrap_or_default(),
+                iommufd_id: iommufd_id.map(str::to_string),
                 ..Default::default()
             },
         )),
@@ -355,40 +355,6 @@ fn vfio_coldplug_slot(index: u8) -> Result<PciSlot> {
         OPENVMM_VFIO_COLDPLUG_FIRST_DEVICE + index % OPENVMM_VFIO_COLDPLUG_DEVICE_COUNT,
         OPENVMM_VFIO_COLDPLUG_FUNCTION + index / OPENVMM_VFIO_COLDPLUG_DEVICE_COUNT,
     )
-}
-
-fn validate_legacy_vfio_backend(device: &VfioDevice, vfio_dir: &Path) -> Result<()> {
-    let group_id = device
-        .iommu_group_id
-        .context("openvmm: VFIO device has no IOMMU group ID")?;
-    let group = device
-        .iommu_group
-        .as_ref()
-        .context("openvmm: VFIO device has no legacy group metadata")?;
-    let expected_devnode = vfio_dir.join(group_id.to_string());
-
-    if group.devnode != expected_devnode {
-        return Err(anyhow!(
-            "openvmm TTRPC VFIO requires legacy group node {}; device was discovered via {}",
-            expected_devnode.display(),
-            group.devnode.display()
-        ));
-    }
-
-    let metadata = fs::metadata(&expected_devnode).with_context(|| {
-        format!(
-            "openvmm TTRPC VFIO requires legacy group node {}",
-            expected_devnode.display()
-        )
-    })?;
-    if !metadata.file_type().is_char_device() {
-        return Err(anyhow!(
-            "openvmm TTRPC VFIO legacy group node {} is not a character device",
-            expected_devnode.display()
-        ));
-    }
-
-    Ok(())
 }
 
 fn is_nvgrace_gpu(host_bdf: &str) -> bool {
@@ -519,7 +485,7 @@ where
                 VfioPcieLocation::Dedicated {
                     index,
                     start_bus,
-                    node: u32::from(index) + 1,
+                    node: 1 + u32::from(index) * OPENVMM_GPU_GI_NODES,
                     coherent_bar,
                 },
             )
@@ -637,7 +603,20 @@ fn make_coherent_gpu_root_complex(
     let end_bus = start_bus
         .checked_add(OPENVMM_GPU_RC_BUS_SPAN - 1)
         .context("coherent GPU root-complex bus range overflow")?;
+    let mut port = make_pcie_port(
+        &assignment.port_name,
+        assignment.slot,
+        false,
+        Some(vfio_device_kind(
+            assignment.host_bdf.clone(),
+            Some(OPENVMM_GPU_IOMMUFD_ID),
+        )),
+    );
+    // CUDA coherent initialization needs multi-PASID SVA through the SMMU.
+    port.pasid = true;
 
+    // preserve_bars with high MMIO pinned at the coherent BAR HPA maps that
+    // BAR at GPA == HPA; the root complex node is its first GI node (_PXM).
     Ok(vmservice::PcieRootComplex {
         name: format!("gpurc{index}"),
         segment: 0,
@@ -648,20 +627,21 @@ fn make_coherent_gpu_root_complex(
         high_mmio_base: Some(high_mmio_base),
         preserve_bars: true,
         node: Some(*node),
-        root_ports: vec![make_pcie_port(
-            &assignment.port_name,
-            assignment.slot,
-            false,
-            Some(vfio_device_kind(
-                assignment.host_bdf.clone(),
-                Some(coherent_bar),
+        root_ports: vec![port],
+        iommu: MessageField::some(vmservice::PcieIommuConfig {
+            kind: Some(vmservice::pcie_iommu_config::Kind::Smmu(
+                vmservice::SmmuConfig {
+                    accel: true,
+                    ..Default::default()
+                },
             )),
-        )],
+            ..Default::default()
+        }),
         ..Default::default()
     })
 }
 
-fn make_numa_config(memory_mb: u64, coherent_gpu_count: usize) -> vmservice::NumaConfig {
+fn make_numa_config(memory_mb: u64, gi_node_count: u32) -> vmservice::NumaConfig {
     let mut nodes = vec![vmservice::NumaNode {
         memory: MessageField::some(vmservice::NodeMemoryConfig {
             memory_mb,
@@ -671,7 +651,7 @@ fn make_numa_config(memory_mb: u64, coherent_gpu_count: usize) -> vmservice::Num
         vps: MessageField::none(),
         ..Default::default()
     }];
-    nodes.extend((0..coherent_gpu_count).map(|_| vmservice::NumaNode {
+    nodes.extend((0..gi_node_count).map(|_| vmservice::NumaNode {
         memory: MessageField::none(),
         vps: MessageField::some(vmservice::VpAssignment::default()),
         ..Default::default()
@@ -682,30 +662,34 @@ fn make_numa_config(memory_mb: u64, coherent_gpu_count: usize) -> vmservice::Num
     }
 }
 
+/// Returns the topology and the number of Generic Initiator NUMA nodes it
+/// references.
 fn make_pcie_topology(
     root_ports: Vec<vmservice::PciePort>,
     assignments: &[VfioPcieAssignment],
-) -> Result<(vmservice::PcieTopologyConfig, usize)> {
+) -> Result<(vmservice::PcieTopologyConfig, u32)> {
     let mut root_complexes = vec![make_pcie_root_complex(root_ports)];
     let mut generic_initiators = Vec::new();
     for assignment in assignments {
         if let VfioPcieLocation::Dedicated { node, .. } = assignment.location {
             root_complexes.push(make_coherent_gpu_root_complex(assignment)?);
-            generic_initiators.push(vmservice::PcieGenericInitiator {
-                port_name: assignment.port_name.clone(),
-                node,
-                ..Default::default()
-            });
+            generic_initiators.extend((node..node + OPENVMM_GPU_GI_NODES).map(|node| {
+                vmservice::PcieGenericInitiator {
+                    port_name: assignment.port_name.clone(),
+                    node,
+                    ..Default::default()
+                }
+            }));
         }
     }
-    let coherent_gpu_count = generic_initiators.len();
+    let gi_node_count = generic_initiators.len() as u32;
     Ok((
         vmservice::PcieTopologyConfig {
             root_complexes,
             generic_initiators,
             ..Default::default()
         },
-        coherent_gpu_count,
+        gi_node_count,
     ))
 }
 
@@ -890,10 +874,6 @@ impl OpenVmmInner {
                 }
                 DeviceType::VfioModern(vfio_handle) => {
                     let vfio_device = vfio_handle.lock().await;
-                    validate_legacy_vfio_backend(
-                        &vfio_device.device,
-                        Path::new(OPENVMM_LEGACY_VFIO_DIR),
-                    )?;
                     let primary_bdf = match &vfio_device.device.primary.addr {
                         DeviceAddress::Pci(bdf) => bdf.to_string(),
                         other => {
@@ -1015,14 +995,20 @@ impl OpenVmmInner {
                 );
             }
         }
-        let (pcie, coherent_gpu_count) = make_pcie_topology(root_ports, &vfio_plan.assignments)?;
+        let (pcie, gi_node_count) = make_pcie_topology(root_ports, &vfio_plan.assignments)?;
 
         // memory_config always enables transparent hugepages; numa_config can
         // opt out, so describe even a single-node guest through it.
-        let numa_config = make_numa_config(
-            self.config.memory_info.default_memory as u64,
-            coherent_gpu_count,
-        );
+        let numa_config =
+            make_numa_config(self.config.memory_info.default_memory as u64, gi_node_count);
+        let iommufds = if gi_node_count > 0 {
+            vec![vmservice::IommufdConfig {
+                id: OPENVMM_GPU_IOMMUFD_ID.to_string(),
+                ..Default::default()
+            }]
+        } else {
+            Vec::new()
+        };
 
         let with_synic = host_has_synic();
         let request = vmservice::CreateVMRequest {
@@ -1033,6 +1019,7 @@ impl OpenVmmInner {
                 )),
                 disable_vmbus: !with_synic,
                 disable_hv: !with_synic,
+                iommufds,
                 pcie: MessageField::some(pcie),
                 BootConfig: Some(vmservice::vmconfig::BootConfig::DirectBoot(
                     vmservice::DirectBoot {
@@ -1199,8 +1186,6 @@ impl OpenVmmInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::symlink;
-    use tempfile::TempDir;
 
     fn pending_vfio_device(primary_bdf: &str, host_bdfs: &[&str]) -> Result<PendingVfioDevice> {
         PendingVfioDevice::new(
@@ -1209,18 +1194,6 @@ mod tests {
             primary_bdf.to_string(),
             host_bdfs.iter().map(|bdf| bdf.to_string()).collect(),
         )
-    }
-
-    fn vfio_device_with_group(group_id: u32, devnode: &Path) -> VfioDevice {
-        let mut device = VfioDevice {
-            iommu_group_id: Some(group_id),
-            ..Default::default()
-        };
-        let mut group = device.iommu_group.take().unwrap_or_default();
-        group.group_id = group_id;
-        group.devnode = devnode.to_path_buf();
-        device.iommu_group = Some(group);
-        device
     }
 
     #[test]
@@ -1307,20 +1280,59 @@ mod tests {
         let vmservice::pcie_device_kind::Kind::Vfio(vfio) = device.kind.as_ref().unwrap() else {
             panic!("GPU root port must contain a VFIO device");
         };
-        assert_eq!(vfio.bar_addresses.len(), 1);
-        assert_eq!(vfio.bar_addresses[0].bar_index, 2);
-        assert_eq!(
-            vfio.bar_addresses[0].source,
-            Some(vmservice::vfio_bar_address::Source::Fixed(0x4400_0000_0000))
-        );
+        assert!(vfio.bar_addresses.is_empty());
+        assert_eq!(vfio.iommufd_id.as_deref(), Some(OPENVMM_GPU_IOMMUFD_ID));
+        assert!(root.root_ports[0].pasid);
+        assert_eq!(root.root_ports[0].acs_capabilities_supported, Some(0x5f));
+        let Some(vmservice::pcie_iommu_config::Kind::Smmu(smmu)) =
+            root.iommu.as_ref().unwrap().kind.as_ref()
+        else {
+            panic!("GPU root complex must carry an SMMU");
+        };
+        assert!(smmu.accel);
+        assert_eq!(smmu.oas_bits, None);
 
-        let (topology, coherent_gpu_count) =
-            make_pcie_topology(Vec::new(), &plan.assignments).unwrap();
-        assert_eq!(coherent_gpu_count, 1);
+        let (topology, gi_node_count) = make_pcie_topology(Vec::new(), &plan.assignments).unwrap();
+        assert_eq!(gi_node_count, OPENVMM_GPU_GI_NODES);
         assert_eq!(topology.root_complexes.len(), 2);
-        assert_eq!(topology.generic_initiators.len(), 1);
-        assert_eq!(topology.generic_initiators[0].port_name, "gpu0");
-        assert_eq!(topology.generic_initiators[0].node, 1);
+        assert_eq!(
+            topology
+                .generic_initiators
+                .iter()
+                .map(|gi| (gi.port_name.as_str(), gi.node))
+                .collect::<Vec<_>>(),
+            [("gpu0", 1), ("gpu0", 2), ("gpu0", 3)]
+        );
+    }
+
+    #[test]
+    fn coherent_gpus_get_disjoint_gi_node_ranges() {
+        let plan = plan_vfio_devices_with(
+            vec![
+                pending_vfio_device("0000:01:00.0", &["0000:01:00.0"]).unwrap(),
+                pending_vfio_device("0000:02:00.0", &["0000:02:00.0"]).unwrap(),
+            ],
+            |_| {
+                Ok(Some(CoherentBar {
+                    index: 2,
+                    hpa: 0x4400_0000_0000,
+                    size: 0x2e_41f0_0000,
+                }))
+            },
+        )
+        .unwrap();
+        let (topology, gi_node_count) = make_pcie_topology(Vec::new(), &plan.assignments).unwrap();
+        assert_eq!(gi_node_count, 2 * OPENVMM_GPU_GI_NODES);
+        assert_eq!(topology.root_complexes[1].node, Some(1));
+        assert_eq!(topology.root_complexes[2].node, Some(4));
+        assert_eq!(
+            topology
+                .generic_initiators
+                .iter()
+                .map(|gi| gi.node)
+                .collect::<Vec<_>>(),
+            [1, 2, 3, 4, 5, 6]
+        );
     }
 
     #[test]
@@ -1444,23 +1456,6 @@ mod tests {
         let plan = plan_vfio_devices(Vec::new()).unwrap();
         assert!(plan.assignments.is_empty());
         assert!(plan.devices.is_empty());
-    }
-
-    #[test]
-    fn openvmm_vfio_requires_a_legacy_group_node() {
-        let vfio_dir = TempDir::new().unwrap();
-        let legacy_path = vfio_dir.path().join("42");
-        symlink("/dev/null", &legacy_path).unwrap();
-
-        let legacy = vfio_device_with_group(42, &legacy_path);
-        validate_legacy_vfio_backend(&legacy, vfio_dir.path()).unwrap();
-
-        let cdev = vfio_device_with_group(42, Path::new("/dev/vfio/devices/vfio7"));
-        let error = validate_legacy_vfio_backend(&cdev, vfio_dir.path())
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("requires legacy group node"));
-        assert!(error.contains("/dev/vfio/devices/vfio7"));
     }
 
     #[test]
