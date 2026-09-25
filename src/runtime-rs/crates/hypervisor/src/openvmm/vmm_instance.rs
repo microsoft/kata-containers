@@ -82,8 +82,7 @@ impl VmmInstance {
 
         let mut command = Command::new(openvmm_path);
         command
-            .arg("--ttrpc")
-            .arg(&ttrpc_socket_path)
+            .args(rpc_server_args(&ttrpc_socket_path))
             .stdin(Stdio::null())
             .kill_on_drop(true);
 
@@ -442,6 +441,14 @@ async fn terminate_child(child: &mut Child, pid: u32) {
     }
 }
 
+/// Arguments running OpenVMM as a TTRPC VM service on `socket_path`.
+fn rpc_server_args(socket_path: &str) -> [String; 2] {
+    [
+        "--rpc".to_string(),
+        format!("path={socket_path},transport=ttrpc"),
+    ]
+}
+
 /// Build a per-call ttrpc context carrying the standard OpenVMM RPC timeout.
 fn rpc_ctx() -> ttrpc::context::Context {
     ttrpc::context::with_timeout(OPENVMM_RPC_TIMEOUT.as_nanos() as i64)
@@ -480,10 +487,12 @@ mod tests {
     fn make_nonresponsive_openvmm(temp_dir: &TempDir) -> (String, std::path::PathBuf) {
         let script_path = temp_dir.path().join("openvmm");
         let pid_path = temp_dir.path().join("openvmm.pid");
+        // Create the socket path from `--rpc path=<socket>,transport=ttrpc`
+        // without ever listening on it.
         fs::write(
             &script_path,
             format!(
-                "#!/bin/sh\necho $$ > {}\ntouch \"$2\"\nexec sleep 30\n",
+                "#!/bin/sh\necho $$ > {}\nsocket=${{2#path=}}\ntouch \"${{socket%%,*}}\"\nexec sleep 30\n",
                 pid_path.display()
             ),
         )
@@ -508,6 +517,17 @@ mod tests {
         fs::set_permissions(&script_path, permissions).unwrap();
 
         (script_path.to_string_lossy().into_owned(), marker_path)
+    }
+
+    #[test]
+    fn openvmm_runs_as_a_ttrpc_vm_service() {
+        assert_eq!(
+            rpc_server_args("/run/kata/sandbox/openvmm.sock"),
+            [
+                "--rpc".to_string(),
+                "path=/run/kata/sandbox/openvmm.sock,transport=ttrpc".to_string(),
+            ]
+        );
     }
 
     #[tokio::test]
