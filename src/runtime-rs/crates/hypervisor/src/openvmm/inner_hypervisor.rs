@@ -635,6 +635,7 @@ fn make_numa_config(memory_mb: u64, coherent_gpu_count: usize) -> vmservice::Num
     let mut nodes = vec![vmservice::NumaNode {
         memory: MessageField::some(vmservice::NodeMemoryConfig {
             memory_mb,
+            transparent_hugepages: Some(false),
             ..Default::default()
         }),
         vps: MessageField::none(),
@@ -989,29 +990,17 @@ impl OpenVmmInner {
         }
         let (pcie, coherent_gpu_count) = make_pcie_topology(root_ports, &vfio_plan.assignments)?;
 
-        let (memory_config, numa_config) = if coherent_gpu_count == 0 {
-            (
-                MessageField::some(vmservice::MemoryConfig {
-                    memory_mb: self.config.memory_info.default_memory as u64,
-                    ..Default::default()
-                }),
-                MessageField::none(),
-            )
-        } else {
-            (
-                MessageField::none(),
-                MessageField::some(make_numa_config(
-                    self.config.memory_info.default_memory as u64,
-                    coherent_gpu_count,
-                )),
-            )
-        };
+        // memory_config always enables transparent hugepages; numa_config can
+        // opt out, so describe even a single-node guest through it.
+        let numa_config = make_numa_config(
+            self.config.memory_info.default_memory as u64,
+            coherent_gpu_count,
+        );
 
         let with_synic = host_has_synic();
         let request = vmservice::CreateVMRequest {
             config: MessageField::some(vmservice::VMConfig {
-                memory_config,
-                numa_config,
+                numa_config: MessageField::some(numa_config),
                 processor_config: MessageField::some(processor_config(
                     self.config.cpu_info.default_vcpus.ceil() as u32,
                 )),
@@ -1312,6 +1301,10 @@ mod tests {
         let numa = make_numa_config(4096, 2);
         assert_eq!(numa.nodes.len(), 3);
         assert_eq!(numa.nodes[0].memory.as_ref().unwrap().memory_mb, 4096);
+        assert_eq!(
+            numa.nodes[0].memory.as_ref().unwrap().transparent_hugepages,
+            Some(false)
+        );
         assert!(numa.nodes[0].vps.is_none());
         for node in &numa.nodes[1..] {
             assert!(node.memory.is_none());
