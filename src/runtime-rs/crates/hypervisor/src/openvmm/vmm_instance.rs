@@ -192,21 +192,54 @@ impl VmmInstance {
             anyhow::bail!("openvmm process is not awaiting startup commit");
         };
         let exit_notify = self.exit_notify.clone();
+        let client = self.client.clone();
         self.wait_task = Some(tokio::spawn(async move {
-            let exit_code = match child.wait().await {
-                Ok(status) => status.code().unwrap_or(1),
-                Err(err) => {
-                    warn!(
-                        sl!(),
-                        "openvmm: failed waiting for process {}: {:?}", pid, err
-                    );
-                    1
+            let notify = |exit_code: i32| {
+                if let Some(exit_notify) = &exit_notify {
+                    exit_notify.send_if_modified(|current| {
+                        current.is_none() && {
+                            *current = Some(exit_code);
+                            true
+                        }
+                    });
                 }
             };
+            let child_exit = async move {
+                match child.wait().await {
+                    Ok(status) => status.code().unwrap_or(1),
+                    Err(err) => {
+                        warn!(
+                            sl!(),
+                            "openvmm: failed waiting for process {}: {:?}", pid, err
+                        );
+                        1
+                    }
+                }
+            };
+            tokio::pin!(child_exit);
 
-            if let Some(exit_notify) = exit_notify {
-                exit_notify.send_replace(Some(exit_code));
+            // A guest shutdown halts the VM but leaves the OpenVMM process
+            // running, so the process exit alone cannot signal it.
+            if let Some(client) = client {
+                let empty = Empty::new();
+                tokio::select! {
+                    exit_code = &mut child_exit => {
+                        notify(exit_code);
+                        return;
+                    }
+                    result = client.wait_vm(ttrpc::context::with_timeout(0), &empty) => {
+                        match result {
+                            Ok(_) => {
+                                info!(sl!(), "openvmm: guest halted");
+                                notify(0);
+                            }
+                            Err(err) => warn!(sl!(), "openvmm: wait_vm RPC failed: {:?}", err),
+                        }
+                    }
+                }
             }
+
+            notify(child_exit.await);
         }));
 
         Ok(())
