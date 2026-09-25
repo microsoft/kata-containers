@@ -33,6 +33,7 @@ use crate::utils::{get_jailer_root, get_sandbox_path};
 use crate::{DeviceType, MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
 
 const OPENVMM_STANDALONE_VIRTIO_FS: &str = "virtio-fs";
+const OPENVMM_INLINE_VIRTIO_FS: &str = "inline-virtio-fs";
 // Size-only windows let OpenVMM route them around the arch-specific chipset
 // ranges; the low one covers the MMIO32 BARs and bridge windows of 8 GPUs and
 // 6 NVSwitches, the high one their 64-bit BARs.
@@ -282,6 +283,15 @@ fn console_pcie_port(socket_path: &str) -> Result<vmservice::PciePort> {
         false,
         Some(console_device_kind(socket_path.to_string())),
     ))
+}
+
+/// Build a virtio-fs endpoint served by OpenVMM itself from a host directory.
+fn inline_fs_device_kind(root_path: String, tag: String) -> vmservice::PcieDeviceKind {
+    virtio_pcie_device(vmservice::virtio_device::Kind::Fs(vmservice::VirtioFs {
+        tag,
+        root_path,
+        ..Default::default()
+    }))
 }
 
 /// Build a vhost-user-fs endpoint (virtiofsd backend reached over a Unix socket).
@@ -826,38 +836,50 @@ impl OpenVmmInner {
                     network_index += 1;
                 }
                 DeviceType::ShareFs(fs_dev) => {
-                    // Only vhost-user virtio-fs over PCIe is supported (no
-                    // vmbus / inline transport). The virtiofsd backend is
-                    // started by the shared-fs resource layer, which populates
-                    // sock_path.
-                    if fs_dev.config.fs_type != OPENVMM_STANDALONE_VIRTIO_FS {
-                        return Err(anyhow!(
-                            "openvmm only supports vhost-user virtio-fs (fs_type '{}'), got '{}'",
-                            OPENVMM_STANDALONE_VIRTIO_FS,
-                            fs_dev.config.fs_type
-                        ));
-                    }
-                    if fs_dev.config.sock_path.is_empty() {
-                        return Err(anyhow!(
-                            "openvmm vhost-user-fs for tag '{}' has no virtiofsd socket path",
-                            fs_dev.config.mount_tag
-                        ));
-                    }
-                    info!(
-                        sl!(),
-                        "openvmm: vhost-user-fs at device {} tag={} sock={}",
-                        OPENVMM_SHAREFS_PCI_DEVICE,
-                        fs_dev.config.mount_tag,
-                        fs_dev.config.sock_path
-                    );
+                    let tag = fs_dev.config.mount_tag.clone();
+                    let device_kind = match fs_dev.config.fs_type.as_str() {
+                        // virtiofsd is started by the shared-fs resource layer,
+                        // which populates sock_path.
+                        OPENVMM_STANDALONE_VIRTIO_FS => {
+                            if fs_dev.config.sock_path.is_empty() {
+                                return Err(anyhow!(
+                                    "openvmm vhost-user-fs for tag '{}' has no virtiofsd socket path",
+                                    tag
+                                ));
+                            }
+                            info!(
+                                sl!(),
+                                "openvmm: vhost-user-fs at device {} tag={} sock={}",
+                                OPENVMM_SHAREFS_PCI_DEVICE,
+                                tag,
+                                fs_dev.config.sock_path
+                            );
+                            vhost_user_fs_device_kind(fs_dev.config.sock_path.clone(), tag)
+                        }
+                        OPENVMM_INLINE_VIRTIO_FS => {
+                            info!(
+                                sl!(),
+                                "openvmm: inline virtio-fs at device {} tag={} root={}",
+                                OPENVMM_SHAREFS_PCI_DEVICE,
+                                tag,
+                                fs_dev.config.host_shared_path
+                            );
+                            inline_fs_device_kind(fs_dev.config.host_shared_path.clone(), tag)
+                        }
+                        other => {
+                            return Err(anyhow!(
+                                "openvmm supports the '{}' and '{}' shared filesystems, got '{}'",
+                                OPENVMM_STANDALONE_VIRTIO_FS,
+                                OPENVMM_INLINE_VIRTIO_FS,
+                                other
+                            ));
+                        }
+                    };
                     root_ports.push(make_pcie_port(
                         "sharefs",
                         PciSlot::new(OPENVMM_SHAREFS_PCI_DEVICE),
                         false,
-                        Some(vhost_user_fs_device_kind(
-                            fs_dev.config.sock_path.clone(),
-                            fs_dev.config.mount_tag.clone(),
-                        )),
+                        Some(device_kind),
                     ));
                 }
                 DeviceType::BlockModern(block_device) => {
