@@ -98,6 +98,19 @@ impl PolicyDecision {
         }
         Ok(())
     }
+
+    pub async fn ensure_no_state_patch(self, ep: &str) {
+        if let Some(patch) = self.state_patch {
+            error!(
+                sl!(),
+                "Policy state patch {:?} is not supported for {ep}", &patch
+            );
+            // Continuing execution with inconsistent policy state could be dangerous.
+            // Give a brief moment for the logs to flush, then abort the process to stop the VM.
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            std::process::abort();
+        }
+    }
 }
 
 impl AgentPolicy {
@@ -277,12 +290,14 @@ impl AgentPolicy {
         })
     }
 
-    /// Ask regorus if an API call should be allowed and apply its state changes immediately.
+    /// Ask regorus if an API call should be allowed and verify that the rego policy didn't
+    /// request any policy state changes. is_allowed_stateful() must be used for requests
+    /// that need to change the policy state.
     pub async fn allow_request(&mut self, ep: &str, ep_input: &str) -> Result<(bool, String)> {
         let decision = self.evaluate_request(ep, ep_input).await?;
         let allowed = decision.allowed();
         let prints = decision.prints().to_owned();
-        decision.commit(self).await?;
+        decision.ensure_no_state_patch(ep).await;
         Ok((allowed, prints))
     }
 
