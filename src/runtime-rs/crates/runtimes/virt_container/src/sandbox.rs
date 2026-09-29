@@ -153,7 +153,7 @@ impl SandboxMembers {
     }
 
     fn deactivate(&mut self, sandbox_id: &str) -> MemberDeactivation {
-        if !self.is_pod_set() || !self.configs.contains_key(sandbox_id) {
+        if !self.is_pod_set() {
             return MemberDeactivation::Legacy;
         }
         if !self.active.remove(sandbox_id) {
@@ -1792,6 +1792,18 @@ mod pod_set_tests {
             MemberDeactivation::AlreadyInactive
         );
         assert!(members.is_active("sandbox-2"));
+    }
+
+    #[test]
+    fn unknown_pod_set_member_does_not_stop_vm() {
+        let mut members = SandboxMembers::new(sandbox_config("sandbox-1", Some("set-1")));
+        for sandbox_id in ["", "unknown-container"] {
+            assert_eq!(
+                members.deactivate(sandbox_id),
+                MemberDeactivation::AlreadyInactive
+            );
+            assert!(members.is_active("sandbox-1"));
+        }
     }
 
     #[test]
