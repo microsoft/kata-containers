@@ -376,7 +376,10 @@ impl Handle {
             }
         }
 
-        // Update link
+        // Update link. Re-read it first: a header captured before the link was
+        // brought down still has IFF_UP, and up() adding a second one would sum
+        // to IFF_BROADCAST in VecLinkFlag, leaving the link down.
+        let link = self.find_link(LinkFilter::Index(link.index())).await?;
         let mut request = self.handle.link().set(link.index());
         request.message_mut().header = link.header.clone();
 
