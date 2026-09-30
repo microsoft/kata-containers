@@ -565,4 +565,4 @@ kubelet_root_dir = "@DEFKUBELETROOTDIR@"
 #              to non-k8s cases)
 #      cold_plug_vfio != no_port AND pod_resource_api_sock != "" => kubelet
 #              based cold plug.
-pod_resource_api_sock = "@DEFPODRESOURCEAPISOCK@"
+pod_resource_api_sock = "@DEFPODRESOURCEAPISOCK_NV@"
