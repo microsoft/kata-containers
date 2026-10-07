@@ -16,7 +16,8 @@ use super::vmservice;
 use super::{
     OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE, OPENVMM_BLOCK_HOTPLUG_PORT_COUNT,
     OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_NET_PCI_FIRST_DEVICE, OPENVMM_NET_PCI_MAX_COUNT,
-    OPENVMM_ROOTFS_PCI_DEVICE, OPENVMM_SHAREFS_PCI_DEVICE, OPENVMM_VSOCK_PCI_DEVICE,
+    OPENVMM_PMEM_PCI_DEVICE, OPENVMM_ROOTFS_PCI_DEVICE, OPENVMM_SHAREFS_PCI_DEVICE,
+    OPENVMM_VSOCK_PCI_DEVICE,
 };
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
@@ -76,6 +77,22 @@ pub(super) fn blk_device_kind(path: String, read_only: bool) -> vmservice::PcieD
         read_only,
         ..Default::default()
     }))
+}
+
+fn pmem_device_kind(path: String) -> vmservice::PcieDeviceKind {
+    virtio_pcie_device(vmservice::virtio_device::Kind::Pmem(vmservice::VirtioPmem {
+        path,
+        ..Default::default()
+    }))
+}
+
+fn pmem_image_path() -> Result<String> {
+    let home = std::env::var_os("HOME").context("HOME is required to locate the PMEM image")?;
+    std::path::PathBuf::from(home)
+        .join("tmp/mariner.image")
+        .into_os_string()
+        .into_string()
+        .map_err(|_| anyhow!("PMEM image path is not valid UTF-8"))
 }
 
 /// Build a virtio-net-pci endpoint backed by a host TAP, opened by name inside
@@ -216,6 +233,15 @@ impl OpenVmmInner {
         // vsock) are attached here; block volumes are hot-added after resume
         // into the pre-declared empty hotplug ports.
         let mut root_ports: Vec<vmservice::PciePort> = Vec::new();
+
+        let pmem_path = pmem_image_path()?;
+        info!(sl!(), "openvmm: virtio-pmem at device {}: {}", OPENVMM_PMEM_PCI_DEVICE, pmem_path);
+        root_ports.push(make_pcie_port(
+            "pmem",
+            OPENVMM_PMEM_PCI_DEVICE,
+            false,
+            Some(pmem_device_kind(pmem_path)),
+        ));
 
         // rootfs as virtio-blk-pci. The guest mounts it via the kernel cmdline
         // (root=/dev/vda), so no guest pci_path needs to be reported.

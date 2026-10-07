@@ -135,7 +135,13 @@ message VirtioDevice {
         // A virtio device whose datapath is backed by an external vhost-user
         // process (e.g. vhost-user-blk / vhost-user-fs).
         VhostUser     vhost_user = 6;
+        // A read-only, file-backed virtio-pmem device.
+        VirtioPmem    pmem       = 7;
     }
+}
+
+message VirtioPmem {
+    string path = 1;
 }
 
 // virtio-console serial device configuration.
