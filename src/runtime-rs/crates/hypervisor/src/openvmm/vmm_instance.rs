@@ -10,6 +10,7 @@ use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -38,6 +39,7 @@ pub(crate) struct VmmInstance {
     /// Persistent ttrpc async client for the OpenVMM `vmservice.VM` service,
     /// established once the process is launched and reused for every RPC.
     client: Option<VmClient>,
+    console_task: Option<JoinHandle<()>>,
 }
 
 impl std::fmt::Debug for VmmInstance {
@@ -58,6 +60,7 @@ impl VmmInstance {
             wait_task: None,
             exit_notify: Some(exit_notify),
             client: None,
+            console_task: None,
         }
     }
 
@@ -82,8 +85,7 @@ impl VmmInstance {
 
         let mut command = Command::new(openvmm_path);
         command
-            .arg("--ttrpc")
-            .arg(&ttrpc_socket_path)
+            .args(rpc_server_args(&ttrpc_socket_path))
             .stdin(Stdio::null())
             .kill_on_drop(true);
 
@@ -192,21 +194,54 @@ impl VmmInstance {
             anyhow::bail!("openvmm process is not awaiting startup commit");
         };
         let exit_notify = self.exit_notify.clone();
+        let client = self.client.clone();
         self.wait_task = Some(tokio::spawn(async move {
-            let exit_code = match child.wait().await {
-                Ok(status) => status.code().unwrap_or(1),
-                Err(err) => {
-                    warn!(
-                        sl!(),
-                        "openvmm: failed waiting for process {}: {:?}", pid, err
-                    );
-                    1
+            let notify = |exit_code: i32| {
+                if let Some(exit_notify) = &exit_notify {
+                    exit_notify.send_if_modified(|current| {
+                        current.is_none() && {
+                            *current = Some(exit_code);
+                            true
+                        }
+                    });
                 }
             };
+            let child_exit = async move {
+                match child.wait().await {
+                    Ok(status) => status.code().unwrap_or(1),
+                    Err(err) => {
+                        warn!(
+                            sl!(),
+                            "openvmm: failed waiting for process {}: {:?}", pid, err
+                        );
+                        1
+                    }
+                }
+            };
+            tokio::pin!(child_exit);
 
-            if let Some(exit_notify) = exit_notify {
-                exit_notify.send_replace(Some(exit_code));
+            // A guest shutdown halts the VM but leaves the OpenVMM process
+            // running, so the process exit alone cannot signal it.
+            if let Some(client) = client {
+                let empty = Empty::new();
+                tokio::select! {
+                    exit_code = &mut child_exit => {
+                        notify(exit_code);
+                        return;
+                    }
+                    result = client.wait_vm(ttrpc::context::with_timeout(0), &empty) => {
+                        match result {
+                            Ok(_) => {
+                                info!(sl!(), "openvmm: guest halted");
+                                notify(0);
+                            }
+                            Err(err) => warn!(sl!(), "openvmm: wait_vm RPC failed: {:?}", err),
+                        }
+                    }
+                }
             }
+
+            notify(child_exit.await);
         }));
 
         Ok(())
@@ -263,6 +298,15 @@ impl VmmInstance {
             .map_err(|e| anyhow!("openvmm remove_pcie_device RPC failed: {:?}", e))
     }
 
+    /// Log the guest virtio-console output relayed by OpenVMM.
+    pub(crate) async fn start_console_logger(&mut self, socket_path: &str) -> Result<()> {
+        let console = tokio::net::UnixStream::connect(socket_path)
+            .await
+            .with_context(|| format!("failed to connect to openvmm console {socket_path}"))?;
+        self.console_task = Some(tokio::spawn(log_console(console)));
+        Ok(())
+    }
+
     pub(crate) async fn stop(&mut self) -> Result<()> {
         let has_client = self.client.is_some();
         if has_client {
@@ -303,6 +347,9 @@ impl VmmInstance {
 
         if let Some(socket_path) = self.ttrpc_socket_path.take() {
             let _ = std::fs::remove_file(socket_path);
+        }
+        if let Some(console_task) = self.console_task.take() {
+            console_task.abort();
         }
         self.client = None;
         self.pid = None;
@@ -348,6 +395,20 @@ impl VmmInstance {
     }
 }
 
+async fn log_console(console: tokio::net::UnixStream) {
+    let mut lines = BufReader::new(console).lines();
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => info!(sl!(), "vm console: {:?}", line),
+            Ok(None) => break,
+            Err(err) => {
+                warn!(sl!(), "openvmm: failed reading the VM console: {:?}", err);
+                break;
+            }
+        }
+    }
+}
+
 async fn wait_for_child_exit(child: &mut Child, pid: u32) {
     match tokio::time::timeout(OPENVMM_STOP_TIMEOUT, child.wait()).await {
         Ok(Ok(_)) => {}
@@ -384,6 +445,14 @@ async fn terminate_child(child: &mut Child, pid: u32) {
     if let Err(err) = child.wait().await {
         warn!(sl!(), "openvmm: failed reaping process {}: {:?}", pid, err);
     }
+}
+
+/// Arguments running OpenVMM as a TTRPC VM service on `socket_path`.
+fn rpc_server_args(socket_path: &str) -> [String; 2] {
+    [
+        "--rpc".to_string(),
+        format!("path={socket_path},transport=ttrpc"),
+    ]
 }
 
 /// Build a per-call ttrpc context carrying the standard OpenVMM RPC timeout.
@@ -424,10 +493,12 @@ mod tests {
     fn make_nonresponsive_openvmm(temp_dir: &TempDir) -> (String, std::path::PathBuf) {
         let script_path = temp_dir.path().join("openvmm");
         let pid_path = temp_dir.path().join("openvmm.pid");
+        // Create the socket path from `--rpc path=<socket>,transport=ttrpc`
+        // without ever listening on it.
         fs::write(
             &script_path,
             format!(
-                "#!/bin/sh\necho $$ > {}\ntouch \"$2\"\nexec sleep 30\n",
+                "#!/bin/sh\necho $$ > {}\nsocket=${{2#path=}}\ntouch \"${{socket%%,*}}\"\nexec sleep 30\n",
                 pid_path.display()
             ),
         )
@@ -452,6 +523,17 @@ mod tests {
         fs::set_permissions(&script_path, permissions).unwrap();
 
         (script_path.to_string_lossy().into_owned(), marker_path)
+    }
+
+    #[test]
+    fn openvmm_runs_as_a_ttrpc_vm_service() {
+        assert_eq!(
+            rpc_server_args("/run/kata/sandbox/openvmm.sock"),
+            [
+                "--rpc".to_string(),
+                "path=/run/kata/sandbox/openvmm.sock,transport=ttrpc".to_string(),
+            ]
+        );
     }
 
     #[tokio::test]
