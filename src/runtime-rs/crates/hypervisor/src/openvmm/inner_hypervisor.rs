@@ -87,9 +87,15 @@ fn pmem_device_kind(path: String) -> vmservice::PcieDeviceKind {
 }
 
 fn pmem_image_path() -> Result<String> {
+    /*
     let home = std::env::var_os("HOME").context("HOME is required to locate the PMEM image")?;
     std::path::PathBuf::from(home)
         .join("tmp/mariner.image")
+        .into_os_string()
+        .into_string()
+        .map_err(|_| anyhow!("PMEM image path is not valid UTF-8"))
+    */
+    std::path::PathBuf::from("/mariner.image")
         .into_os_string()
         .into_string()
         .map_err(|_| anyhow!("PMEM image path is not valid UTF-8"))
