@@ -82,6 +82,7 @@ impl VmmInstance {
             .arg("--ttrpc")
             .arg(&ttrpc_socket_path)
             .stdin(Stdio::null())
+            .env("OPENVMM_LOG", "debug")
             .kill_on_drop(true);
 
         if let Some(log_dir) = &log_dir {
