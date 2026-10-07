@@ -9,6 +9,7 @@ use anyhow::{anyhow, Context, Result};
 use kata_types::config::KATA_PATH;
 use protobuf::MessageField;
 use std::fs;
+use std::os::unix::fs::FileTypeExt;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -32,6 +33,7 @@ use crate::utils::{get_jailer_root, get_sandbox_path};
 use crate::{DeviceType, MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
 
 const OPENVMM_STANDALONE_VIRTIO_FS: &str = "virtio-fs";
+const OPENVMM_INLINE_VIRTIO_FS: &str = "inline-virtio-fs";
 // Size-only windows let OpenVMM route them around the arch-specific chipset
 // ranges; the low one covers the MMIO32 BARs and bridge windows of 8 GPUs and
 // 6 NVSwitches, the high one their 64-bit BARs.
@@ -200,12 +202,16 @@ fn virtio_pcie_device(kind: vmservice::virtio_device::Kind) -> vmservice::PcieDe
 }
 
 /// Build a virtio-blk-pci endpoint backed by a host file or block device node.
+/// Host block devices bypass the host page cache; regular files use it.
 pub(super) fn blk_device_kind(path: String, read_only: bool) -> vmservice::PcieDeviceKind {
+    let direct = fs::metadata(&path)
+        .map(|metadata| metadata.file_type().is_block_device())
+        .unwrap_or(false);
     virtio_pcie_device(vmservice::virtio_device::Kind::Blk(vmservice::VirtioBlk {
         backend: MessageField::some(vmservice::DiskBackend {
             kind: Some(vmservice::disk_backend::Kind::File(vmservice::FileDisk {
                 path,
-                direct: false,
+                direct,
                 ..Default::default()
             })),
             ..Default::default()
@@ -277,6 +283,15 @@ fn console_pcie_port(socket_path: &str) -> Result<vmservice::PciePort> {
         false,
         Some(console_device_kind(socket_path.to_string())),
     ))
+}
+
+/// Build a virtio-fs endpoint served by OpenVMM itself from a host directory.
+fn inline_fs_device_kind(root_path: String, tag: String) -> vmservice::PcieDeviceKind {
+    virtio_pcie_device(vmservice::virtio_device::Kind::Fs(vmservice::VirtioFs {
+        tag,
+        root_path,
+        ..Default::default()
+    }))
 }
 
 /// Build a vhost-user-fs endpoint (virtiofsd backend reached over a Unix socket).
@@ -640,6 +655,7 @@ fn make_numa_config(memory_mb: u64, gi_node_count: u32) -> vmservice::NumaConfig
     let mut nodes = vec![vmservice::NumaNode {
         memory: MessageField::some(vmservice::NodeMemoryConfig {
             memory_mb,
+            transparent_hugepages: Some(false),
             ..Default::default()
         }),
         vps: MessageField::none(),
@@ -820,38 +836,50 @@ impl OpenVmmInner {
                     network_index += 1;
                 }
                 DeviceType::ShareFs(fs_dev) => {
-                    // Only vhost-user virtio-fs over PCIe is supported (no
-                    // vmbus / inline transport). The virtiofsd backend is
-                    // started by the shared-fs resource layer, which populates
-                    // sock_path.
-                    if fs_dev.config.fs_type != OPENVMM_STANDALONE_VIRTIO_FS {
-                        return Err(anyhow!(
-                            "openvmm only supports vhost-user virtio-fs (fs_type '{}'), got '{}'",
-                            OPENVMM_STANDALONE_VIRTIO_FS,
-                            fs_dev.config.fs_type
-                        ));
-                    }
-                    if fs_dev.config.sock_path.is_empty() {
-                        return Err(anyhow!(
-                            "openvmm vhost-user-fs for tag '{}' has no virtiofsd socket path",
-                            fs_dev.config.mount_tag
-                        ));
-                    }
-                    info!(
-                        sl!(),
-                        "openvmm: vhost-user-fs at device {} tag={} sock={}",
-                        OPENVMM_SHAREFS_PCI_DEVICE,
-                        fs_dev.config.mount_tag,
-                        fs_dev.config.sock_path
-                    );
+                    let tag = fs_dev.config.mount_tag.clone();
+                    let device_kind = match fs_dev.config.fs_type.as_str() {
+                        // virtiofsd is started by the shared-fs resource layer,
+                        // which populates sock_path.
+                        OPENVMM_STANDALONE_VIRTIO_FS => {
+                            if fs_dev.config.sock_path.is_empty() {
+                                return Err(anyhow!(
+                                    "openvmm vhost-user-fs for tag '{}' has no virtiofsd socket path",
+                                    tag
+                                ));
+                            }
+                            info!(
+                                sl!(),
+                                "openvmm: vhost-user-fs at device {} tag={} sock={}",
+                                OPENVMM_SHAREFS_PCI_DEVICE,
+                                tag,
+                                fs_dev.config.sock_path
+                            );
+                            vhost_user_fs_device_kind(fs_dev.config.sock_path.clone(), tag)
+                        }
+                        OPENVMM_INLINE_VIRTIO_FS => {
+                            info!(
+                                sl!(),
+                                "openvmm: inline virtio-fs at device {} tag={} root={}",
+                                OPENVMM_SHAREFS_PCI_DEVICE,
+                                tag,
+                                fs_dev.config.host_shared_path
+                            );
+                            inline_fs_device_kind(fs_dev.config.host_shared_path.clone(), tag)
+                        }
+                        other => {
+                            return Err(anyhow!(
+                                "openvmm supports the '{}' and '{}' shared filesystems, got '{}'",
+                                OPENVMM_STANDALONE_VIRTIO_FS,
+                                OPENVMM_INLINE_VIRTIO_FS,
+                                other
+                            ));
+                        }
+                    };
                     root_ports.push(make_pcie_port(
                         "sharefs",
                         PciSlot::new(OPENVMM_SHAREFS_PCI_DEVICE),
                         false,
-                        Some(vhost_user_fs_device_kind(
-                            fs_dev.config.sock_path.clone(),
-                            fs_dev.config.mount_tag.clone(),
-                        )),
+                        Some(device_kind),
                     ));
                 }
                 DeviceType::BlockModern(block_device) => {
@@ -991,23 +1019,10 @@ impl OpenVmmInner {
         }
         let (pcie, gi_node_count) = make_pcie_topology(root_ports, &vfio_plan.assignments)?;
 
-        let (memory_config, numa_config) = if gi_node_count == 0 {
-            (
-                MessageField::some(vmservice::MemoryConfig {
-                    memory_mb: self.config.memory_info.default_memory as u64,
-                    ..Default::default()
-                }),
-                MessageField::none(),
-            )
-        } else {
-            (
-                MessageField::none(),
-                MessageField::some(make_numa_config(
-                    self.config.memory_info.default_memory as u64,
-                    gi_node_count,
-                )),
-            )
-        };
+        // memory_config always enables transparent hugepages; numa_config can
+        // opt out, so describe even a single-node guest through it.
+        let numa_config =
+            make_numa_config(self.config.memory_info.default_memory as u64, gi_node_count);
         let iommufds = if gi_node_count > 0 {
             vec![vmservice::IommufdConfig {
                 id: OPENVMM_GPU_IOMMUFD_ID.to_string(),
@@ -1020,8 +1035,7 @@ impl OpenVmmInner {
         let with_synic = host_has_synic();
         let request = vmservice::CreateVMRequest {
             config: MessageField::some(vmservice::VMConfig {
-                memory_config,
-                numa_config,
+                numa_config: MessageField::some(numa_config),
                 processor_config: MessageField::some(processor_config(
                     self.config.cpu_info.default_vcpus.ceil() as u32,
                 )),
@@ -1348,6 +1362,10 @@ mod tests {
         let numa = make_numa_config(4096, 2);
         assert_eq!(numa.nodes.len(), 3);
         assert_eq!(numa.nodes[0].memory.as_ref().unwrap().memory_mb, 4096);
+        assert_eq!(
+            numa.nodes[0].memory.as_ref().unwrap().transparent_hugepages,
+            Some(false)
+        );
         assert!(numa.nodes[0].vps.is_none());
         for node in &numa.nodes[1..] {
             assert!(node.memory.is_none());
@@ -1460,6 +1478,23 @@ mod tests {
         let plan = plan_vfio_devices(Vec::new()).unwrap();
         assert!(plan.assignments.is_empty());
         assert!(plan.devices.is_empty());
+    }
+
+    #[test]
+    fn regular_file_disks_keep_the_host_page_cache() {
+        let image = tempfile::NamedTempFile::new().unwrap();
+        let kind = blk_device_kind(image.path().to_string_lossy().into_owned(), true);
+        let Some(vmservice::pcie_device_kind::Kind::Virtio(virtio)) = kind.kind else {
+            panic!("expected a virtio device");
+        };
+        let Some(vmservice::virtio_device::Kind::Blk(blk)) = virtio.kind else {
+            panic!("expected a virtio-blk device");
+        };
+        assert!(blk.read_only);
+        let Some(vmservice::disk_backend::Kind::File(file)) = blk.backend.unwrap().kind else {
+            panic!("expected a file disk backend");
+        };
+        assert!(!file.direct);
     }
 
     #[test]
