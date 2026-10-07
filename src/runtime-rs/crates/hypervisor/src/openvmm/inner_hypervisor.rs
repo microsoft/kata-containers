@@ -6,6 +6,7 @@
 //! OpenVMM hypervisor lifecycle management over the standalone VM service.
 
 use anyhow::{anyhow, Context, Result};
+use kata_types::config::hypervisor::snp_igvm_enabled;
 use kata_types::config::KATA_PATH;
 use protobuf::MessageField;
 use std::fs;
@@ -198,15 +199,22 @@ impl OpenVmmInner {
     pub(crate) async fn start_vm(&mut self, _timeout: i32) -> Result<()> {
         info!(sl!(), "openvmm: start_vm via external ttrpc process");
 
-        let cmdline = build_kernel_cmdline(
-            self.config.debug_info.enable_debug,
-            &self.config.boot_info.kernel_params,
-            &self.config.boot_info.kernel_verity_params,
-            &self.config.boot_info.rootfs_type,
-        )?;
-        let cmdline = adapt_cmdline_for_rpc(cmdline);
+        let use_snp_igvm = snp_igvm_enabled(&self.config)?;
+
+        let cmdline = if use_snp_igvm {
+            String::new()
+        } else {
+            let cmdline = build_kernel_cmdline(
+                self.config.debug_info.enable_debug,
+                &self.config.boot_info.kernel_params,
+                &self.config.boot_info.kernel_verity_params,
+                &self.config.boot_info.rootfs_type,
+            )?;
+            adapt_cmdline_for_rpc(cmdline)
+        };
 
         info!(sl!(), "openvmm: kernel={}", self.config.boot_info.kernel);
+        info!(sl!(), "openvmm: igvm={}", self.config.boot_info.igvm);
         info!(sl!(), "openvmm: image={}", self.config.boot_info.image);
         info!(sl!(), "openvmm: cmdline={}", cmdline);
 
@@ -398,6 +406,48 @@ impl OpenVmmInner {
             ..Default::default()
         };
 
+        let (boot_config, isolation_config) = if use_snp_igvm {
+            (
+                vmservice::vmconfig::BootConfig::Igvm(vmservice::IgvmBoot {
+                    igvm_path: self.config.boot_info.igvm.clone(),
+                    personality: vmservice::igvm_boot::Personality::PERSONALITY_LINUX_DIRECT.into(),
+                    ..Default::default()
+                }),
+                MessageField::some(vmservice::IsolationConfig {
+                    isolation_type: Some(vmservice::isolation_config::Isolation_type::Snp(
+                        vmservice::SnpIsolationConfig {
+                            host_data: Vec::new(),
+                            ..Default::default()
+                        },
+                    )),
+                    ..Default::default()
+                }),
+            )
+        } else {
+            (
+                vmservice::vmconfig::BootConfig::DirectBoot(vmservice::DirectBoot {
+                    kernel_path: self.config.boot_info.kernel.clone(),
+                    initrd_path: self.config.boot_info.initrd.clone(),
+                    kernel_cmdline: cmdline,
+                    ..Default::default()
+                }),
+                MessageField::none(),
+            )
+        };
+        let serial_config = if use_snp_igvm {
+            MessageField::none()
+        } else {
+            MessageField::some(vmservice::SerialConfig {
+                ports: vec![vmservice::serial_config::Config {
+                    port: 0,
+                    socket_path: serial_socket_path,
+                    connect: false,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+        };
+
         let request = vmservice::CreateVMRequest {
             config: MessageField::some(vmservice::VMConfig {
                 memory_config: MessageField::some(vmservice::MemoryConfig {
@@ -409,23 +459,10 @@ impl OpenVmmInner {
                     ..Default::default()
                 }),
                 pcie: MessageField::some(pcie),
-                serial_config: MessageField::some(vmservice::SerialConfig {
-                    ports: vec![vmservice::serial_config::Config {
-                        port: 0,
-                        socket_path: serial_socket_path,
-                        connect: false,
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                }),
-                BootConfig: Some(vmservice::vmconfig::BootConfig::DirectBoot(
-                    vmservice::DirectBoot {
-                        kernel_path: self.config.boot_info.kernel.clone(),
-                        initrd_path: self.config.boot_info.initrd.clone(),
-                        kernel_cmdline: cmdline,
-                        ..Default::default()
-                    },
-                )),
+                serial_config,
+                BootConfig: Some(boot_config),
+                isolation_config,
+                disable_vmbus: use_snp_igvm,
                 ..Default::default()
             }),
             log_id: self.id.clone(),
