@@ -391,6 +391,21 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "openvmm")]
+    #[tokio::test]
+    async fn openvmm_attach_uses_hypervisor_owned_topology() {
+        let mut handle = test_handle();
+        let mut topology = None;
+
+        handle
+            .attach(&mut topology, &crate::openvmm::OpenVmm::new())
+            .await
+            .unwrap();
+
+        assert_eq!(handle.attach_count().await, 1);
+        assert!(!handle.with(|device| device.is_allocated).await);
+    }
+
     #[tokio::test]
     async fn generic_attach_without_topology_rolls_back_reference() {
         let mut handle = test_handle();
