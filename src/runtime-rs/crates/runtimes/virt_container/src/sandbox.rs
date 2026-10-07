@@ -35,6 +35,11 @@ use containerd_shim_protos::events::task::{TaskExit, TaskOOM};
 use hypervisor::ch::CloudHypervisor;
 use hypervisor::device::topology::PCIePort;
 use hypervisor::device::util::{get_host_path, DEVICE_TYPE_CHAR};
+#[cfg(all(
+    feature = "openvmm",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+use hypervisor::openvmm::OpenVmm;
 use hypervisor::remote::Remote;
 use hypervisor::VsockConfig;
 use hypervisor::HYPERVISOR_REMOTE;
@@ -48,11 +53,6 @@ use hypervisor::{firecracker::Firecracker, HYPERVISOR_FIRECRACKER};
 use hypervisor::{
     is_vfio_ap_device, BlockConfigModern, Hypervisor, RestoreVmRequest, VfioDeviceBase,
 };
-#[cfg(all(
-    feature = "openvmm",
-    any(target_arch = "x86_64", target_arch = "aarch64")
-))]
-use hypervisor::{openvmm::OpenVmm, HYPERVISOR_NAME_OPENVMM};
 use hypervisor::{qemu::Qemu, HYPERVISOR_QEMU};
 use hypervisor::{
     utils::{
@@ -73,6 +73,8 @@ use kata_types::config::hypervisor::Hypervisor as HypervisorConfig;
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 use kata_types::config::hypervisor::HYPERVISOR_NAME_CH;
+#[cfg(feature = "openvmm")]
+use kata_types::config::hypervisor::{snp_igvm_enabled, HYPERVISOR_NAME_OPENVMM};
 use kata_types::config::hypervisor::{MemoryRestoreMode, VIRTIO_BLK_CCW, VIRTIO_BLK_PCI};
 use kata_types::config::{hypervisor::Factory, TomlConfig};
 use kata_types::initdata::{calculate_initdata_digest, ProtectedPlatform};
@@ -2212,6 +2214,23 @@ impl VirtSandbox {
         // protection they cannot use, e.g. SEV without SEV-SNP).
         if !hypervisor_config.security_info.confidential_guest {
             return Ok(None);
+        }
+
+        #[cfg(feature = "openvmm")]
+        if self.resource_manager.config().await.runtime.hypervisor_name == HYPERVISOR_NAME_OPENVMM
+            && snp_igvm_enabled(hypervisor_config)?
+        {
+            // available_guest_protection probes KVM, not MSHV. OpenVMM validates
+            // SNP support at launch and obtains the firmware layout from IGVM.
+            return Ok(Some(ProtectionDeviceConfig::SevSnp(SevSnpConfig {
+                is_snp: true,
+                // Placeholders for KVM/QEMU fields unused by OpenVMM.
+                cbitpos: 0,
+                phys_addr_reduction: 0,
+                // No separate firmware file is needed for IGVM boot.
+                firmware: String::new(),
+                host_data: init_data,
+            })));
         }
 
         let available_protection = available_guest_protection()?;

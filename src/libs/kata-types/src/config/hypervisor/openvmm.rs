@@ -24,6 +24,23 @@ pub const MIN_OPENVMM_MEMORY_SIZE_MB: u32 = 64;
 /// Default memory slots for openvmm.
 pub const DEFAULT_OPENVMM_MEMORY_SLOTS: u32 = 128;
 
+/// Report whether OpenVMM SNP IGVM boot is enabled, rejecting partial
+/// configurations.
+pub fn snp_igvm_enabled(config: &super::Hypervisor) -> Result<bool> {
+    let has_igvm = !config.boot_info.igvm.is_empty();
+    let confidential_guest = config.security_info.confidential_guest;
+    let sev_snp_guest = config.security_info.sev_snp_guest;
+    let enabled = has_igvm && confidential_guest && sev_snp_guest;
+    let requested = has_igvm || confidential_guest || sev_snp_guest;
+    if requested && !enabled {
+        return Err(std::io::Error::other(
+            "OpenVMM SNP boot requires igvm, confidential_guest=true, and sev_snp_guest=true",
+        ));
+    }
+
+    Ok(enabled)
+}
+
 /// Configuration information for openvmm.
 #[derive(Default, Debug)]
 pub struct OpenVmmConfig {}
@@ -85,6 +102,21 @@ impl ConfigPlugin for OpenVmmConfig {
                 return Err(std::io::Error::other(format!(
                     "OpenVMM hypervisor has minimal memory limitation {MIN_OPENVMM_MEMORY_SIZE_MB}",
                 )));
+            }
+
+            if snp_igvm_enabled(ovmm)? {
+                if !ovmm.boot_info.kernel_params.is_empty()
+                    || !ovmm.boot_info.kernel_verity_params.is_empty()
+                {
+                    return Err(std::io::Error::other(
+                        "OpenVMM SNP command line and verity parameters must be embedded in the IGVM",
+                    ));
+                }
+                if !ovmm.boot_info.initrd.is_empty() {
+                    return Err(std::io::Error::other(
+                        "runtime-rs OpenVMM IGVM boot does not support an initrd rootfs",
+                    ));
+                }
             }
         }
         Ok(())
@@ -177,6 +209,73 @@ mod tests {
             .unwrap()
             .memory_info
             .default_memory = MIN_OPENVMM_MEMORY_SIZE_MB - 1;
+
+        assert!(OpenVmmConfig::new().validate(&config).is_err());
+    }
+
+    #[test]
+    fn validate_accepts_snp_igvm_configuration() {
+        let binary = NamedTempFile::new().unwrap();
+        let mut config = create_config(binary.path());
+        let hypervisor = config.hypervisor.get_mut(HYPERVISOR_NAME_OPENVMM).unwrap();
+        hypervisor.memory_info.default_memory = MIN_OPENVMM_MEMORY_SIZE_MB;
+        hypervisor.boot_info.kernel.clear();
+        hypervisor.boot_info.igvm = "/tmp/openvmm.igvm".to_string();
+        hypervisor.boot_info.image = "/tmp/openvmm.img".to_string();
+        hypervisor.security_info.confidential_guest = true;
+        hypervisor.security_info.sev_snp_guest = true;
+
+        OpenVmmConfig::new().validate(&config).unwrap();
+    }
+
+    #[test]
+    fn validate_rejects_snp_igvm_with_initrd() {
+        let binary = NamedTempFile::new().unwrap();
+        let mut config = create_config(binary.path());
+        let hypervisor = config.hypervisor.get_mut(HYPERVISOR_NAME_OPENVMM).unwrap();
+        hypervisor.memory_info.default_memory = MIN_OPENVMM_MEMORY_SIZE_MB;
+        hypervisor.boot_info.igvm = "/tmp/openvmm.igvm".to_string();
+        hypervisor.boot_info.image = "/tmp/openvmm.img".to_string();
+        hypervisor.boot_info.initrd = "/tmp/openvmm.initrd".to_string();
+        hypervisor.security_info.confidential_guest = true;
+        hypervisor.security_info.sev_snp_guest = true;
+
+        assert!(OpenVmmConfig::new().validate(&config).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_unmeasured_snp_command_line_overrides() {
+        let binary = NamedTempFile::new().unwrap();
+        let mut config = create_config(binary.path());
+        let hypervisor = config.hypervisor.get_mut(HYPERVISOR_NAME_OPENVMM).unwrap();
+        hypervisor.memory_info.default_memory = MIN_OPENVMM_MEMORY_SIZE_MB;
+        hypervisor.boot_info.igvm = "/tmp/openvmm.igvm".to_string();
+        hypervisor.boot_info.image = "/tmp/openvmm.img".to_string();
+        hypervisor.security_info.confidential_guest = true;
+        hypervisor.security_info.sev_snp_guest = true;
+        hypervisor.boot_info.kernel_params = "debug".to_string();
+        assert!(OpenVmmConfig::new().validate(&config).is_err());
+        let hypervisor = config.hypervisor.get_mut(HYPERVISOR_NAME_OPENVMM).unwrap();
+        hypervisor.boot_info.kernel_params.clear();
+        hypervisor.boot_info.kernel_verity_params = "root_hash=invalid".to_string();
+        assert!(OpenVmmConfig::new().validate(&config).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_partial_snp_igvm_configuration() {
+        let binary = NamedTempFile::new().unwrap();
+        let mut config = create_config(binary.path());
+        let hypervisor = config.hypervisor.get_mut(HYPERVISOR_NAME_OPENVMM).unwrap();
+        hypervisor.memory_info.default_memory = MIN_OPENVMM_MEMORY_SIZE_MB;
+        hypervisor.boot_info.kernel.clear();
+        hypervisor.boot_info.igvm = "/tmp/openvmm.igvm".to_string();
+
+        assert!(OpenVmmConfig::new().validate(&config).is_err());
+
+        let hypervisor = config.hypervisor.get_mut(HYPERVISOR_NAME_OPENVMM).unwrap();
+        hypervisor.security_info.confidential_guest = true;
+        hypervisor.security_info.sev_snp_guest = true;
+        hypervisor.boot_info.igvm.clear();
 
         assert!(OpenVmmConfig::new().validate(&config).is_err());
     }
