@@ -9,6 +9,7 @@ use anyhow::{anyhow, Context, Result};
 use kata_types::config::KATA_PATH;
 use protobuf::MessageField;
 use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -49,6 +50,9 @@ const OPENVMM_GPU_LOW_MMIO_SIZE: u64 = 64 << 20;
 const OPENVMM_GPU_GI_NODES: u32 = 3;
 // All coherent GPUs share one iommufd context, and so one DMA address space.
 const OPENVMM_GPU_IOMMUFD_ID: &str = "iommu";
+// Under GICv2m every PCIe MSI consumes an SPI; the platform default is too small
+// for the hotplug ports plus the MSI-X vectors of several GB200 GPUs.
+const OPENVMM_GIC_V2M_SPI_COUNT: u32 = 512;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct CoherentBar {
@@ -157,6 +161,31 @@ fn build_kernel_cmdline(
 
 fn adapt_cmdline_for_rpc(cmdline: String) -> String {
     cmdline.replace("console=hvc0", "console=ttyS0")
+}
+
+/// VMBus and the Hyper-V enlightenments need a synthetic interrupt controller,
+/// which MSHV always provides and KVM only provides on x86_64.
+fn host_has_synic() -> bool {
+    Path::new("/dev/mshv").exists() || cfg!(target_arch = "x86_64")
+}
+
+fn processor_config(processor_count: u32) -> vmservice::ProcessorConfig {
+    let arch_config = cfg!(target_arch = "aarch64").then(|| {
+        vmservice::processor_config::Arch_config::Aarch64(vmservice::ProcessorAarch64Config {
+            gic_msi_config: Some(vmservice::processor_aarch64config::Gic_msi_config::MsiV2m(
+                vmservice::GicMsiV2mConfig {
+                    spi_count: Some(OPENVMM_GIC_V2M_SPI_COUNT),
+                    ..Default::default()
+                },
+            )),
+            ..Default::default()
+        })
+    });
+    vmservice::ProcessorConfig {
+        processor_count,
+        arch_config,
+        ..Default::default()
+    }
 }
 
 /// Wrap a virtio device function as a `PcieDeviceKind` (the endpoint behind a
@@ -962,14 +991,16 @@ impl OpenVmmInner {
             Vec::new()
         };
 
+        let with_synic = host_has_synic();
         let request = vmservice::CreateVMRequest {
             config: MessageField::some(vmservice::VMConfig {
                 memory_config,
                 numa_config,
-                processor_config: MessageField::some(vmservice::ProcessorConfig {
-                    processor_count: self.config.cpu_info.default_vcpus.ceil() as u32,
-                    ..Default::default()
-                }),
+                processor_config: MessageField::some(processor_config(
+                    self.config.cpu_info.default_vcpus.ceil() as u32,
+                )),
+                disable_vmbus: !with_synic,
+                disable_hv: !with_synic,
                 iommufds,
                 pcie: MessageField::some(pcie),
                 serial_config: MessageField::some(vmservice::SerialConfig {
@@ -1404,6 +1435,26 @@ mod tests {
         let plan = plan_vfio_devices(Vec::new()).unwrap();
         assert!(plan.assignments.is_empty());
         assert!(plan.devices.is_empty());
+    }
+
+    #[test]
+    fn processor_config_pins_the_gicv2m_spi_pool_on_aarch64() {
+        let config = processor_config(4);
+        assert_eq!(config.processor_count, 4);
+        if !cfg!(target_arch = "aarch64") {
+            assert!(config.arch_config.is_none());
+            return;
+        }
+        let Some(vmservice::processor_config::Arch_config::Aarch64(aarch64)) = config.arch_config
+        else {
+            panic!("aarch64 guests must carry an aarch64 topology override");
+        };
+        let Some(vmservice::processor_aarch64config::Gic_msi_config::MsiV2m(v2m)) =
+            aarch64.gic_msi_config
+        else {
+            panic!("aarch64 guests must use GICv2m");
+        };
+        assert_eq!(v2m.spi_count, Some(OPENVMM_GIC_V2M_SPI_COUNT));
     }
 
     #[test]
