@@ -313,6 +313,14 @@ impl VmmInstance {
     }
 
     async fn create_vm(client: &VmClient, request: vmservice::CreateVMRequest) -> Result<()> {
+        debug!(
+            sl!(),
+            "openvmm: CreateVM PCIe topology: {:?}",
+            request
+                .config
+                .as_ref()
+                .and_then(|config| config.pcie.as_ref())
+        );
         client
             .create_vm(rpc_ctx(), &request)
             .await
