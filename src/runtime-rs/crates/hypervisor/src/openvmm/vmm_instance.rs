@@ -24,6 +24,28 @@ use protobuf::MessageField;
 pub(super) const OPENVMM_READY_TIMEOUT: Duration = Duration::from_secs(20);
 const OPENVMM_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const OPENVMM_RPC_TIMEOUT: Duration = Duration::from_secs(30);
+const VM_SERVICE_API_VERSION: u32 = 1;
+const VM_SERVICE_BUILD_REVISION: &str = match option_env!("KATA_BUILD_REVISION") {
+    Some(revision) => revision,
+    None => "unknown",
+};
+const VM_SERVICE_SCHEMA_FINGERPRINT: u64 =
+    schema_fingerprint(include_bytes!("protos/vmservice.proto"));
+
+const fn schema_fingerprint(schema: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325;
+    let mut index = 0;
+    while index < schema.len() {
+        hash ^= schema[index] as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+        index += 1;
+    }
+    hash
+}
+
+fn schema_revision() -> String {
+    format!("fnv1a64:{VM_SERVICE_SCHEMA_FINGERPRINT:016x}")
+}
 
 /// Wrapper around an external OpenVMM process, providing VM lifecycle control.
 pub(crate) struct VmmInstance {
@@ -156,6 +178,7 @@ impl VmmInstance {
                     "openvmm TTRPC socket did not become ready: {ttrpc_socket_path}"
                 ))?;
             info!(sl!(), "openvmm: TTRPC connected pid={}", pid);
+            Self::check_protocol(&client).await?;
             info!(sl!(), "openvmm: creating VM pid={}", pid);
             Self::create_vm(&client, request).await?;
             info!(sl!(), "openvmm: VM created pid={}", pid);
@@ -310,6 +333,48 @@ impl VmmInstance {
 
     pub(crate) fn pid(&self) -> Option<u32> {
         self.pid
+    }
+
+    async fn check_protocol(client: &VmClient) -> Result<()> {
+        let server = client
+            .protocol_info(rpc_ctx(), &Empty::new())
+            .await
+            .map_err(|e| {
+                anyhow!(
+                    "openvmm protocol_info RPC failed; the server may predate the protocol handshake: {:?}",
+                    e
+                )
+            })?;
+        let client_schema_revision = schema_revision();
+
+        info!(
+            sl!(),
+            "openvmm: VM service protocol client_api_version={} client_schema_revision={} client_build_revision={} server_api_version={} server_schema_revision={} server_build_revision={}",
+            VM_SERVICE_API_VERSION,
+            client_schema_revision,
+            VM_SERVICE_BUILD_REVISION,
+            server.api_version,
+            server.schema_revision,
+            server.build_revision
+        );
+
+        if server.api_version != VM_SERVICE_API_VERSION {
+            anyhow::bail!(
+                "incompatible openvmm VM service API version: runtime-rs supports {}, server reports {}",
+                VM_SERVICE_API_VERSION,
+                server.api_version
+            );
+        }
+        if server.schema_revision != client_schema_revision {
+            warn!(
+                sl!(),
+                "openvmm: VM service schema differs: runtime-rs={} server={}",
+                client_schema_revision,
+                server.schema_revision
+            );
+        }
+
+        Ok(())
     }
 
     async fn create_vm(client: &VmClient, request: vmservice::CreateVMRequest) -> Result<()> {

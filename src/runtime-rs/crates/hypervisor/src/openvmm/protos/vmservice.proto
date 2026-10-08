@@ -10,6 +10,9 @@ import "google/protobuf/empty.proto";
 import "google/protobuf/struct.proto";
 
 service VM {
+    // ProtocolInfo identifies the API and schema implemented by this server.
+    rpc ProtocolInfo(google.protobuf.Empty) returns (ProtocolInfoResponse);
+
     // CreateVM will create the virtual machine with the configuration in the
     // CreateVMRequest. The virtual machine will be in a paused state power wise
     // after CreateVM. ResumeVM can be called to transition the VM into a running state.
@@ -56,6 +59,15 @@ service VM {
 }
 
 // Note: VTL assignment is not modeled yet; all devices are assumed to be VTL0.
+
+message ProtocolInfoResponse {
+    // Compatibility version for the VM service API.
+    uint32 api_version = 1;
+    // Fingerprint of the exact vmservice.proto used to build the server.
+    string schema_revision = 2;
+    // Source revision used to build the server, when available.
+    string build_revision = 3;
+}
 
 //
 // VM lifecycle request/response

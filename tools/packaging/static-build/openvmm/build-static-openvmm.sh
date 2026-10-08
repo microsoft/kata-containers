@@ -53,7 +53,7 @@ build_openvmm_from_source() {
 	# device-code prompt, hanging the non-interactive build. OpenVMM's own CI
 	# (.github/copilot-setup-steps.yml) uses the same flag for this reason.
 	cargo "+${rust_version}" xflowey restore-packages --no-compat-igvm
-	cargo "+${rust_version}" build --release --package openvmm
+	OPENVMM_BUILD_REVISION="${openvmm_version}" cargo "+${rust_version}" build --release --package openvmm
 
 	local binary="target/release/openvmm"
 	[[ -f "${binary}" ]] || die "openvmm binary not found at ${binary}"
