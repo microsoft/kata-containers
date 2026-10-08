@@ -1560,6 +1560,18 @@ impl VirtSandbox {
                 .await
                 .context("synchronize restored guest time")?;
 
+            let hostname = self
+                .sandbox_config
+                .as_ref()
+                .map(|config| config.hostname.clone())
+                .unwrap_or_default();
+            if !hostname.is_empty() {
+                self.agent
+                    .set_hostname(agent::SetHostnameRequest { hostname })
+                    .await
+                    .context("replace restored guest hostname")?;
+            }
+
             let before = self.agent.list_interfaces(agent::Empty::new()).await?;
             let source_interfaces = before
                 .interfaces
