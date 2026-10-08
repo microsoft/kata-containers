@@ -62,7 +62,7 @@ async fn detect_initdata_device(logger: &Logger) -> Result<Option<String>> {
     while let Some(entry) = read_dir.next_entry().await? {
         let filename = entry.file_name();
         let filename = filename.to_string_lossy();
-        debug!(logger, "Initdata check device `{filename}`");
+        // debug!(logger, "Initdata check device `{filename}`");
 
         // Currently there're two disk types supported:
         // virtio-blk (vd*) and virtio-scsi (sd*)
