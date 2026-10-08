@@ -53,6 +53,7 @@ type AgentServiceService interface {
 	ResizeVolume(context.Context, *ResizeVolumeRequest) (*emptypb.Empty, error)
 	SetPolicy(context.Context, *SetPolicyRequest) (*emptypb.Empty, error)
 	PrepareGuestMount(context.Context, *PrepareGuestMountRequest) (*emptypb.Empty, error)
+	SetHostname(context.Context, *SetHostnameRequest) (*emptypb.Empty, error)
 }
 
 func RegisterAgentServiceService(srv *ttrpc.Server, svc AgentServiceService) {
@@ -358,6 +359,13 @@ func RegisterAgentServiceService(srv *ttrpc.Server, svc AgentServiceService) {
 					return nil, err
 				}
 				return svc.PrepareGuestMount(ctx, &req)
+			},
+			"SetHostname": func(ctx context.Context, unmarshal func(interface{}) error) (interface{}, error) {
+				var req SetHostnameRequest
+				if err := unmarshal(&req); err != nil {
+					return nil, err
+				}
+				return svc.SetHostname(ctx, &req)
 			},
 		},
 	})
@@ -712,6 +720,14 @@ func (c *agentserviceClient) SetPolicy(ctx context.Context, req *SetPolicyReques
 func (c *agentserviceClient) PrepareGuestMount(ctx context.Context, req *PrepareGuestMountRequest) (*emptypb.Empty, error) {
 	var resp emptypb.Empty
 	if err := c.client.Call(ctx, "grpc.AgentService", "PrepareGuestMount", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *agentserviceClient) SetHostname(ctx context.Context, req *SetHostnameRequest) (*emptypb.Empty, error) {
+	var resp emptypb.Empty
+	if err := c.client.Call(ctx, "grpc.AgentService", "SetHostname", req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

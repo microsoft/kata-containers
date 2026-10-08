@@ -5,7 +5,7 @@
 
 use anyhow::{anyhow, Result};
 use nix::mount::MsFlags;
-use nix::sched::{unshare, CloneFlags};
+use nix::sched::{setns, unshare, CloneFlags};
 use nix::unistd::{getpid, gettid};
 use slog::Logger;
 use std::fmt;
@@ -143,6 +143,26 @@ impl Namespace {
 
         Ok(self)
     }
+
+    /// Replace the hostname of a UTS namespace persisted by `setup`.
+    #[instrument]
+    pub fn set_hostname(&mut self, hostname: &str) -> Result<()> {
+        if self.ns_type != NamespaceType::Uts || self.path.is_empty() {
+            return Err(anyhow!("no persistent UTS namespace"));
+        }
+        let path = self.path.clone();
+        let host = hostname.to_string();
+        // setns() only moves the calling thread, so keep it off runtime workers.
+        std::thread::spawn(move || -> Result<()> {
+            setns(File::open(&path)?, CloneFlags::CLONE_NEWUTS)?;
+            nix::unistd::sethostname(&host)?;
+            Ok(())
+        })
+        .join()
+        .map_err(|e| anyhow!("Failed to join thread {:?}!", e))??;
+        self.hostname = Some(hostname.to_string());
+        Ok(())
+    }
 }
 
 /// Represents the Namespace type.
@@ -183,7 +203,7 @@ impl fmt::Debug for NamespaceType {
 mod tests {
     use super::{Namespace, NamespaceType};
     use crate::mount::remove_mounts;
-    use nix::sched::CloneFlags;
+    use nix::sched::{setns, CloneFlags};
     use rstest::rstest;
     use tempfile::Builder;
     use test_utils::skip_if_not_root;
@@ -227,6 +247,47 @@ mod tests {
             .await;
 
         assert!(ns_pid.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_set_hostname_on_persistent_uts_ns() {
+        skip_if_not_root!();
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let tmpdir = Builder::new().prefix("uts").tempdir().unwrap();
+
+        let mut ns_uts = Namespace::new(&logger)
+            .get_uts("source-host")
+            .set_root_dir(tmpdir.path().to_str().unwrap())
+            .setup()
+            .await
+            .unwrap();
+        let own_hostname = nix::unistd::gethostname().unwrap();
+
+        ns_uts.set_hostname("target-host").unwrap();
+
+        let path = ns_uts.path.clone();
+        let ns_hostname = std::thread::spawn(move || {
+            setns(std::fs::File::open(path).unwrap(), CloneFlags::CLONE_NEWUTS).unwrap();
+            nix::unistd::gethostname().unwrap()
+        })
+        .join()
+        .unwrap();
+        assert_eq!(ns_hostname, "target-host");
+        assert_eq!(ns_uts.hostname.as_deref(), Some("target-host"));
+        assert_eq!(nix::unistd::gethostname().unwrap(), own_hostname);
+        assert!(remove_mounts(&[ns_uts.path]).is_ok());
+    }
+
+    #[test]
+    fn test_set_hostname_requires_persistent_uts_ns() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+
+        let mut ns_uts = Namespace::new(&logger).get_uts("source-host");
+        assert!(ns_uts.set_hostname("target-host").is_err());
+
+        let mut ns_ipc = Namespace::new(&logger).get_ipc();
+        ns_ipc.path = "/proc/self/ns/ipc".to_string();
+        assert!(ns_ipc.set_hostname("target-host").is_err());
     }
 
     #[rstest]

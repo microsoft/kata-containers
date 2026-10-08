@@ -532,6 +532,11 @@ pub struct SetGuestDateTimeRequest {
 }
 
 #[derive(PartialEq, Clone, Default)]
+pub struct SetHostnameRequest {
+    pub hostname: String,
+}
+
+#[derive(PartialEq, Clone, Default)]
 pub struct AgentDetails {
     pub version: String,
     pub init_daemon: bool,

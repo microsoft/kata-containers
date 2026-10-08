@@ -23,10 +23,11 @@ pub use types::{
     MemHotplugByProbeRequest, MetricsResponse, OnlineCPUMemRequest, OomEventResponse,
     PrepareGuestMountRequest, ReadStreamRequest, ReadStreamResponse, RemoveContainerRequest,
     ReseedRandomDevRequest, ResizeVolumeRequest, Route, Routes, SetGuestDateTimeRequest,
-    SetIPTablesRequest, SetIPTablesResponse, SignalProcessRequest, StatsContainerResponse, Storage,
-    TtyWinResizeRequest, UpdateContainerRequest, UpdateInterfaceRequest, UpdateRoutesRequest,
-    VersionCheckResponse, VolumeStatsRequest, VolumeStatsResponse, WaitProcessRequest,
-    WaitProcessResponse, WriteStreamRequest, WriteStreamResponse,
+    SetHostnameRequest, SetIPTablesRequest, SetIPTablesResponse, SignalProcessRequest,
+    StatsContainerResponse, Storage, TtyWinResizeRequest, UpdateContainerRequest,
+    UpdateInterfaceRequest, UpdateRoutesRequest, VersionCheckResponse, VolumeStatsRequest,
+    VolumeStatsResponse, WaitProcessRequest, WaitProcessResponse, WriteStreamRequest,
+    WriteStreamResponse,
 };
 
 use anyhow::Result;
@@ -83,6 +84,7 @@ pub trait Agent: AgentManager + HealthService + Send + Sync {
     async fn online_cpu_mem(&self, req: OnlineCPUMemRequest) -> Result<Empty>;
     async fn reseed_random_dev(&self, req: ReseedRandomDevRequest) -> Result<Empty>;
     async fn set_guest_date_time(&self, req: SetGuestDateTimeRequest) -> Result<Empty>;
+    async fn set_hostname(&self, req: SetHostnameRequest) -> Result<Empty>;
 
     // network
     async fn add_arp_neighbors(&self, req: AddArpNeighborRequest) -> Result<Empty>;

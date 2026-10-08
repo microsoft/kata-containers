@@ -1026,6 +1026,29 @@ impl agent_ttrpc::AgentService for AgentService {
         Ok(Empty::new())
     }
 
+    async fn set_hostname(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::SetHostnameRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "set_hostname", req);
+        is_allowed(&req).await?;
+
+        if req.hostname.is_empty() {
+            return Err(ttrpc_error(
+                ttrpc::Code::INVALID_ARGUMENT,
+                "hostname must not be empty",
+            ));
+        }
+        let mut sandbox = self.sandbox.lock().await;
+        sandbox
+            .shared_utsns
+            .set_hostname(&req.hostname)
+            .map_ttrpc_err(same)?;
+        sandbox.hostname = req.hostname;
+        Ok(Empty::new())
+    }
+
     async fn remove_container(
         &self,
         ctx: &TtrpcContext,

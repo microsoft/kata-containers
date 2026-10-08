@@ -265,6 +265,10 @@ func (p *HybridVSockTTRPCMockImp) PrepareGuestMount(ctx context.Context, req *pb
 	return &gpb.Empty{}, nil
 }
 
+func (p *HybridVSockTTRPCMockImp) SetHostname(ctx context.Context, req *pb.SetHostnameRequest) (*gpb.Empty, error) {
+	return &gpb.Empty{}, nil
+}
+
 func (p *HybridVSockTTRPCMockImp) GetDiagnosticData(ctx context.Context, req *pb.GetDiagnosticDataRequest) (*pb.GetDiagnosticDataResponse, error) {
 	return &pb.GetDiagnosticDataResponse{}, nil
 }
