@@ -59,7 +59,6 @@ pub(crate) struct OpenVmmInner {
     pub(crate) cached_block_devices: HashSet<String>,
     pub(crate) free_block_hotplug_ports: VecDeque<OpenVmmHotplugPort>,
     pub(crate) attached_block_hotplug_ports: HashMap<String, OpenVmmHotplugPort>,
-    pub(crate) capabilities: Capabilities,
     pub(crate) guest_memory_block_size_mb: u32,
     pub(crate) vmm_instance: VmmInstance,
 }
@@ -75,13 +74,6 @@ impl std::fmt::Debug for OpenVmmInner {
 
 impl OpenVmmInner {
     pub(crate) fn new(exit_notify: watch::Sender<Option<i32>>) -> Self {
-        let mut capabilities = Capabilities::new();
-        capabilities.set(
-            CapabilityBits::BlockDeviceSupport
-                | CapabilityBits::BlockDeviceDiscardSupport
-                | CapabilityBits::FsSharingSupport,
-        );
-
         OpenVmmInner {
             id: String::new(),
             vm_path: String::new(),
@@ -94,7 +86,6 @@ impl OpenVmmInner {
             cached_block_devices: HashSet::new(),
             free_block_hotplug_ports: Self::default_block_hotplug_ports(),
             attached_block_hotplug_ports: HashMap::new(),
-            capabilities,
             guest_memory_block_size_mb: 0,
             vmm_instance: VmmInstance::new(exit_notify),
         }
@@ -109,11 +100,24 @@ impl OpenVmmInner {
     }
 
     pub(crate) async fn capabilities(&self) -> Result<Capabilities> {
-        Ok(self.capabilities.clone())
+        let mut caps = Capabilities::default();
+        let flags = if self.hypervisor_config().security_info.confidential_guest
+            || self.hypervisor_config().shared_fs.shared_fs.is_none()
+        {
+            CapabilityBits::BlockDeviceSupport | CapabilityBits::BlockDeviceDiscardSupport
+        } else {
+            CapabilityBits::BlockDeviceSupport
+                | CapabilityBits::BlockDeviceDiscardSupport
+                | CapabilityBits::FsSharingSupport
+        };
+        caps.set(flags);
+        Ok(caps)
     }
 
     pub(crate) fn set_capabilities(&mut self, flag: CapabilityBits) {
-        self.capabilities.set(flag);
+        let mut caps = Capabilities::default();
+
+        caps.set(flag)
     }
 
     pub(crate) fn set_guest_memory_block_size(&mut self, size: u32) {
