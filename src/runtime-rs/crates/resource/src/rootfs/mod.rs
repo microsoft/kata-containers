@@ -11,6 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use kata_types::mount::Mount;
 mod block_rootfs;
+mod dm_linear;
 mod erofs_rootfs;
 pub mod virtual_volume;
 
@@ -103,10 +104,17 @@ impl RootFsResource {
                     rootfs_mounts.len()
                 );
 
-                let multi_layer =
-                    ErofsMultiLayerRootfs::new(device_manager, sid, cid, rootfs_mounts, share_fs)
-                        .await
-                        .context("new multi-layer erofs rootfs")?;
+                let multi_layer = ErofsMultiLayerRootfs::new(
+                    device_manager,
+                    sid,
+                    cid,
+                    cri_name,
+                    rootfs_mounts,
+                    share_fs,
+                    h.requires_raw_block_devices(),
+                )
+                .await
+                .context("new multi-layer erofs rootfs")?;
 
                 let ret = Arc::new(multi_layer);
                 let mut inner = self.inner.write().await;

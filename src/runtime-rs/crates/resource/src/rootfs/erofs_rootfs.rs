@@ -12,7 +12,7 @@
 // The overlay mount may be handled by the guest agent if it contains "{{"
 // templates in upperdir/workdir.
 
-use super::{Rootfs, ROOTFS};
+use super::{dm_linear, Rootfs, RootfsSnapshotArtifacts, SnapshotDiskPath, ROOTFS};
 use crate::{
     block_device::agent_storage_source_from_block_config,
     share_fs::{do_get_guest_path, do_get_host_path},
@@ -368,6 +368,10 @@ async fn extract_block_device_info(
 /// - EROFS layers (fsmeta + flattened layers) -> virtio-blk via VMDK.
 /// - Overlay metadata that combines the writable upper with the EROFS lower.
 pub(crate) struct ErofsMultiLayerRootfs {
+    // Keep the dm-linear disk around until cleanup.
+    linear_disk: Option<dm_linear::LinearDisk>,
+    cri_name: String,
+    container_id: String,
     guest_path: String,
     device_ids: Vec<String>,
     // Writable layer storage (upper layer), typically ext4 and optional when
@@ -388,6 +392,7 @@ impl ErofsMultiLayerRootfs {
         cid: &str,
         rootfs_mounts: &[Mount],
         _share_fs: &Option<Arc<dyn crate::share_fs::ShareFs>>,
+        use_dm_linear: bool,
     ) -> Result<Self> {
         let container_path = do_get_guest_path(ROOTFS, cid, false, false);
         let host_path = do_get_host_path(ROOTFS, sid, cid, false, false);
@@ -396,6 +401,7 @@ impl ErofsMultiLayerRootfs {
             .map_err(|e| anyhow!("failed to create rootfs dir {}: {:?}", host_path, e))?;
 
         let mut device_ids = Vec::new();
+        let mut linear_disk = None;
         let mut rwlayer_storage: Option<Storage> = None;
         let mut erofs_storages: Vec<Storage> = Vec::new();
         let mut gpt_metadata_paths: Vec<PathBuf> = Vec::new();
@@ -568,14 +574,38 @@ impl ErofsMultiLayerRootfs {
 
                         if erofs_layers.is_empty() {
                             return Err(anyhow!(
-                                "gptdisk: no valid EROFS layers found for GPT VMDK"
+                                "gptdisk: no valid EROFS layers found for GPT disk"
                             ));
                         }
 
-                        // Generate GPT-partitioned VMDK and get layout information
-                        let (erofs_path, vmdk, layout, gpt_files) =
+                        // Generate a GPT-partitioned disk and get layout information
+                        let (erofs_path, erofs_format, layout, gpt_files) = if use_dm_linear {
+                            // dm_linear is a workaround because OpenVMM does not support VMDK yet.
+                            let (disk, layout, metadata) =
+                                dm_linear::generate_gpt_linear_with_layout(sid, cid, erofs_layers)
+                                    .await
+                                    .context("gptdisk: failed to generate GPT dm-linear disk")?;
+                            let path = disk.path().display().to_string();
+                            linear_disk = Some(disk);
+                            (path, BlockDeviceFormat::Raw, layout, metadata)
+                        } else {
                             generate_gpt_vmdk_with_layout(sid, cid, erofs_layers)
-                                .context("gptdisk: failed to generate GPT VMDK")?;
+                                .context("gptdisk: failed to generate GPT VMDK")?
+                        };
+
+                        // Track VMDK path for cleanup
+                        if erofs_format == BlockDeviceFormat::Vmdk {
+                            vmdk_path = Some(PathBuf::from(&erofs_path));
+                        }
+                        readonly_disk_path = Some(PathBuf::from(&erofs_path));
+                        readonly_sources = layout
+                            .partitions
+                            .iter()
+                            .map(|partition| PathBuf::from(&partition.layer.path))
+                            .collect();
+                        gpt_partitioned = true;
+                        snapshot_gpt_layout = Some(layout.clone());
+                        snapshot_gpt_files = Some(gpt_files.clone());
 
                         // Track GPT metadata files (head + padding) for cleanup
                         gpt_metadata_paths.push(gpt_files.head_path.clone());
@@ -723,6 +753,11 @@ impl ErofsMultiLayerRootfs {
                         gpt_erofs_processed = true;
                     } else {
                         // fsmerge mode: Single erofs mount with device= options
+                        if use_dm_linear {
+                            return Err(anyhow!(
+                                "OpenVMM's dm-linear workaround does not support fsmerge EROFS mounts; use independent EROFS layers"
+                            ));
+                        }
                         info!(
                             sl!(),
                             "multi-layer erofs: using fsmerge mode for erofs layers: {}",
@@ -848,6 +883,9 @@ impl ErofsMultiLayerRootfs {
         }
 
         Ok(Self {
+            cri_name: cri_name.to_string(),
+            linear_disk,
+            container_id: cid.to_string(),
             guest_path: container_path,
             device_ids,
             rwlayer_storage,
@@ -911,6 +949,17 @@ impl Rootfs for ErofsMultiLayerRootfs {
         let mut dm = device_manager.write().await;
         for device_id in &self.device_ids {
             dm.try_remove_device(device_id).await?;
+        }
+
+        if let Some(disk) = &self.linear_disk {
+            // Release our disk and loop handles after guest detach.
+            // The kernel removes the mapping when its last opener closes.
+            disk.release()?;
+        }
+
+        // Clean up generated VMDK descriptor file if it exists.
+        if let Some(ref vmdk) = self.vmdk_path {
+            safely_remove_file(vmdk, &self.generated_artifacts_dir)?;
         }
 
         // Clean up GPT metadata files (head, padding).
@@ -1019,5 +1068,191 @@ mod tests {
             mount("overlay", &[]),
         ];
         assert!(is_erofs_multi_layer(&mounts));
+    }
+
+    #[test]
+    fn snapshot_gpt_vmdk_is_independent_of_live_sources() {
+        let live = tempfile::tempdir().unwrap();
+        let snapshot_parent = tempfile::tempdir().unwrap();
+        let staging = snapshot_parent.path().join(".snapshot.partial");
+        let published = snapshot_parent.path().join("snapshot");
+        fs::create_dir(&staging).unwrap();
+        let layer0 = live.path().join("layer-0.erofs");
+        let layer1 = live.path().join("layer-1.erofs");
+        let head = live.path().join("gpt_meta_head.img");
+        let writable = live.path().join("rwlayer.img");
+        let live_vmdk = live.path().join("merged_fs.vmdk");
+        fs::write(&layer0, vec![0x10; 4096]).unwrap();
+        fs::write(&layer1, vec![0x20; 8192]).unwrap();
+        fs::write(&head, vec![0x30; 2048 * 512]).unwrap();
+        fs::write(&live_vmdk, b"live descriptor").unwrap();
+        let writable_file = fs::File::create(&writable).unwrap();
+        writable_file.set_len(4 * 1024 * 1024).unwrap();
+
+        let partitions = vec![
+            PartitionLayout {
+                layer: ErofsLayer {
+                    path: layer0.display().to_string(),
+                    size_sectors: 8,
+                    snapshot_id: "0".to_string(),
+                },
+                partition_number: 1,
+                start_lba: 2048,
+                end_lba: 2055,
+                name: "layer-0".to_string(),
+            },
+            PartitionLayout {
+                layer: ErofsLayer {
+                    path: layer1.display().to_string(),
+                    size_sectors: 16,
+                    snapshot_id: "1".to_string(),
+                },
+                partition_number: 2,
+                start_lba: 4096,
+                end_lba: 4111,
+                name: "layer-1".to_string(),
+            },
+        ];
+        let rootfs = ErofsMultiLayerRootfs {
+            linear_disk: None,
+            cri_name: "workload".to_string(),
+            container_id: "host-workload-id".to_string(),
+            guest_path: "/run/kata-containers/workload/rootfs".to_string(),
+            device_ids: Vec::new(),
+            rwlayer_storage: None,
+            erofs_storages: Vec::new(),
+            vmdk_path: Some(live_vmdk.clone()),
+            gpt_metadata_paths: vec![head.clone()],
+            generated_artifacts_dir: live.path().to_path_buf(),
+            writable_source: Some(writable.clone()),
+            readonly_sources: vec![layer0.clone(), layer1.clone()],
+            readonly_disk_path: live_vmdk.clone(),
+            gpt_partitioned: true,
+            gpt_layout: Some(GptDiskLayout {
+                partitions,
+                total_sectors: 6144,
+                lb_size: 512,
+            }),
+            gpt_files: Some(GptMetadataFiles {
+                head_path: head,
+                head_sectors: 2048,
+                pad_paths: Vec::new(),
+            }),
+        };
+
+        let artifacts = rootfs
+            .package_snapshot_artifacts(&staging, &published)
+            .unwrap();
+        let staged_descriptor = staging
+            .join("containers")
+            .join("host-workload-id")
+            .join("rootfs.vmdk");
+        let descriptor = fs::read_to_string(&staged_descriptor).unwrap();
+        assert!(!descriptor.contains(&live.path().display().to_string()));
+        assert!(!descriptor.contains(&staging.display().to_string()));
+        assert!(!descriptor.contains(&published.display().to_string()));
+        assert!(descriptor.contains("FLAT \"lower-0000.erofs\""));
+        assert!(descriptor.contains("FLAT \"lower-0001.erofs\""));
+        assert!(descriptor.contains("FLAT \"gpt-head.img\""));
+        assert!(descriptor.contains("FLAT \"pad-1.img\""));
+        assert_eq!(artifacts.cri_name, "workload");
+        assert_eq!(artifacts.source_host_id, "host-workload-id");
+        assert_eq!(
+            artifacts
+                .readonly_disk
+                .snapshot_path
+                .parent()
+                .unwrap()
+                .file_name()
+                .unwrap(),
+            "host-workload-id"
+        );
+        assert_eq!(artifacts.readonly_disk.live_path, live_vmdk);
+        assert_eq!(
+            fs::metadata(staging.join("containers/host-workload-id/rwlayer.img"))
+                .unwrap()
+                .len(),
+            4 * 1024 * 1024
+        );
+
+        live.close().unwrap();
+        for path in artifacts.files {
+            assert!(
+                path.is_file(),
+                "missing packaged artifact {}",
+                path.display()
+            );
+        }
+        fs::rename(&staging, &published).unwrap();
+        assert!(artifacts.readonly_disk.snapshot_path.is_file());
+        for extent in [
+            "gpt-head.img",
+            "lower-0000.erofs",
+            "pad-1.img",
+            "lower-0001.erofs",
+        ] {
+            assert!(artifacts
+                .readonly_disk
+                .snapshot_path
+                .parent()
+                .unwrap()
+                .join(extent)
+                .is_file());
+        }
+        assert!(artifacts
+            .writable_disk
+            .as_ref()
+            .unwrap()
+            .snapshot_path
+            .is_file());
+    }
+
+    #[test]
+    fn snapshot_fsmerge_vmdk_is_independent_of_live_sources() {
+        let live = tempfile::tempdir().unwrap();
+        let snapshot = tempfile::tempdir().unwrap();
+        let layer0 = live.path().join("fsmeta.erofs");
+        let layer1 = live.path().join("layer.erofs");
+        let live_vmdk = live.path().join("merged_fs.vmdk");
+        fs::write(&layer0, vec![0x10; 4096]).unwrap();
+        fs::write(&layer1, vec![0x20; 8192]).unwrap();
+        fs::write(&live_vmdk, b"live descriptor").unwrap();
+
+        let rootfs = ErofsMultiLayerRootfs {
+            cri_name: "workload".to_string(),
+            linear_disk: None,
+            container_id: "host-workload-id".to_string(),
+            guest_path: "/run/kata-containers/workload/rootfs".to_string(),
+            device_ids: Vec::new(),
+            rwlayer_storage: None,
+            erofs_storages: Vec::new(),
+            vmdk_path: Some(live_vmdk.clone()),
+            gpt_metadata_paths: Vec::new(),
+            generated_artifacts_dir: live.path().to_path_buf(),
+            writable_source: None,
+            readonly_sources: vec![layer0, layer1],
+            readonly_disk_path: live_vmdk,
+            gpt_partitioned: false,
+            gpt_layout: None,
+            gpt_files: None,
+        };
+
+        let artifacts = rootfs
+            .package_snapshot_artifacts(snapshot.path(), snapshot.path())
+            .unwrap();
+        let descriptor = fs::read_to_string(&artifacts.readonly_disk.snapshot_path).unwrap();
+        assert!(!descriptor.contains(&live.path().display().to_string()));
+        assert!(!descriptor.contains(&snapshot.path().display().to_string()));
+        assert!(descriptor.contains("FLAT \"lower-0000.erofs\""));
+        assert!(descriptor.contains("FLAT \"lower-0001.erofs\""));
+
+        live.close().unwrap();
+        for path in artifacts.files {
+            assert!(
+                path.is_file(),
+                "missing packaged artifact {}",
+                path.display()
+            );
+        }
     }
 }

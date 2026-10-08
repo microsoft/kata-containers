@@ -16,10 +16,10 @@ test-utils = { workspace = true }
 actix-rt = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+linux-raw-sys = { version = "0.12.1", default-features = false, features = ["std", "loop_device"] }
 base64 = { workspace = true }
-byte-unit = { workspace = true }
 bytes = { workspace = true }
-cgroups.workspace = true
+cgroups = { workspace = true }
 flate2 = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
