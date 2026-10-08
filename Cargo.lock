@@ -6486,6 +6486,7 @@ dependencies = [
  "kata-types",
  "lazy_static",
  "libc",
+ "linux-raw-sys 0.12.1",
  "logging",
  "netlink-packet-core 0.8.1",
  "netlink-packet-route 0.30.0",
