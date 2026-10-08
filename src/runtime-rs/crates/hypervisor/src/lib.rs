@@ -153,6 +153,11 @@ pub struct RestoreVmRequest {
 
 #[async_trait]
 pub trait Hypervisor: std::fmt::Debug + Send + Sync {
+    /// Request host-side composition of layered rootfs disks instead of VMDK.
+    fn requires_raw_block_devices(&self) -> bool {
+        false
+    }
+
     // vm manager
     async fn prepare_vm(
         &self,

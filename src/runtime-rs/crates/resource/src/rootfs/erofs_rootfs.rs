@@ -12,7 +12,7 @@
 // The overlay mount may be handled by the guest agent if it contains "{{"
 // templates in upperdir/workdir.
 
-use super::{Rootfs, RootfsSnapshotArtifacts, SnapshotDiskPath, ROOTFS};
+use super::{dm_linear, Rootfs, RootfsSnapshotArtifacts, SnapshotDiskPath, ROOTFS};
 use crate::{
     block_device::agent_storage_source_from_block_config,
     share_fs::{do_get_guest_path, do_get_host_path},
@@ -493,6 +493,8 @@ async fn extract_block_device_info(
 /// - EROFS layers (fsmeta + flattened layers) -> virtio-blk via VMDK.
 /// - Overlay metadata that combines the writable upper with the EROFS lower.
 pub(crate) struct ErofsMultiLayerRootfs {
+    // Keep the dm-linear disk around until cleanup.
+    linear_disk: Option<dm_linear::LinearDisk>,
     cri_name: String,
     container_id: String,
     guest_path: String,
@@ -524,6 +526,7 @@ impl ErofsMultiLayerRootfs {
         cri_name: &str,
         rootfs_mounts: &[Mount],
         _share_fs: &Option<Arc<dyn crate::share_fs::ShareFs>>,
+        use_dm_linear: bool,
     ) -> Result<Self> {
         let container_path = do_get_guest_path(ROOTFS, cid, false, false);
         let host_path = do_get_host_path(ROOTFS, sid, cid, false, false);
@@ -532,6 +535,7 @@ impl ErofsMultiLayerRootfs {
             .map_err(|e| anyhow!("failed to create rootfs dir {}: {:?}", host_path, e))?;
 
         let mut device_ids = Vec::new();
+        let mut linear_disk = None;
         let mut rwlayer_storage: Option<Storage> = None;
         let mut erofs_storages: Vec<Storage> = Vec::new();
         let mut vmdk_path: Option<PathBuf> = None;
@@ -713,17 +717,29 @@ impl ErofsMultiLayerRootfs {
 
                         if erofs_layers.is_empty() {
                             return Err(anyhow!(
-                                "gptdisk: no valid EROFS layers found for GPT VMDK"
+                                "gptdisk: no valid EROFS layers found for GPT disk"
                             ));
                         }
 
-                        // Generate GPT-partitioned VMDK and get layout information
-                        let (erofs_path, erofs_format, layout, gpt_files) =
+                        // Generate a GPT-partitioned disk and get layout information
+                        let (erofs_path, erofs_format, layout, gpt_files) = if use_dm_linear {
+                            // dm_linear is a workaround because OpenVMM does not support VMDK yet.
+                            let (disk, layout, metadata) =
+                                dm_linear::generate_gpt_linear_with_layout(sid, cid, erofs_layers)
+                                    .await
+                                    .context("gptdisk: failed to generate GPT dm-linear disk")?;
+                            let path = disk.path().display().to_string();
+                            linear_disk = Some(disk);
+                            (path, BlockDeviceFormat::Raw, layout, metadata)
+                        } else {
                             generate_gpt_vmdk_with_layout(sid, cid, erofs_layers)
-                                .context("gptdisk: failed to generate GPT VMDK")?;
+                                .context("gptdisk: failed to generate GPT VMDK")?
+                        };
 
                         // Track VMDK path for cleanup
-                        vmdk_path = Some(PathBuf::from(&erofs_path));
+                        if erofs_format == BlockDeviceFormat::Vmdk {
+                            vmdk_path = Some(PathBuf::from(&erofs_path));
+                        }
                         readonly_disk_path = Some(PathBuf::from(&erofs_path));
                         readonly_sources = layout
                             .partitions
@@ -885,6 +901,11 @@ impl ErofsMultiLayerRootfs {
                         gpt_erofs_processed = true;
                     } else {
                         // fsmerge mode: Single erofs mount with device= options
+                        if use_dm_linear {
+                            return Err(anyhow!(
+                                "OpenVMM's dm-linear workaround does not support fsmerge EROFS mounts; use independent EROFS layers"
+                            ));
+                        }
                         info!(
                             sl!(),
                             "multi-layer erofs: using fsmerge mode for erofs layers: {}",
@@ -1021,6 +1042,7 @@ impl ErofsMultiLayerRootfs {
 
         Ok(Self {
             cri_name: cri_name.to_string(),
+            linear_disk,
             container_id: cid.to_string(),
             guest_path: container_path,
             device_ids,
@@ -1305,6 +1327,12 @@ impl Rootfs for ErofsMultiLayerRootfs {
             dm.try_remove_device(device_id).await?;
         }
 
+        if let Some(disk) = &self.linear_disk {
+            // Release our disk and loop handles after guest detach.
+            // The kernel removes the mapping when its last opener closes.
+            disk.release()?;
+        }
+
         // Clean up generated VMDK descriptor file if it exists.
         if let Some(ref vmdk) = self.vmdk_path {
             safely_remove_file(vmdk, &self.generated_artifacts_dir)?;
@@ -1464,6 +1492,7 @@ mod tests {
             },
         ];
         let rootfs = ErofsMultiLayerRootfs {
+            linear_disk: None,
             cri_name: "workload".to_string(),
             container_id: "host-workload-id".to_string(),
             guest_path: "/run/kata-containers/workload/rootfs".to_string(),
@@ -1569,6 +1598,7 @@ mod tests {
 
         let rootfs = ErofsMultiLayerRootfs {
             cri_name: "workload".to_string(),
+            linear_disk: None,
             container_id: "host-workload-id".to_string(),
             guest_path: "/run/kata-containers/workload/rootfs".to_string(),
             device_ids: Vec::new(),
