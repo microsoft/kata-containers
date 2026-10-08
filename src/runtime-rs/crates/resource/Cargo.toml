@@ -30,6 +30,7 @@ hyperlocal = { workspace = true }
 inotify = "0.11.0"
 lazy_static = { workspace = true }
 libc = { workspace = true }
+linux-raw-sys = { version = "0.12.1", default-features = false, features = ["std", "loop_device"] }
 netns-rs = { workspace = true }
 nix = { workspace = true }
 oci-spec = { workspace = true }

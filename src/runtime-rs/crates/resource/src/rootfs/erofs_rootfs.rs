@@ -12,7 +12,7 @@
 // The overlay mount may be handled by the guest agent if it contains "{{"
 // templates in upperdir/workdir.
 
-use super::{Rootfs, ROOTFS};
+use super::{dm_linear, Rootfs, ROOTFS};
 use crate::{
     block_device::agent_storage_source_from_block_config,
     share_fs::{do_get_guest_path, do_get_host_path},
@@ -368,6 +368,8 @@ async fn extract_block_device_info(
 /// - EROFS layers (fsmeta + flattened layers) -> virtio-blk via VMDK.
 /// - Overlay metadata that combines the writable upper with the EROFS lower.
 pub(crate) struct ErofsMultiLayerRootfs {
+    // Keep the dm-linear disk around until cleanup.
+    linear_disk: Option<dm_linear::LinearDisk>,
     guest_path: String,
     device_ids: Vec<String>,
     // Writable layer storage (upper layer), typically ext4 and optional when
@@ -388,6 +390,7 @@ impl ErofsMultiLayerRootfs {
         cid: &str,
         rootfs_mounts: &[Mount],
         _share_fs: &Option<Arc<dyn crate::share_fs::ShareFs>>,
+        use_dm_linear: bool,
     ) -> Result<Self> {
         let container_path = do_get_guest_path(ROOTFS, cid, false, false);
         let host_path = do_get_host_path(ROOTFS, sid, cid, false, false);
@@ -396,6 +399,7 @@ impl ErofsMultiLayerRootfs {
             .map_err(|e| anyhow!("failed to create rootfs dir {}: {:?}", host_path, e))?;
 
         let mut device_ids = Vec::new();
+        let mut linear_disk = None;
         let mut rwlayer_storage: Option<Storage> = None;
         let mut erofs_storages: Vec<Storage> = Vec::new();
         let mut gpt_metadata_paths: Vec<PathBuf> = Vec::new();
@@ -568,14 +572,26 @@ impl ErofsMultiLayerRootfs {
 
                         if erofs_layers.is_empty() {
                             return Err(anyhow!(
-                                "gptdisk: no valid EROFS layers found for GPT VMDK"
+                                "gptdisk: no valid EROFS layers found for GPT disk"
                             ));
                         }
 
-                        // Generate GPT-partitioned VMDK and get layout information
-                        let (erofs_path, vmdk, layout, gpt_files) =
-                            generate_gpt_vmdk_with_layout(sid, cid, erofs_layers)
-                                .context("gptdisk: failed to generate GPT VMDK")?;
+                        // Generate a GPT-partitioned disk and get layout information.
+                        let (erofs_path, vmdk, layout, gpt_files) = if use_dm_linear {
+                            // dm-linear is a workaround because OpenVMM does not support VMDK yet.
+                            let (disk, layout, metadata) =
+                                dm_linear::generate_gpt_linear_with_layout(sid, cid, erofs_layers)
+                                    .await
+                                    .context("gptdisk: failed to generate GPT dm-linear disk")?;
+                            let path = disk.path().display().to_string();
+                            linear_disk = Some(disk);
+                            (path, None, layout, metadata)
+                        } else {
+                            let (path, vmdk, layout, metadata) =
+                                generate_gpt_vmdk_with_layout(sid, cid, erofs_layers)
+                                    .context("gptdisk: failed to generate GPT VMDK")?;
+                            (path, Some(vmdk), layout, metadata)
+                        };
 
                         // Track GPT metadata files (head + padding) for cleanup
                         gpt_metadata_paths.push(gpt_files.head_path.clone());
@@ -596,14 +612,14 @@ impl ErofsMultiLayerRootfs {
 
                         info!(
                             sl!(),
-                            "GPT VMDK layout created - id: {}, {} partitions",
+                            "GPT disk layout created - id: {}, {} partitions",
                             erofs_path,
                             layout.partitions.len()
                         );
 
                         let device_config = &mut BlockConfigModern {
                             driver_option: block_driver.clone(),
-                            vmdk: Some(vmdk),
+                            vmdk,
                             path_on_host: erofs_path,
                             is_readonly: true,
                             blkdev_aio: BlockDeviceAio::new(&blkdev_info.block_device_aio),
@@ -617,13 +633,13 @@ impl ErofsMultiLayerRootfs {
                             &DeviceConfig::BlockCfgModern(device_config.clone()),
                         )
                         .await
-                        .context("failed to attach GPT VMDK block device")?;
+                        .context("failed to attach GPT block device")?;
 
                         let (base_device, device_id) =
                             extract_block_device_info(&device_info, true).await?;
                         info!(
                             sl!(),
-                            "GPT VMDK device attached - device_id: {} guest_path: {}",
+                            "GPT device attached - device_id: {} guest_path: {}",
                             device_id,
                             &base_device.source
                         );
@@ -723,6 +739,11 @@ impl ErofsMultiLayerRootfs {
                         gpt_erofs_processed = true;
                     } else {
                         // fsmerge mode: Single erofs mount with device= options
+                        if use_dm_linear {
+                            return Err(anyhow!(
+                                "OpenVMM's dm-linear workaround does not support fsmerge EROFS mounts; use independent EROFS layers"
+                            ));
+                        }
                         info!(
                             sl!(),
                             "multi-layer erofs: using fsmerge mode for erofs layers: {}",
@@ -848,6 +869,7 @@ impl ErofsMultiLayerRootfs {
         }
 
         Ok(Self {
+            linear_disk,
             guest_path: container_path,
             device_ids,
             rwlayer_storage,
@@ -911,6 +933,12 @@ impl Rootfs for ErofsMultiLayerRootfs {
         let mut dm = device_manager.write().await;
         for device_id in &self.device_ids {
             dm.try_remove_device(device_id).await?;
+        }
+
+        if let Some(disk) = &self.linear_disk {
+            // Release our disk and loop handles after guest detach.
+            // The kernel removes the mapping when its last opener closes.
+            disk.release()?;
         }
 
         // Clean up GPT metadata files (head, padding).
