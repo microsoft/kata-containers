@@ -557,6 +557,9 @@ mod tests {
         ) -> Result<agent::Empty> {
             unimplemented!()
         }
+        async fn set_hostname(&self, _: agent::SetHostnameRequest) -> Result<agent::Empty> {
+            unimplemented!()
+        }
         async fn remove_container(&self, _: agent::RemoveContainerRequest) -> Result<agent::Empty> {
             if self.removed.fetch_add(1, Ordering::SeqCst) < self.remove_failures {
                 return Err(anyhow!("injected remove container failure"));

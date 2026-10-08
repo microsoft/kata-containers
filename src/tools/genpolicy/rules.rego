@@ -41,6 +41,7 @@ default ReseedRandomDevRequest := false
 default ResizeVolumeRequest := false
 default ResumeContainerRequest := false
 default SetGuestDateTimeRequest := false
+default SetHostnameRequest := false
 default SetIPTablesRequest := false
 default SetPolicyRequest := false
 default SignalProcessRequest := true
