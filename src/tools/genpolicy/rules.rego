@@ -1240,9 +1240,10 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
     p_count := count(p_storages)
     i_count := count(i_storages)
     img_pull_count := count([s | s := i_storages[_]; s.driver == "image_guest_pull"])
-    print("allow_storages: p_count =", p_count, "i_count =", i_count, "img_pull_count =", img_pull_count)
+    host_erofs_count := count([s | s := i_storages[_]; is_host_erofs_rootfs(s, bundle_id)])
+    print("allow_storages: p_count =", p_count, "i_count =", i_count, "img_pull_count =", img_pull_count, "host_erofs_count =", host_erofs_count)
 
-    p_count == i_count - img_pull_count
+    p_count == i_count - img_pull_count - host_erofs_count
 
     every i_storage in i_storages {
         allow_storage(p_storages, i_storage, bundle_id, sandbox_id)
@@ -1283,6 +1284,11 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
     print("allow_storage with image_guest_pull: true")
 }
 allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
+    print("allow_storage with host erofs rootfs: start")
+    is_host_erofs_rootfs(i_storage, bundle_id)
+    print("allow_storage with host erofs rootfs: true")
+}
+allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
     print("allow_storage with scsi: start")
 
     i_storage.driver == "scsi"
@@ -1301,6 +1307,20 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
     allow_block_storage(p_storages, i_storage, bundle_id, sandbox_id)
 
     print("allow_storage with blk: true")
+}
+
+# Container image passed from the host EROFS snapshotter as a read-only block device.
+# TODO: the image layers are not integrity-checked (no dm-verity root hash in the policy).
+is_host_erofs_rootfs(i_storage, bundle_id) if {
+    i_storage.driver == "blk"
+    i_storage.fstype == "erofs"
+    i_storage.fs_group == null
+    i_storage.shared == false
+    regex.match("^[0-9a-f]{2}(/[0-9a-f]{2})?$", i_storage.source)
+    every o in i_storage.options {
+        regex.match("^(ro|X-kata\\.overlay-lower|X-kata\\.multi-layer=true|X-kata\\.gpt-partitioned=true|X-kata\\.partition-number=[0-9]+)$", o)
+    }
+    i_storage.mount_point == replace(policy_data.common.root_path, "$(bundle-id)", bundle_id)
 }
 
 # Validates all storage fields except driver and source.
