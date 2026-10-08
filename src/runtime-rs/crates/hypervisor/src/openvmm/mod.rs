@@ -93,6 +93,11 @@ impl OpenVmm {
 
 #[async_trait]
 impl Hypervisor for OpenVmm {
+    // No VMDK support in OpenVMM yet, so we require raw block devices for now.
+    fn requires_raw_block_devices(&self) -> bool {
+        true
+    }
+
     #[instrument]
     async fn prepare_vm(
         &self,
