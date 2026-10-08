@@ -121,6 +121,25 @@ printf '%s\n' \
 	'net.ipv4.ip_forward = 1' |
 	sudo tee /etc/sysctl.d/99-kubernetes-cri.conf >/dev/null
 sudo sysctl --system >/dev/null
+
+# Azure Linux's iptables.service drops INPUT/FORWARD by default, so pods cannot reach the API server.
+pod_rules=(
+	"INPUT -s ${pod_cidr} -j ACCEPT"
+	"FORWARD -s ${pod_cidr} -j ACCEPT"
+	"FORWARD -d ${pod_cidr} -j ACCEPT"
+)
+for rule in "${pod_rules[@]}"; do
+	# shellcheck disable=SC2086
+	sudo iptables -C ${rule} 2>/dev/null || sudo iptables -I ${rule}
+done
+ip4save=/etc/systemd/scripts/ip4save
+if [[ -f "${ip4save}" ]]; then
+	for rule in "${pod_rules[@]}"; do
+		sudo grep -qxF -- "-A ${rule}" "${ip4save}" ||
+			sudo sed -i "0,/^COMMIT\$/s|^COMMIT\$|-A ${rule}\nCOMMIT|" "${ip4save}"
+	done
+fi
+
 sudo systemctl daemon-reload
 sudo systemctl enable kubelet >/dev/null
 
