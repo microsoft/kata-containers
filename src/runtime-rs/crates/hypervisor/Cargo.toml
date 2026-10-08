@@ -11,6 +11,7 @@ license = { workspace = true }
 actix-rt = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+base64 = { workspace = true }
 go-flag = { workspace = true }
 libc = { workspace = true }
 nix = { workspace = true }
