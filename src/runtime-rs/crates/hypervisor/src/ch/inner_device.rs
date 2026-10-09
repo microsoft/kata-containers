@@ -537,7 +537,8 @@ impl TryFrom<BlockConfigModern> for DiskConfig {
             readonly: blkcfg.is_readonly,
             num_queues: blkcfg.num_queues,
             queue_size: blkcfg.queue_size as u16,
-            sparse: blkcfg.discard_unmap,
+            // CLH fallocates writable disks to their full logical size when sparse is false.
+            sparse: true,
             image_type,
             extent_anchor_path: blkcfg.extent_anchor_path,
             ..Default::default()
