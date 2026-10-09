@@ -10,8 +10,8 @@
 #
 # Verification strategy:
 #   The pod derives the expected workload layer count from the root overlay's
-#   lowerdirs, then requires the same number of kata-verity devices and
-#   dm-backed EROFS mounts. The guest rootfs and pause container are outside
+#   lowerdirs plus one for pause, then requires the same number of kata-verity
+#   devices and dm-backed EROFS mounts. The guest rootfs is outside
 #   this test's scope. The command exits 0 on success and 1 on failure; with
 #   restartPolicy: Never the pod reaches Succeeded or Failed respectively,
 #   which the test polls for.
