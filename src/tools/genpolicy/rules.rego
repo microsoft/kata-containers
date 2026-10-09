@@ -1244,6 +1244,7 @@ allow_storages(p_storages, i_storages, bundle_id, sandbox_id) if {
     print("allow_storages: p_count =", p_count, "i_count =", i_count, "img_pull_count =", img_pull_count, "host_erofs_count =", host_erofs_count)
 
     p_count == i_count - img_pull_count - host_erofs_count
+    erofs_verity_partitions_unique(i_storages)
 
     every i_storage in i_storages {
         allow_storage(p_storages, i_storage, bundle_id, sandbox_id)
@@ -1289,6 +1290,30 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
     print("allow_storage with host erofs rootfs: true")
 }
 allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
+    print("allow_storage with erofs verity layer: start")
+
+    i_storage.driver == "blk"
+    regex.match("^[0-9a-f]{2}(/[0-9a-f]{2})?$", i_storage.source)
+    i_storage.fstype == "erofs"
+    i_storage.fs_group == null
+    i_storage.shared == false
+    i_storage.mount_point == replace(policy_data.common.root_path, "$(bundle-id)", bundle_id)
+
+    some p_storage in p_storages
+    p_storage.driver == "erofs-verity-layer"
+
+    # The declared options carry the partition number and root hash; the runtime may only add
+    # the dm-verity layout parameters that the root hash already pins.
+    every p_option in p_storage.options {
+        p_option in i_storage.options
+    }
+    every i_option in i_storage.options {
+        allow_erofs_verity_option(p_storage, i_option)
+    }
+
+    print("allow_storage with erofs verity layer: true")
+}
+allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
     print("allow_storage with scsi: start")
 
     i_storage.driver == "scsi"
@@ -1310,8 +1335,10 @@ allow_storage(p_storages, i_storage, bundle_id, sandbox_id) if {
 }
 
 # Container image passed from the host EROFS snapshotter as a read-only block device.
-# TODO: the image layers are not integrity-checked (no dm-verity root hash in the policy).
+# Only allowed when the policy doesn't bind image layers to dm-verity root hashes, and
+# then the image layers are not integrity-checked.
 is_host_erofs_rootfs(i_storage, bundle_id) if {
+    policy_data.common.image_layer_verification != "host-erofs-dm-verity"
     i_storage.driver == "blk"
     i_storage.fstype == "erofs"
     i_storage.fs_group == null
@@ -1321,6 +1348,24 @@ is_host_erofs_rootfs(i_storage, bundle_id) if {
         regex.match("^(ro|X-kata\\.overlay-lower|X-kata\\.multi-layer=true|X-kata\\.gpt-partitioned=true|X-kata\\.partition-number=[0-9]+)$", o)
     }
     i_storage.mount_point == replace(policy_data.common.root_path, "$(bundle-id)", bundle_id)
+}
+
+allow_erofs_verity_option(p_storage, i_option) if {
+    i_option in p_storage.options
+}
+allow_erofs_verity_option(p_storage, i_option) if {
+    regex.match("^X-kata\\.dmverity\\.(hashoffset=[0-9]+|salt=[0-9a-f]{64}|no-superblock=(true|false))$", i_option)
+}
+
+# Each dm-verity layer must be a distinct partition, so one declared layer can't be presented twice.
+erofs_verity_partitions_unique(i_storages) if {
+    partitions := [o |
+        some s in i_storages
+        "X-kata.dmverity-enabled=true" in s.options
+        some o in s.options
+        startswith(o, "X-kata.partition-number=")
+    ]
+    count(partitions) == count({p | some p in partitions})
 }
 
 # Validates all storage fields except driver and source.

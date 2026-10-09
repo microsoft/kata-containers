@@ -66,6 +66,10 @@ containerd-client = "0.4.0"
 # username to UID:GID mapping support
 tar = "0.4.46"
 
+# EROFS layer dm-verity root hashes
+sha1 = "0.10"
+sha2.workspace = true
+
 # init data support
 kata-types = { path = "../../libs/kata-types" } # TODO(burgerdev): figure out how to use this from workspace without including safe-path.
 

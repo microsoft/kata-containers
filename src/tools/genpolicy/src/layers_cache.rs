@@ -137,6 +137,7 @@ mod tests {
             diff_id: DIFF_ID.to_string(),
             passwd: "root:x:0:0:root:/root:/bin/sh".to_string(),
             group: "root:x:0:".to_string(),
+            verity_hash: String::new(),
         });
 
         cache.persist();

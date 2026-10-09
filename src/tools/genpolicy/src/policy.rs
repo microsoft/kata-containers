@@ -12,6 +12,7 @@ use crate::mount_and_storage;
 use crate::no_policy;
 use crate::pod;
 use crate::policy;
+use crate::registry;
 use crate::secret;
 use crate::utils;
 use crate::yaml;
@@ -450,6 +451,20 @@ pub struct CommonData {
 
     /// Default capabilities for a privileged container.
     pub privileged_caps: Vec<String>,
+
+    /// "host-erofs-dm-verity" binds each image layer to its dm-verity root hash; "none" doesn't.
+    #[serde(default = "default_image_layer_verification")]
+    pub image_layer_verification: String,
+}
+
+pub const IMAGE_LAYER_VERIFICATION_NONE: &str = "none";
+pub const IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY: &str = "host-erofs-dm-verity";
+
+/// Marker driver for a declared layer: the presented driver and source are runtime-chosen.
+pub const EROFS_VERITY_LAYER_DRIVER: &str = "erofs-verity-layer";
+
+fn default_image_layer_verification() -> String {
+    IMAGE_LAYER_VERIFICATION_NONE.to_string()
 }
 
 /// Configuration from "kubectl config".
@@ -713,6 +728,11 @@ impl AgentPolicy {
             &mut storages,
             yaml_container,
             &self.config.settings,
+        );
+        get_erofs_layer_storages(
+            &mut storages,
+            &self.config.settings.common.image_layer_verification,
+            yaml_container.registry.get_image_layers(),
         );
 
         let mut linux = containerd::get_linux(is_privileged);
@@ -1359,6 +1379,34 @@ fn add_missing_strings(src: &Vec<String>, dest: &mut Vec<String>) {
         }
     }
     debug!("src = {:?}, dest = {:?}", src, dest)
+}
+
+fn get_erofs_layer_storages(
+    storages: &mut Vec<agent::Storage>,
+    image_layer_verification: &str,
+    image_layers: &[registry::ImageLayer],
+) {
+    if image_layer_verification != IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY {
+        return;
+    }
+
+    // The runtime numbers GPT partitions in overlayfs lowerdir order: topmost layer first.
+    for (index, layer) in image_layers.iter().rev().enumerate() {
+        storages.push(agent::Storage {
+            driver: EROFS_VERITY_LAYER_DRIVER.to_string(),
+            fstype: "erofs".to_string(),
+            options: vec![
+                "X-kata.overlay-lower".to_string(),
+                "X-kata.multi-layer=true".to_string(),
+                "X-kata.gpt-partitioned=true".to_string(),
+                format!("X-kata.partition-number={}", index + 1),
+                "X-kata.dmverity-enabled=true".to_string(),
+                format!("X-kata.dmverity.roothash={}", layer.verity_hash),
+            ],
+            mount_point: "$(root_path)".to_string(),
+            ..Default::default()
+        });
+    }
 }
 
 pub fn get_kata_namespaces(
