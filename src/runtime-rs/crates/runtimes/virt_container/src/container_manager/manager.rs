@@ -66,6 +66,10 @@ fn from_hooks(hooks: &Option<Vec<oci::Hook>>) -> &[oci::Hook] {
     }
 }
 
+fn restored_rootfs_needs_hot_unplug(sid: &str, container_id: &str) -> bool {
+    container_id != sid
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum SnapshotContainerLifecycle {
     Live {
@@ -338,10 +342,12 @@ impl ContainerManager for VirtContainerManager {
                     c.cleanup()
                         .await
                         .context("clean up deleted restored container")?;
-                    self.resource_manager
-                        .cleanup_restored_rootfs(container_id)
-                        .await
-                        .context("detach deleted restored rootfs")?;
+                    if restored_rootfs_needs_hot_unplug(&self.sid, container_id) {
+                        self.resource_manager
+                            .cleanup_restored_rootfs(container_id)
+                            .await
+                            .context("detach deleted restored rootfs")?;
+                    }
                     self.restore_context.retire_live(&host_id).await;
                 }
                 self.restore_context
@@ -924,5 +930,11 @@ mod tests {
             &process_state(ProcessStatus::Stopped, 0),
         )
         .is_err());
+    }
+
+    #[test]
+    fn restored_rootfs_hot_unplug_skips_stopped_sandbox() {
+        assert!(!restored_rootfs_needs_hot_unplug("sandbox", "sandbox"));
+        assert!(restored_rootfs_needs_hot_unplug("sandbox", "workload"));
     }
 }
