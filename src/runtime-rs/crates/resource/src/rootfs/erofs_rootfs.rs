@@ -650,7 +650,7 @@ impl ErofsMultiLayerRootfs {
                     // Two modes are supported:
                     // 1. fsmerge mode: Single erofs mount with `device=` options pointing to additional files.
                     //    This is used when containerd has already merged layers into a single file.
-                    // 2. GPT+VMDK mode: Multiple independent erofs mounts (each mount is a separate layer file).
+                    // 2. GPT+VMDK mode: Independent erofs mounts (each mount is a separate layer file).
                     //    This is used when containerd does NOT use fsmerge, and we need to create GPT partitions.
 
                     // In GPT mode, all erofs layers are processed in bulk on the first
@@ -673,8 +673,8 @@ impl ErofsMultiLayerRootfs {
                         .collect();
                     let total_erofs_mounts = erofs_mounts_indexed.len();
 
-                    // GPT+VMDK mode: Multiple independent erofs layer files
-                    if total_erofs_mounts > 1 {
+                    // GPT+VMDK mode: Independent erofs layer files
+                    if total_erofs_mounts > 1 || has_dmverity(&erofs_mounts_indexed) {
                         info!(
                             sl!(),
                             "multi-layer erofs: using GPT+VMDK mode for {} independent layers",
@@ -1324,6 +1324,15 @@ fn overlay_like(fs_type: &str) -> bool {
         fs_type.to_ascii_lowercase().as_str(),
         "overlay" | "format/overlay" | "format/mkdir/overlay"
     )
+}
+
+fn has_dmverity(erofs_mounts: &[(usize, &Mount)]) -> bool {
+    erofs_mounts.iter().any(|(_, mount)| {
+        mount
+            .options
+            .iter()
+            .any(|option| option.starts_with("X-containerd.dmverity="))
+    })
 }
 
 /// Check if mounts represent a multi-layer EROFS rootfs.
