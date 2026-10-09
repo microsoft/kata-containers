@@ -68,10 +68,15 @@ impl Container {
         let mut passwd = String::new();
         let mut group = String::new();
 
-        let image_layers =
-            get_image_layers(&config.layers_cache, &manifest, &config_layer, &ctrd_client)
-                .await
-                .unwrap();
+        let image_layers = get_image_layers(
+            &config.layers_cache,
+            &manifest,
+            &config_layer,
+            &ctrd_client,
+            crate::registry::derive_verity_hashes(config),
+        )
+        .await
+        .unwrap();
 
         // Find the last layer with an /etc/* file, respecting whiteouts.
         info!("Parsing users and groups in image layers");
@@ -94,6 +99,7 @@ impl Container {
             config_layer,
             passwd,
             group,
+            image_layers,
         })
     }
 }
@@ -281,6 +287,7 @@ pub async fn get_image_layers(
     manifest: &serde_json::Value,
     config_layer: &DockerConfigLayer,
     client: &containerd_client::Client,
+    derive_verity: bool,
 ) -> Result<Vec<ImageLayer>> {
     let mut layer_index = 0;
     let mut layersVec = Vec::new();
@@ -298,6 +305,7 @@ pub async fn get_image_layers(
                     layer["digest"].as_str().unwrap(),
                     client,
                     &config_layer.rootfs.diff_ids[layer_index].clone(),
+                    derive_verity,
                 )
                 .await?;
                 imageLayer.diff_id = config_layer.rootfs.diff_ids[layer_index].clone();
@@ -317,10 +325,13 @@ async fn get_users_from_layer(
     layer_digest: &str,
     client: &containerd_client::Client,
     diff_id: &str,
+    derive_verity: bool,
 ) -> Result<ImageLayer> {
     if let Some(layer) = layers_cache.get_layer(diff_id) {
-        info!("Using cache file");
-        return Ok(layer);
+        if !derive_verity || !layer.verity_hash.is_empty() {
+            info!("Using cache file");
+            return Ok(layer);
+        }
     }
 
     let temp_dir = tempfile::tempdir_in(".")?;
@@ -344,6 +355,15 @@ async fn get_users_from_layer(
         ));
     }
 
+    let verity_hash =
+        match crate::registry::get_verity_hash(&decompressed_path, layer_digest, derive_verity) {
+            Ok(hash) => hash,
+            Err(e) => {
+                temp_dir.close()?;
+                return Err(e);
+            }
+        };
+
     match get_users_from_decompressed_layer(&decompressed_path) {
         Err(e) => {
             temp_dir.close()?;
@@ -354,6 +374,7 @@ async fn get_users_from_layer(
                 diff_id: diff_id.to_string(),
                 passwd,
                 group,
+                verity_hash,
             };
             layers_cache.insert_layer(&layer);
             Ok(layer)
