@@ -159,6 +159,21 @@ version = 2
 
 [plugins."io.containerd.snapshotter.v1.erofs"]
   default_size = "0"
+  dmverity_mode = "on"
+
+# Reproducible layer images, so genpolicy can predict each layer's dm-verity root hash.
+[plugins."io.containerd.differ.v1.erofs"]
+  enable_dmverity = true
+  enable_tar_index = false
+  mkfs_options = ["-T0", "--mkfs-time", "--sort=none"]
+
+# Only the EROFS differ writes dm-verity metadata; don't let unpacking bypass it.
+# Setting unpack_config replaces the defaults, so keep overlayfs for runc pods.
+[plugins."io.containerd.transfer.v1.local"]
+  unpack_config = [
+    {platform = "linux/amd64", snapshotter = "erofs", differ = "erofs"},
+    {platform = "linux/amd64", snapshotter = "overlayfs", differ = "walking"},
+  ]
 
 [plugins."io.containerd.service.v1.diff-service"]
   default = ["erofs", "walking"]
@@ -169,6 +184,7 @@ cat >"${dropin_tmp}" <<EOF
 ExecStartPre=
 ExecStartPre=/sbin/modprobe overlay
 ExecStartPre=/sbin/modprobe erofs
+ExecStartPre=/sbin/modprobe dm_verity
 ExecStart=
 ExecStart=$(command -v containerd) --config ${containerd_config}
 EOF
@@ -192,6 +208,7 @@ if [[ ! -e "${crictl_config}" ]]; then
 	sudo install -D -m 0644 "${crictl_tmp}" "${crictl_config}"
 fi
 sudo modprobe erofs
+sudo modprobe dm_verity
 sudo systemctl daemon-reload
 sudo systemctl restart containerd
 

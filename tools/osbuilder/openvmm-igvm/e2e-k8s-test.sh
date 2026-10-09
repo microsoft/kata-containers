@@ -42,9 +42,9 @@ cleanup()
 trap cleanup EXIT
 
 kubectl delete pod "${pod_name}" --ignore-not-found --wait=true >/dev/null
-sudo ctr -n k8s.io images pull --local --snapshotter erofs \
+sudo ctr -n k8s.io images pull --snapshotter erofs \
 	--platform linux/amd64 "${pause_image}" >/dev/null
-sudo ctr -n k8s.io images pull --local --snapshotter erofs \
+sudo ctr -n k8s.io images pull --snapshotter erofs \
 	--platform linux/amd64 "${image}" >/dev/null
 kubectl apply -f "${manifest}" >/dev/null
 
