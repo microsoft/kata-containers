@@ -269,7 +269,10 @@ impl TryFrom<(MemoryInfo, GuestProtection)> for MemoryConfig {
             return Err(MemoryConfigError::DefaultMemSizeTooBig);
         }
 
-        let hotplug_size = if guest_protection_is_tdx(guest_protection_to_use) {
+        let hotplug_disabled =
+            guest_protection_is_tdx(guest_protection_to_use) || mem.disable_hotplug_memory;
+
+        let hotplug_size = if hotplug_disabled {
             None
         } else {
             // The amount of memory that can be hot-plugged is the total less the
@@ -1645,6 +1648,22 @@ mod tests {
                         usable_max_mem_bytes - (1024 * MIB),
                         PMEM_ALIGN_BYTES,
                     ),
+
+                    ..Default::default()
+                }),
+            },
+            TestData {
+                mem_info: MemoryInfo {
+                    default_memory: 1024,
+                    disable_hotplug_memory: true,
+
+                    ..Default::default()
+                },
+                guest_protection: GuestProtection::NoProtection,
+                result: Ok(MemoryConfig {
+                    size: 1024_u64 * MIB,
+                    shared: true,
+                    hotplug_size: None,
 
                     ..Default::default()
                 }),

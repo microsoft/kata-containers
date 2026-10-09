@@ -124,6 +124,11 @@ overhead_memory = @DEFOVERHEADMEMSZ_CLH@
 #                        configuration.
 memory_restore_mode = "copyonwrite"
 
+# Boot without a memory hotplug region. Required for copyonwrite restore: a
+# hotplug region makes Cloud Hypervisor fall back to copy, and it cannot be
+# removed at restore time without moving the guest's ACPI devices.
+disable_hotplug_memory = false
+
 # Shared file system type:
 #   - virtio-fs
 #   - virtio-fs-nydus
