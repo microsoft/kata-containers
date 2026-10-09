@@ -1,0 +1,68 @@
+diff --git a/vm/loader/igvmfilegen/src/snp_linux_direct.rs b/vm/loader/igvmfilegen/src/snp_linux_direct.rs
+index f34a01684..55929e3de 100644
+--- a/vm/loader/igvmfilegen/src/snp_linux_direct.rs
++++ b/vm/loader/igvmfilegen/src/snp_linux_direct.rs
+@@ -27,8 +27,9 @@
+ use loader_defs::linux::SnpBootShimParams;
+ use loader_defs::linux::SnpBootShimRange;
+ use memory_range::MemoryRange;
+-use serial_16550_resources::ComPort;
+ use std::io::Seek;
++use vm_topology::layout::LayoutBuilder;
++use vm_topology::layout::Placement;
+ use vm_topology::memory::MemoryLayout;
+ use vm_topology::pcie::PcieHostBridge;
+ use vm_topology::processor::ProcessorTopology;
+@@ -86,10 +87,35 @@ fn new(memory_page_count: u64, processor_count: u32) -> anyhow::Result<Self> {
+         // Match the single RAM node instead of inheriting per-socket vnodes.
+         processors.set_vnodes(&vec![0; processor_count as usize]);
+ 
++        let mut ecam_range = MemoryRange::EMPTY;
++        let mut low_mmio = MemoryRange::EMPTY;
++        let mut high_mmio = MemoryRange::EMPTY;
++        let mut ram = Vec::new();
++        let mut allocator = LayoutBuilder::new();
++        allocator.fixed("chipset-low", MemoryRange::new(0xf800_0000..0x1_0000_0000));
++        allocator.request("ecam", &mut ecam_range, 0x0800_0000, 0x10_0000, Placement::Mmio32);
++        allocator.request("pci-low", &mut low_mmio, 0x1000_0000, 0x20_0000, Placement::Mmio32);
++        allocator.request("pci-high", &mut high_mmio, 0x4_0000_0000, 0x20_0000, Placement::Mmio64);
++        allocator.ram("ram", &mut ram, memory_size, PAGE_SIZE);
++        allocator.allocate().context("allocating diagnostic PCIe layout")?;
++        tracing::info!(?ecam_range, ?low_mmio, ?high_mmio, "diagnostic PCIe layout");
++
+         Ok(Self {
+             memory,
+             processors,
+-            pcie_host_bridges: Vec::new(),
++            pcie_host_bridges: vec![PcieHostBridge {
++                index: 0,
++                segment: 0,
++                start_bus: 0,
++                end_bus: 127,
++                ecam_range,
++                low_mmio,
++                high_mmio,
++                cxl: None,
++                vnode: None,
++                preserve_bars: false,
++                preserve_boot_config: false,
++            }],
+         })
+     }
+ 
+@@ -196,7 +222,6 @@ pub fn build(params: BuildParams<'_>) -> anyhow::Result<IgvmOutput> {
+     let (mut kernel, mut initrd) = open_linux_resources(linux, resources)?;
+     let initrd_config = initrd_config(&mut initrd)?;
+     let mut loader = new_loader(policy, c_bit_position, memory_page_count, injection_type);
+-    let com1 = ComPort::Com1;
+ 
+     let load_info = loader::linux::load_x86(
+         &mut loader.loader(),
+@@ -207,7 +232,6 @@ pub fn build(params: BuildParams<'_>) -> anyhow::Result<IgvmOutput> {
+         |gpa| {
+             let tables = acpi_builder.build_acpi_tables(gpa, |dsdt| {
+                 dsdt.add_apic();
+-                dsdt.add_uart(b"\\_SB.UAR1", b"COM1", 1, com1.io_port(), com1.irq().into());
+                 dsdt.add_rtc();
+             });
+             loader::linux::AcpiTables {
