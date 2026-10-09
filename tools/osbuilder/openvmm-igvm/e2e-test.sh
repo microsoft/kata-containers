@@ -61,12 +61,10 @@ cleanup()
 trap cleanup EXIT
 
 sudo ctr -n k8s.io images pull \
-	--local \
 	--snapshotter erofs \
 	--platform linux/amd64 \
 	"${pause_image}" >/dev/null
 sudo ctr -n k8s.io images pull \
-	--local \
 	--snapshotter erofs \
 	--platform linux/amd64 \
 	"${image}" >/dev/null
