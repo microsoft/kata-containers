@@ -196,18 +196,24 @@ impl TryFrom<MemoryInfo> for MemoryConfig {
             return Err(MemoryConfigError::DefaultMemSizeTooBig);
         }
 
-        // The amount of memory that can be hot-plugged is the total less the
-        // amount allocated at VM start.
-        let hotplug_size_bytes = max_mem_bytes
-            .checked_sub(mem_bytes)
-            .ok_or(())
-            .map_err(|_| MemoryConfigError::BadMemSizeForHotplug(max_mem_bytes))?;
-
-        let hotplug_size = Some(
-            checked_next_multiple_of(hotplug_size_bytes, PMEM_ALIGN_BYTES)
+        // A non-null hotplug region, even a 0-sized one, makes copy-on-write
+        // restores fall back to eager copies.
+        let hotplug_size = if mem.disable_hotplug_memory {
+            None
+        } else {
+            // The amount of memory that can be hot-plugged is the total less the
+            // amount allocated at VM start.
+            let hotplug_size_bytes = max_mem_bytes
+                .checked_sub(mem_bytes)
                 .ok_or(())
-                .map_err(|_| MemoryConfigError::BadPmemAlign(hotplug_size_bytes))?,
-        );
+                .map_err(|_| MemoryConfigError::BadMemSizeForHotplug(max_mem_bytes))?;
+
+            Some(
+                checked_next_multiple_of(hotplug_size_bytes, PMEM_ALIGN_BYTES)
+                    .ok_or(())
+                    .map_err(|_| MemoryConfigError::BadPmemAlign(hotplug_size_bytes))?,
+            )
+        };
 
         let cfg = MemoryConfig {
             size: mem_bytes,
@@ -1253,6 +1259,21 @@ mod tests {
                         usable_max_mem_bytes - (1024 * MIB),
                         PMEM_ALIGN_BYTES,
                     ),
+
+                    ..Default::default()
+                }),
+            },
+            TestData {
+                mem_info: MemoryInfo {
+                    default_memory: 1024,
+                    disable_hotplug_memory: true,
+
+                    ..Default::default()
+                },
+                result: Ok(MemoryConfig {
+                    size: 1024_u64 * MIB,
+                    shared: true,
+                    hotplug_size: None,
 
                     ..Default::default()
                 }),
