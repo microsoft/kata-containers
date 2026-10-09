@@ -53,6 +53,7 @@ guest-image:
 		BUILD_TYPE=release \
 		LIBC=gnu \
 		SECCOMP=yes \
+		USE_DEVMAPPER=yes \
 		kata-agent kata-agent.service kata-containers.target
 	sudo rm -f \
 		"$(OUT_DIR)/.cbl-mariner_rootfs.done" \
