@@ -13,6 +13,7 @@ use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use kata_types::mount::Mount;
 mod block_rootfs;
+mod dm_linear;
 mod erofs_rootfs;
 pub mod virtual_volume;
 
@@ -208,6 +209,7 @@ impl RootFsResource {
                     cri_name,
                     rootfs_mounts,
                     share_fs,
+                    h.requires_raw_block_devices(),
                 )
                 .await
                 .context("new multi-layer erofs rootfs")?;
