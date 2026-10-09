@@ -67,6 +67,8 @@ use kata_sys_util::hooks::HookStates;
 use kata_sys_util::protection::{available_guest_protection, GuestProtection};
 use kata_sys_util::spec::load_oci_spec;
 use kata_types::capabilities::CapabilityBits;
+#[cfg(feature = "openvmm")]
+use kata_types::config::hypervisor::snp_igvm_enabled;
 use kata_types::config::hypervisor::Hypervisor as HypervisorConfig;
 #[cfg(all(
     feature = "cloud-hypervisor",
@@ -2212,6 +2214,23 @@ impl VirtSandbox {
         // protection they cannot use, e.g. SEV without SEV-SNP).
         if !hypervisor_config.security_info.confidential_guest {
             return Ok(None);
+        }
+
+        #[cfg(feature = "openvmm")]
+        if self.resource_manager.config().await.runtime.hypervisor_name == HYPERVISOR_NAME_OPENVMM
+            && snp_igvm_enabled(hypervisor_config)?
+        {
+            // available_guest_protection probes KVM, not MSHV. OpenVMM validates
+            // SNP support at launch and obtains the firmware layout from IGVM.
+            return Ok(Some(ProtectionDeviceConfig::SevSnp(SevSnpConfig {
+                is_snp: true,
+                // Placeholders for KVM/QEMU fields unused by OpenVMM.
+                cbitpos: 0,
+                phys_addr_reduction: 0,
+                // No separate firmware file is needed for IGVM boot.
+                firmware: String::new(),
+                host_data: init_data,
+            })));
         }
 
         let available_protection = available_guest_protection()?;
