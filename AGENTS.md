@@ -60,10 +60,19 @@ Preserve all of the following in `src/runtime-rs`:
 - Every runtime-rs hypervisor config template that enables `static_sandbox_resource_mgmt` must
   also carry `static_sandbox_default_workload_mem` and `static_sandbox_default_workload_vcpus`.
   These are fork-added keys and default to `0` when absent (`#[serde(default)]`).
+- kata-v2 (snapshot/restore) CLH sandboxes must boot without a memory hotplug window: the kata-v2 template
+  (`configuration-clh-azure-runtime-rs-v2.toml.in`) sets `disable_hotplug_memory = true`, which
+  makes the CLH config conversion omit `hotplug_size`. CLH copy-on-write restore rejects any
+  hotplug window, and removing it only in the restore config shifts the guest's ACPI device
+  addresses (PCI hotplug into restored VMs stops working). Restore may only flip `memory.shared`.
 
 Primary files:
 
 - `src/runtime-rs/crates/resource/src/cpu_mem/initial_size.rs`
+- `src/libs/kata-types/src/config/hypervisor/mod.rs`
+- `src/runtime-rs/crates/hypervisor/ch-config/src/convert.rs`
+- `src/runtime-rs/crates/hypervisor/src/ch/inner_hypervisor.rs`
+- `src/runtime-rs/config/configuration-clh-azure-runtime-rs-v2.toml.in`
 - `src/runtime-rs/config/configuration-clh-azure-runtime-rs.toml.in`
 - `src/runtime-rs/config/configuration-clh-runtime-rs.toml.in`
 - `src/runtime-rs/config/configuration-dragonball.toml.in`

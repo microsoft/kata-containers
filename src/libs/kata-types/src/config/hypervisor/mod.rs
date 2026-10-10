@@ -1067,6 +1067,13 @@ pub struct MemoryInfo {
     #[serde(default)]
     pub memory_restore_mode: MemoryRestoreMode,
 
+    /// Boot without a memory hotplug region (Cloud Hypervisor only).
+    ///
+    /// Cloud Hypervisor copy-on-write snapshot restore requires guest RAM
+    /// that has no hotplug region.
+    #[serde(default)]
+    pub disable_hotplug_memory: bool,
+
     /// Enable swap in guest.
     #[serde(default)]
     pub enable_guest_swap: bool,
