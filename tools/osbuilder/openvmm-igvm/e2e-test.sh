@@ -101,7 +101,7 @@ guest_vps="$("${cri[@]}" exec "${container_id}" nproc)"
 	die "guest has ${guest_vps} VPs, expected ${expected_vps}"
 
 sudo ctr -n k8s.io snapshots --snapshotter erofs ls |
-	grep -q "${container_id}" ||
+	grep "${container_id}" >/dev/null ||
 	die "container does not have an active EROFS snapshot"
 
 openvmm_pid="$(

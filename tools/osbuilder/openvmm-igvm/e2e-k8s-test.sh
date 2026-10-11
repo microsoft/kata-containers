@@ -70,7 +70,7 @@ container_id="$(
 )"
 [[ -n "${container_id}" ]] || die "CRI container ID was not found"
 sudo ctr -n k8s.io snapshots --snapshotter erofs ls |
-	grep -q "${container_id}" ||
+	grep "${container_id}" >/dev/null ||
 	die "container does not have an active EROFS snapshot"
 pgrep -f 'openvmm.*--ttrpc' >/dev/null || die "OpenVMM process was not found"
 snp_dmesg="$(kubectl exec "${pod_name}" -- dmesg)"
