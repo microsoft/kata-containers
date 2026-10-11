@@ -27,6 +27,7 @@ kernel="${KERNEL:-${kernel_build_dir}/arch/x86/boot/bzImage}"
 kata_image="${KATA_IMAGE:-${out_dir}/kata-containers.img}"
 root_hash_file="${ROOT_HASH_FILE:-${out_dir}/root_hash_.txt}"
 runtime_config="${RUNTIME_CONFIG:-${out_dir}/configuration-openvmm-snp-runtime-rs.toml}"
+network_model="${NETWORK_MODEL:-none}"
 shim_path="${SHIM_PATH:-/usr/local/bin/containerd-shim-kata-cc-v2}"
 containerd_config="${CONTAINERD_CONFIG:-/etc/containerd/config-openvmm.toml}"
 containerd_dropin="${CONTAINERD_DROPIN:-/etc/systemd/system/containerd.service.d/20-kata-openvmm.conf}"
@@ -103,12 +104,20 @@ if [[ -z "${igvm_override}" &&
 fi
 [[ -f "${igvm}" ]] || die "IGVM was not built: ${igvm}"
 
+# "none" (no guest NIC) is required by the host-network e2e-test pod;
+# Kubernetes pods need "tcfilter".
+case "${network_model}" in
+none) disable_new_netns=true ;;
+tcfilter) disable_new_netns=false ;;
+*) die "unsupported NETWORK_MODEL: ${network_model} (none or tcfilter)" ;;
+esac
+
 make -B -C "${runtime_dir}" \
 	HYPERVISOR=openvmm-runtime-rs \
 	OPENVMMPATH="${openvmm}" \
 	IGVMPATH_OPENVMM_SNP="${igvm}" \
 	IMAGEPATH_OPENVMM_AZURE="${kata_image}" \
-	DEFNETWORKMODEL_OPENVMM=none \
+	DEFNETWORKMODEL_OPENVMM="${network_model}" \
 	crates/shim/src/config.rs \
 	config/configuration-openvmm-snp-runtime-rs.toml
 
@@ -122,7 +131,7 @@ make -B -C "${runtime_dir}" \
 
 generated_config="${runtime_dir}/config/configuration-openvmm-snp-runtime-rs.toml"
 sed \
-	-e 's/^disable_new_netns = false$/disable_new_netns = true/' \
+	-e "s/^disable_new_netns = .*/disable_new_netns = ${disable_new_netns}/" \
 	-e "s/^default_vcpus = .*/default_vcpus = ${vp_count}/" \
 	-e "s/^static_sandbox_default_workload_vcpus = .*/static_sandbox_default_workload_vcpus = ${vp_count}/" \
 	"${generated_config}" >"${runtime_config}"

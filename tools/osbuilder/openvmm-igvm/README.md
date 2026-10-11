@@ -216,7 +216,10 @@ generate and install an IGVM with the desired fixed `VP_COUNT` instead.
 ## Validate through Kubernetes
 
 The Kubernetes flow assumes `make e2e-setup` has already installed the Kata
-runtime and configured containerd.
+runtime and configured containerd. Run it with `NETWORK_MODEL=tcfilter` so
+pods get a guest NIC; the default `none` gives guests no network, so Services,
+DNS and probes from the kubelet fail. `make e2e-test` needs the default `none`:
+its pod uses the host network, which `tcfilter` doesn't support.
 
 Create an experimental single-node Kubernetes cluster:
 
