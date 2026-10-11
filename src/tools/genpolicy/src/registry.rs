@@ -37,6 +37,7 @@ pub struct Container {
     pub config_layer: DockerConfigLayer,
     pub passwd: String,
     pub group: String,
+    pub image_layers: Vec<ImageLayer>,
 }
 
 /// Image config layer properties.
@@ -73,6 +74,9 @@ pub struct ImageLayer {
     pub diff_id: String,
     pub passwd: String,
     pub group: String,
+    /// dm-verity root hash of the layer's EROFS image, as the host EROFS differ builds it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub verity_hash: String,
 }
 
 /// See https://docs.docker.com/reference/dockerfile/#volume.
@@ -178,6 +182,7 @@ impl Container {
             &reference,
             &manifest,
             &config_layer,
+            derive_verity_hashes(config),
         )
         .await
         .unwrap();
@@ -205,7 +210,12 @@ impl Container {
             config_layer,
             passwd,
             group,
+            image_layers,
         })
+    }
+
+    pub fn get_image_layers(&self) -> &[ImageLayer] {
+        &self.image_layers
     }
 
     pub fn get_gid_from_passwd_uid(&self, uid: u32) -> Result<u32> {
@@ -565,6 +575,7 @@ async fn get_image_layers(
     reference: &Reference,
     manifest: &manifest::OciImageManifest,
     config_layer: &DockerConfigLayer,
+    derive_verity: bool,
 ) -> Result<Vec<ImageLayer>> {
     let mut layer_index = 0;
     let mut layers = Vec::new();
@@ -582,6 +593,7 @@ async fn get_image_layers(
                     reference,
                     &layer.digest,
                     &config_layer.rootfs.diff_ids[layer_index].clone(),
+                    derive_verity,
                 )
                 .await?;
                 imageLayer.diff_id = config_layer.rootfs.diff_ids[layer_index].clone();
@@ -603,10 +615,13 @@ async fn get_users_from_layer(
     reference: &Reference,
     layer_digest: &str,
     diff_id: &str,
+    derive_verity: bool,
 ) -> Result<ImageLayer> {
     if let Some(layer) = layers_cache.get_layer(diff_id) {
-        info!("get_users_from_layer: using cache file");
-        return Ok(layer);
+        if !derive_verity || !layer.verity_hash.is_empty() {
+            info!("get_users_from_layer: using cache file");
+            return Ok(layer);
+        }
     }
 
     let temp_dir = tempfile::tempdir_in(".")?;
@@ -631,6 +646,14 @@ async fn get_users_from_layer(
         bail!(format!("Failed to decompress image layer, error {e}"));
     };
 
+    let verity_hash = match get_verity_hash(&decompressed_path, layer_digest, derive_verity) {
+        Ok(hash) => hash,
+        Err(e) => {
+            temp_dir.close()?;
+            return Err(e);
+        }
+    };
+
     match get_users_from_decompressed_layer(&decompressed_path) {
         Err(e) => {
             temp_dir.close()?;
@@ -641,11 +664,29 @@ async fn get_users_from_layer(
                 diff_id: diff_id.to_string(),
                 passwd,
                 group,
+                verity_hash,
             };
             layers_cache.insert_layer(&layer);
             Ok(layer)
         }
     }
+}
+
+pub fn derive_verity_hashes(config: &Config) -> bool {
+    config.settings.common.image_layer_verification
+        == crate::policy::IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY
+}
+
+pub fn get_verity_hash(
+    decompressed_path: &Path,
+    layer_digest: &str,
+    derive_verity: bool,
+) -> Result<String> {
+    if !derive_verity {
+        return Ok(String::new());
+    }
+    crate::erofs::layer_root_hash(decompressed_path, layer_digest)
+        .map_err(|e| anyhow!("Failed to derive dm-verity root hash for layer {layer_digest}: {e}"))
 }
 
 async fn create_decompressed_layer_file(
@@ -871,6 +912,7 @@ mod tests {
                 "root:x:0:0:root:/root:/bin/sh\nwww-data:x:33:33:www-data:/var/www:/sbin/nologin\n"
                     .to_string(),
             group: "root:x:0:\nwww-data:x:33:\nstaff:x:50:\nwheel:x:10:\n".to_string(),
+            image_layers: Vec::new(),
         }
     }
 

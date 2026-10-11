@@ -2495,6 +2495,8 @@ dependencies = [
  "serde_ignored",
  "serde_json",
  "serde_yaml 0.8.26",
+ "sha1",
+ "sha2 0.11.0",
  "slog",
  "tar",
  "tempfile",
