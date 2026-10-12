@@ -665,7 +665,7 @@ ifeq ($(USE_OPENVMM),true)
     OPENVMMCMD ?= openvmm
     OPENVMMPATH := $(PREFIXDEPS)/bin/$(OPENVMMCMD)
     OPENVMMVALIDHYPERVISORPATHS := [\"$(OPENVMMPATH)\"]
-    VMROOTFSDRIVER_OPENVMM := virtio-blk-pci
+    VMROOTFSDRIVER_OPENVMM := virtio-pmem
     DEFBLOCKSTORAGEDRIVER_OPENVMM := virtio-blk-pci
     DEFNETWORKMODEL_OPENVMM := tcfilter
     KERNELPARAMS_OPENVMM = console=hvc0 cgroup_no_v1=all systemd.unified_cgroup_hierarchy=1

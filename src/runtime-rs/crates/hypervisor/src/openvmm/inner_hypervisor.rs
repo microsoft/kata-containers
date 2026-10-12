@@ -16,12 +16,13 @@ use super::vmservice;
 use super::{
     OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE, OPENVMM_BLOCK_HOTPLUG_PORT_COUNT,
     OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_NET_PCI_FIRST_DEVICE, OPENVMM_NET_PCI_MAX_COUNT,
-    OPENVMM_PMEM_PCI_DEVICE, OPENVMM_ROOTFS_PCI_DEVICE, OPENVMM_SHAREFS_PCI_DEVICE,
-    OPENVMM_VSOCK_PCI_DEVICE,
+    OPENVMM_ROOTFS_PCI_DEVICE, OPENVMM_SHAREFS_PCI_DEVICE, OPENVMM_VSOCK_PCI_DEVICE,
 };
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
-use crate::{DeviceType, MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
+use crate::{
+    DeviceType, MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK, VM_ROOTFS_DRIVER_PMEM,
+};
 
 const OPENVMM_STANDALONE_VIRTIO_FS: &str = "virtio-fs";
 
@@ -29,13 +30,14 @@ fn build_kernel_cmdline(
     debug: bool,
     kernel_params: &str,
     kernel_verity_params: &str,
+    rootfs_driver: &str,
     rootfs_type: &str,
 ) -> Result<String> {
     let mut params = KernelParams::new(debug);
 
     let mut rootfs_params = KernelParams::new_rootfs_kernel_params(
         kernel_verity_params,
-        VM_ROOTFS_DRIVER_BLK,
+        rootfs_driver,
         rootfs_type,
         false,
     )?;
@@ -80,25 +82,23 @@ pub(super) fn blk_device_kind(path: String, read_only: bool) -> vmservice::PcieD
 }
 
 fn pmem_device_kind(path: String) -> vmservice::PcieDeviceKind {
-    virtio_pcie_device(vmservice::virtio_device::Kind::Pmem(vmservice::VirtioPmem {
-        path,
-        ..Default::default()
-    }))
+    virtio_pcie_device(vmservice::virtio_device::Kind::Pmem(
+        vmservice::VirtioPmem {
+            path,
+            ..Default::default()
+        },
+    ))
 }
 
-fn pmem_image_path() -> Result<String> {
-    /*
-    let home = std::env::var_os("HOME").context("HOME is required to locate the PMEM image")?;
-    std::path::PathBuf::from(home)
-        .join("tmp/mariner.image")
-        .into_os_string()
-        .into_string()
-        .map_err(|_| anyhow!("PMEM image path is not valid UTF-8"))
-    */
-    std::path::PathBuf::from("/mariner.image")
-        .into_os_string()
-        .into_string()
-        .map_err(|_| anyhow!("PMEM image path is not valid UTF-8"))
+fn rootfs_device_kind(path: String, driver: &str) -> Result<vmservice::PcieDeviceKind> {
+    match driver {
+        VM_ROOTFS_DRIVER_BLK => Ok(blk_device_kind(path, true)),
+        VM_ROOTFS_DRIVER_PMEM => Ok(pmem_device_kind(path)),
+        unsupported => Err(anyhow!(
+            "openvmm does not support rootfs driver '{}'",
+            unsupported
+        )),
+    }
 }
 
 /// Build a virtio-net-pci endpoint backed by a host TAP, opened by name inside
@@ -225,6 +225,7 @@ impl OpenVmmInner {
             self.config.debug_info.enable_debug,
             &self.config.boot_info.kernel_params,
             &self.config.boot_info.kernel_verity_params,
+            &self.config.boot_info.vm_rootfs_driver,
             &self.config.boot_info.rootfs_type,
         )?;
         let cmdline = adapt_cmdline_for_rpc(cmdline);
@@ -240,22 +241,14 @@ impl OpenVmmInner {
         // into the pre-declared empty hotplug ports.
         let mut root_ports: Vec<vmservice::PciePort> = Vec::new();
 
-        let pmem_path = pmem_image_path()?;
-        info!(sl!(), "openvmm: virtio-pmem at device {}: {}", OPENVMM_PMEM_PCI_DEVICE, pmem_path);
-        root_ports.push(make_pcie_port(
-            "pmem",
-            OPENVMM_PMEM_PCI_DEVICE,
-            false,
-            Some(pmem_device_kind(pmem_path)),
-        ));
-
-        // rootfs as virtio-blk-pci. The guest mounts it via the kernel cmdline
-        // (root=/dev/vda), so no guest pci_path needs to be reported.
+        // The rootfs is cold-plugged using vm_rootfs_driver and mounted through
+        // the corresponding root= kernel parameter.
         let rootfs_disk_path = if !self.config.boot_info.image.is_empty() {
             let disk_path = self.config.boot_info.image.clone();
             info!(
                 sl!(),
-                "openvmm: rootfs as virtio-blk-pci at device {}: {}",
+                "openvmm: rootfs as {} at device {}: {}",
+                self.config.boot_info.vm_rootfs_driver,
                 OPENVMM_ROOTFS_PCI_DEVICE,
                 disk_path
             );
@@ -263,7 +256,10 @@ impl OpenVmmInner {
                 "rootfs",
                 OPENVMM_ROOTFS_PCI_DEVICE,
                 false,
-                Some(blk_device_kind(disk_path.clone(), true)),
+                Some(rootfs_device_kind(
+                    disk_path.clone(),
+                    &self.config.boot_info.vm_rootfs_driver,
+                )?),
             ));
             Some(disk_path)
         } else {
@@ -595,5 +591,32 @@ impl OpenVmmInner {
 
     pub(crate) async fn get_passfd_listener_addr(&self) -> Result<(String, u32)> {
         Err(anyhow!("openvmm passfd IO is not supported"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pmem_rootfs_uses_pmem_kernel_device() {
+        let cmdline = build_kernel_cmdline(false, "", "", VM_ROOTFS_DRIVER_PMEM, "ext4").unwrap();
+
+        assert!(cmdline.contains("root=/dev/pmem0p1"));
+        assert!(!cmdline.contains("root=/dev/vda1"));
+    }
+
+    #[test]
+    fn pmem_rootfs_uses_configured_image() {
+        let path = "/var/lib/kata/rootfs.img".to_string();
+        let device = rootfs_device_kind(path.clone(), VM_ROOTFS_DRIVER_PMEM).unwrap();
+
+        let vmservice::pcie_device_kind::Kind::Virtio(virtio) = device.kind.unwrap() else {
+            panic!("rootfs device is not virtio");
+        };
+        let vmservice::virtio_device::Kind::Pmem(pmem) = virtio.kind.unwrap() else {
+            panic!("rootfs device is not pmem");
+        };
+        assert_eq!(pmem.path, path);
     }
 }
