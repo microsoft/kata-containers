@@ -38,7 +38,7 @@ firmware = "@FIRMWAREPATH@"
 # List of valid annotation names for the hypervisor
 # Each member of the list is a regular expression, which is the base name
 # of the annotation, e.g. "path" for io.katacontainers.config.hypervisor.path"
-enable_annotations = @DEFENABLEANNOTATIONS_COCO@
+enable_annotations = ["enable_iommu", "default_vcpus", "default_memory", "cc_init_data"]
 
 # List of valid annotations values for the hypervisor
 # Each member of the list is a path pattern as described by glob(3).
@@ -479,7 +479,7 @@ sandbox_cgroup_only = @DEFSANDBOXCGROUPONLY_OPENVMM@
 #   - block-plain
 #     Plugs a block device to be mounted directly in the guest.
 #
-emptydir_mode = "@DEFEMPTYDIRMODE@"
+emptydir_mode = "block-encrypted"
 
 # Enabled experimental feature list, format: ["a", "b"].
 # Experimental features are features not stable enough for production,

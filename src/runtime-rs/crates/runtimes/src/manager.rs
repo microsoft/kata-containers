@@ -1202,8 +1202,10 @@ mod tests {
         h.security_info.confidential_guest = true;
         h.security_info.sev_snp_guest = true;
         config.hypervisor.insert("openvmm".to_string(), h);
-        let mut agent = kata_types::config::Agent::default();
-        agent.debug = true;
+        let agent = kata_types::config::Agent {
+            debug: true,
+            ..Default::default()
+        };
         config.agent.insert("kata".to_string(), agent);
         update_agent_kernel_params(&mut config).unwrap();
         assert!(config.hypervisor["openvmm"]

@@ -1,174 +1,121 @@
 # OpenVMM standard-injection SNP
 
-This builds fixed-profile SNP guests for the runtime-rs OpenVMM backend.
-Each profile embeds its CPU count, memory layout, kernel command line and
-rootfs verity hash in an IGVM. Changing CPU or memory size requires rebuilding
-the IGVM. Dynamic sizing with one approved IGVM awaits the updated bootshim.
+**DO NOT MERGE: temporary MAP source snapshot.** See `DO-NOT-MERGE.txt` at the
+repository root. The latest boot review changes require fresh compilation and
+E2E validation; earlier frozen-image results do not validate this exact revision.
 
-## Sources and prerequisites
+Build launch-sized SNP IGVMs from the installed Azure Linux `kernel-uvm-cc`
+and `openvmm` packages. The image pipeline configures the approved package
+repositories, including buddy repositories when evaluating candidate packages.
+This builder does not fetch private host payloads or compile either kernel.
 
-- OpenVMM is pinned by `assets.hypervisor.openvmm` in `versions.yaml`.
-- Guest kernel: `chris-oo/CBL-Mariner-Linux-Kernel`, commit
-  `a155739c182a97c11746002df305b9f91a0c0c42`.
-- `standard-snp/kernel.config` is the fixed guest configuration.
-- `standard-snp/0001-vmservice-use-low-ECAM-for-isolated-guests.patch` is the VMM-only release patch:
-  the VM service places ECAM below 4 GiB only for isolated guests.
-- `standard-snp/igvmfilegen-pci-platform.patch` supplies the guest's measured
-  PCI bridge layout and removes COM1 from its ACPI tables. It is separate for
-  vendoring the generator independently of the VMM package. Both patches apply
-  to the pinned OpenVMM release; neither changes the non-confidential ECAM default.
-- Host MSHV must support normal SNP injection and correct teardown. The tested
-  host used `f10394f7b07d5a1ee469fc3b85249d3bcdeee193` plus
-  [the unmap-first fix](https://github.com/chris-oo/openvmm/blob/801b9f4f401f237b7dfc194152c7954a81100874/mshv-snp-unmap-first.patch).
-  Host installation is separate; these scripts do not provision or reboot hosts.
+## Dependencies
 
-Build on x86-64 Azure Linux 3 with the repository Rust toolchain, guest-kernel
-build dependencies, GNU agent dependencies (including device-mapper development
-libraries), `jq`, `yq`, and the existing osbuilder image dependencies.
-Install the Rust `x86_64-unknown-none` target for `snp_bootshim`.
-The node needs `dmsetup`, loop devices with `LOOP_CONFIGURE` support (Linux 5.8+),
-device-mapper `linear` and `zero` targets, and root privileges.
+On the Azure Linux 3 x86-64 builder, install the approved package versions:
+
+```bash
+sudo tdnf install -y kernel-uvm-cc openvmm
+```
+
+The guest kernel input is `/usr/share/kernel-uvm-cc/bzImage`, not
+`vmlinux.bin`. The package owns the kernel configuration and release. Installing
+the guest package alone does not update an IGVM; the image must be regenerated.
+The OpenVMM package must match the release in `versions.yaml` and include the
+confidential-only low-ECAM fix. Its runtime binary is staged from `/usr/bin/openvmm`.
+
+The generator and bootshim still require a source build: their launch-sizing
+changes are carried separately in
+[`standard-snp/igvmfilegen-launch-sizing.patch`](standard-snp/igvmfilegen-launch-sizing.patch).
+Use an OpenVMM checkout containing the pinned release, the repository Rust
+toolchain, `protoc`, `yq`, and the Rust `x86_64-unknown-none` target.
+Agent/rootfs assembly retains the normal osbuilder prerequisites, including GNU
+agent and device-mapper development dependencies.
 
 ## Build
 
-Use a fresh output directory. Source repositories must already contain the
-pinned revisions. The builder creates its own detached source worktrees.
-
 ```bash
-export KERNEL_SOURCE=/path/to/CBL-Mariner-Linux-Kernel
 export OPENVMM_SOURCE=/path/to/openvmm
-export OUT_DIR=/path/to/build/openvmm-snp-1cpu-1g
-export PROFILE_VCPUS=1 PROFILE_MEMORY_MIB=1024
+export OUT_DIR=/path/to/build/openvmm-snp
 make -C tools/osbuilder/openvmm-igvm all
 ```
 
-Separate targets are `kernel`, `openvmm`, `guest-image`, and `igvm`.
-`OPENVMM_TARGET_DIR` and `CARGO_TARGET_DIR` allow reuse of build caches.
-`IGVM_SVN` selects the unsigned 32-bit guest security version (default `1`);
-the release pipeline must choose it explicitly for endorsed builds.
-The agent is built with policy, seccomp and device-mapper support.
-Supply a reviewed `AGENT_POLICY_FILE` if the minimal bootstrap policy is not
-appropriate. Workload policy is delivered through initdata.
+Use a fresh output directory. Individual targets are:
 
-The output contains `openvmm`, `igvmfilegen`, `snp_bootshim`, `bzImage`,
-`kata-containers.img`, `kata-openvmm-snp.bin`, `kata-openvmm-snp-debug.bin`,
-`manifest.json`, `manifest-debug.json`, `resources.json`, and `SHA256SUMS`.
-Both IGVMs use the same kernel/rootfs and fixed resource sizes but have different
-measured command lines. The production profile uses `quiet` without enabling
-the HVC console or agent debug shell. The debug profile enables `console=hvc0`,
-console systemd logging, `agent.log=debug`, and an agent debug shell over vsock
-port 1026. SNP hardware debugging remains disabled in both profiles.
-Use separate attestation expectations for production and debug guests.
-One- and two-vCPU, 1-GiB profiles are the bring-up reference sizes; other profile
-sizes require validation. The fixed low-MMIO layout limits this builder to
-at most 3072 MiB until the platform/bootshim contract is updated.
+| Target | Work |
+|---|---|
+| `packages` | Verify installed packages; stage runtime, guest bzImage and package/release records |
+| `tools` | Build only `igvmfilegen` and `snp_bootshim` from the pinned, patched source |
+| `guest-image` | Build the Kata agent and matched dm-verity rootfs |
+| `igvm` | Generate production/debug manifests, images, measurements and checksums |
 
-Generate the corresponding runtime configuration:
+`OPENVMM_TARGET_DIR` and `CARGO_TARGET_DIR` allow build-cache reuse. `IGVM_SVN`
+selects the unsigned 32-bit security version; endorsed builds must choose it
+explicitly. `AGENT_POLICY_FILE` selects the bootstrap policy.
 
-```bash
-make -C src/runtime-rs \
-  PACKAGE_VERSION=dev USE_OPENVMM=true \
-  OPENVMMPATH=/usr/bin/openvmm \
-  IGVMPATH_OPENVMM_SNP=/usr/share/kata-containers/kata-openvmm-snp.bin \
-  IMAGEPATH_OPENVMM_AZURE=/usr/share/kata-containers/kata-openvmm-snp.img \
-  DEFVCPUS_OPENVMM_SNP=1 DEFMEMSZ_OPENVMM_SNP=1024 \
-  config/configuration-openvmm-azure-snp-runtime-rs.toml
-```
+There is no `KERNEL_SOURCE`, private kernel config, or VMM-runtime patch/build
+step. The old `kernel`/`openvmm` targets and fixed `PROFILE_VCPUS` /
+`PROFILE_MEMORY_MIB` settings have been replaced. Configure CPU/memory through
+the runtime at VM launch instead.
 
-Install the VMM and matching IGVM/rootfs at those paths. Resource settings must
-match the profile; kernel command-line overrides are rejected for SNP IGVM boot.
-The Azure Linux node-builder can additionally package the configuration and a
-`containerd-shim-kata-openvmm-v2` alias with `BUILD_OPENVMM_SNP=yes`. This does
-not replace CLH defaults or select the legacy `CONF_PODS`/tardev recipe.
-`OPENVMM_PROFILE_VCPUS` and `OPENVMM_PROFILE_MEMORY_MIB` select package config sizes.
-The debug config selects `kata-openvmm-snp-debug.bin` and enables hypervisor
-debugging, which attaches the virtio-console device. Production leaves it
-unattached; PCI slot 8 remains reserved in both modes. When configuring manually,
-set the debug config's `igvm` path to the debug artifact and enable
-`[hypervisor.openvmm].enable_debug`. Guest boot/debug parameters are embedded in
-the selected measured IGVM, not changed at launch. Install both IGVMs if using
-both configurations; they share the same rootfs image.
-Image/VMM artifacts are installed separately, not implicitly replaced by
-`package_install.sh`.
+## Resource and boot contract
 
-For containerd 2.x, select the EROFS snapshotter for this runtime and enable
-`plugins.'io.containerd.differ.v1.erofs'.enable_dmverity`. Pass a
-`ConfigPath` pointing to the generated OpenVMM configuration. Keep
-`pod_annotations = ["io.katacontainers.*"]` to forward initdata. Use a reviewed
-RuntimeClass/Pod resource policy for the selected fixed guest profile.
+The Kata-fork tooling always uses launch-time sizing, with one BSP/platform template,
+reserves a 512-MiB minimum, and sets `nr_cpus=256`. The bootshim validates the
+launch CPU count, memory map and MADT; constructs CPU ACPI tables; adjusts memory
+and PCI windows; then enters Linux. Linux starts the secondary CPUs.
 
-## Signing and node-image integration
+The prototype is bounded to 256 CPUs and 32 GiB RAM with one NUMA node.
+Hardware validation covered 1-32 CPUs and 512 MiB-32 GiB, including the combined
+32-CPU/32-GiB case. This is boot-time sizing, not CPU/memory hotplug.
+The 32-GiB E2Es required a longer CreateVM timeout. This temporary integration
+snapshot includes the CreateVM-only 300-second extension in runtime-rs; the
+IGVM recipe does not build the host shim, so build it separately from this same
+Kata revision. Other RPC timeouts remain unchanged.
 
-The builder produces unsigned artifacts. Signing and AgentBaker node-image
-assembly are separate stages; no signing credentials belong in this builder.
-The `igvm` target can run against an output directory populated by earlier build
-jobs, without rebuilding the kernel, agent or rootfs.
+`clearcpuid=rdpid` temporarily forces Linux's GDT CPU-ID fallback. On the tested
+MSHV SNP stack, RDPID/RDTSCP reported CPU 0 despite correct per-CPU TSC_AUX MSR
+values. This kernel workaround does not fix raw instruction users or CPUID
+advertisement; conditional feature masking belongs in OpenVMM.
 
-Keep each fixed CPU/memory profile in its own artifact directory. Publish both
-IGVMs, their shared rootfs, and their corresponding measurement files together:
+The guest uses an ext4 dm-verity rootfs over `/dev/vda1` and `/dev/vda2`, without
+an initrd. Its command line binds the exact root hash and salt from
+`root_hash_.txt`. Rebuild the IGVM whenever the kernel, bootshim, command line
+or rootfs verity inputs change.
 
-| Profile | IGVM | Native measurement JSON |
-|---|---|---|
-| Production | `kata-openvmm-snp.bin` | `kata-openvmm-snp-snp.json` |
-| Debug | `kata-openvmm-snp-debug.bin` | `kata-openvmm-snp-debug-snp.json` |
+Production is quiet with no debug console. The debug image enables `hvc0`,
+agent logging and the vsock debug shell. SNP hardware debug remains disabled
+in both profiles. Keep separate production/debug measurement expectations.
 
-`igvmfilegen` also emits matching `.cbor` and `.idblock` files. `SHA256SUMS`
-includes these, the images, the VMM, manifests and verity metadata, using relative
-paths so artifact consumers can run `sha256sum --check SHA256SUMS`.
-`resources.json` records build input paths; installation does not need those
-paths to remain available.
+Use valid runtime boot defaults (1 CPU/1024 MiB), with `overhead_vcpus=0` and
+`overhead_memory=0`. Static resource management replaces the boot defaults
+with pod limits; setting `default_memory=0` fails OpenVMM configuration validation.
 
-The native JSON stores the launch digest in `series[0].reference.snp_ld` and
-the SVN in `series[0].endorsement.snp_isvsvn`. It is not the legacy Kata signing
-claims format containing `x-ms-sevsnpvm-launchmeasurement` and
-`x-ms-sevsnpvm-guestsvn`. Whether to preserve that signing schema remains an
-integration decision; no conversion or signed `.cose` file is produced here.
-Do not relabel native JSON as a signed endorsement.
+Apply the generated `runtimeclass.yaml` after configuring the `kata-openvmm`
+containerd handler. Its pod memory overhead provides host VMM/shim headroom:
+without it, a pod memory limit equal to guest RAM can OOM-kill OpenVMM.
+This Kubernetes overhead is separate from the zero guest-sizing overhead
+knobs and does not request additional guest RAM.
 
-The generator's `debug_build` metadata describes hardware debug permission,
-which is false for both profiles. It does not identify the guest debug-console
-profile. Keep production and debug artifacts distinct; do not accidentally
-publish a debug guest's measurement as the production endorsement.
+## Outputs and deployment boundary
 
-AgentBaker integration must select the matching OpenVMM binary, IGVM, rootfs,
-signed endorsement and runtime configuration. Artifact filenames may be renamed
-during staging, but do not rebuild or modify measured inputs after endorsement.
-The node also needs the MSHV host prerequisite and `device-mapper` (`dmsetup`).
-The optional node-builder configuration in this series does not itself wire
-AgentBaker download filters, install signed endorsements or switch its kata-cc
-handler away from CLH. Those consumer changes remain separate.
+Outputs include the package-provided `openvmm` and `bzImage`, `kernel.release`,
+`package-versions.txt`, generator/bootshim, `kata-containers.img`,
+`kata-openvmm-snp.bin`, `kata-openvmm-snp-debug.bin`, their native measurement
+JSON/CBOR/ID-block files, manifests, resources, `runtimeclass.yaml` and `SHA256SUMS`.
+Record the supplying repository snapshots/buddy build IDs alongside these
+artifacts. Checksums are not signatures or endorsements.
 
-## GPT layer disks
+The node/image pipeline separately installs `kernel-mshv`, `mshv`,
+`mshv-bootloader-lx`, `mshv-kd`, and `openvmm` from approved repositories, then
+configures the MSHV boot path and validates the actual kernel/modules and
+Hyper-V build after reboot. This builder never installs/reboots a host or
+replaces its EFI payload.
 
-Only OpenVMM requests host-side composition. CLH retains its existing VMDK and
-snapshot paths. GPT metadata and existing layer files are backed by read-only,
-autoclear loop devices and assembled into one read-only dm-linear disk per
-container. Alignment gaps use dm-zero. The guest verifies each partition with
-dm-verity; host composition is not a replacement for guest verification.
+Runtime deployment also needs the reviewed OpenVMM-enabled Kata shim/configs
+and compatible containerd/erofs-utils. Preserve the required EROFS differ,
+dm-verity and host dm-linear settings. Workload-policy parity and report
+signature-chain verification are separate from successful boot and sizing.
 
-No VMDK conversion, copied combined image, per-layer PCI device, multifunction
-topology, Python helper, or experimental compile-time flag is needed.
-The runtime holds the dm-linear device open while the VMM uses it and schedules
-deferred device-mapper removal. Kernel references retain the loop backings until
-the device is no longer in use. Setup/teardown failures are reported.
-This temporary path supports GPT-partitioned independent layers only; OpenVMM
-rejects fsmerge mounts. Correct single-layer classification requires the separate
-EROFS detection change.
-
-OpenVMM snapshot/restore of these disks is explicitly unsupported. Rootless
-deployment is not supported. Validate host SELinux/device access and package
-permissions before deployment. Production workload policy, attestation
-certificate verification and corruption-injection tests are separate from
-the functional SNP/report bring-up checks.
-
-## Focused checks
-
-```bash
-cargo test -p resource --lib rootfs::
-cargo test -p hypervisor --features openvmm --lib openvmm::
-```
-
-The privileged `readonly_mapping_and_deferred_cleanup` test is ignored by
-default. Run the built resource test binary as root on a dedicated test node
-with `--ignored` to verify mapped bytes, read-only behavior and final-close
-cleanup. Do not run host device-mapper tests on an unapproved shared node.
+See [source boundaries](standard-snp/sources.md) and
+[runtime follow-ups](standard-snp/follow-ups.md) for the remaining integration
+work.

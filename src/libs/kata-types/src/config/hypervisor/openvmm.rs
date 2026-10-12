@@ -30,13 +30,15 @@ pub fn snp_igvm_enabled(config: &super::Hypervisor) -> Result<bool> {
     let has_igvm = !config.boot_info.igvm.is_empty();
     let confidential_guest = config.security_info.confidential_guest;
     let sev_snp_guest = config.security_info.sev_snp_guest;
-    if has_igvm != confidential_guest || confidential_guest != sev_snp_guest {
+    let enabled = has_igvm && confidential_guest && sev_snp_guest;
+    let requested = has_igvm || confidential_guest || sev_snp_guest;
+    if requested && !enabled {
         return Err(std::io::Error::other(
             "OpenVMM SNP boot requires igvm, confidential_guest=true, and sev_snp_guest=true",
         ));
     }
 
-    Ok(has_igvm)
+    Ok(enabled)
 }
 
 /// Configuration information for openvmm.

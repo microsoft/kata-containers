@@ -1,0 +1,38 @@
+DO NOT MERGE - temporary MAP producer and runtime integration snapshot
+
+This branch exists to unblock parallel MAP/AgentBaker build work.
+It is not an approved release or a completed boot-code review.
+
+Use this same Kata source commit for both:
+- tools/osbuilder/openvmm-igvm (agent/rootfs and production/debug IGVMs);
+- src/runtime-rs (OpenVMM-enabled containerd-shim-kata-v2 and configurations).
+
+The producer consumes installed kernel-uvm-cc and openvmm RPMs. It builds
+igvmfilegen/snp_bootshim from public OpenVMM base
+49742cf0636bdda0dc94757d6185e5e50254873c plus the committed
+tools/osbuilder/openvmm-igvm/standard-snp/igvmfilegen-launch-sizing.patch.
+Do not apply this patch on top of an already-patched tooling commit.
+
+Runtime additions over the builder base:
+- Existing reviewed EROFS single-layer dm-verity routing fix and probe updates
+  from 7ef44aa74bf32cdc74c60232e70cffd864bc5a79.
+- SNP configuration/review fixes from the delta between 2b48c70560 and
+  deea04c4770c8d9463ee78aa1b7b359cadb2b70e.
+- The previously tested prototype CreateVM-only timeout extension to 300s.
+  Other OpenVMM RPC timeouts remain 30s. This extension is included here,
+  but has not been promoted to the reviewed runtime branch.
+
+The host shim is not built by the IGVM recipe's all target. Build runtime-rs
+separately with USE_OPENVMM=true and select the SNP configuration. Keep valid
+boot defaults (1 CPU/1024 MiB), zero guest-sizing overhead, and matching static
+workload defaults. Apply runtimeclass.yaml for host VMM/shim memory headroom.
+Generate deployment-path and debug-config variants for the AgentBaker contract.
+
+These latest boot review changes use katashim/version 1 and launch-data
+memory-map offset 8. They supersede older frozen producer images; regeneration
+changes the measurement. The earlier successful E2E does not validate these
+new ABI bytes. Latest compilation was blocked by a full remote build disk.
+Compile and validate these exact pins before claiming a working MAP image.
+
+No prebuilt IGVMs, private binaries, credentials or repository-feed setup are
+included. The approved kernel/MSHV/OpenVMM buddy inputs remain external.

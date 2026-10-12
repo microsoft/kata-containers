@@ -15,7 +15,7 @@ When revisiting dynamic sizing:
 - Define supported behavior for SNP IGVM and ordinary OpenVMM guests.
 - Implement accurate resize results or explicit unsupported handling, and check
   how the resource manager consumes those results.
-- Add targeted resize tests. The fixed-profile E2E uses
+- Add targeted resize tests. The launch-sized E2E uses
   `static_sandbox_resource_mgmt=true`, which bypasses runtime CPU/memory updates.
 
 ## Per-VM runtime directory cleanup

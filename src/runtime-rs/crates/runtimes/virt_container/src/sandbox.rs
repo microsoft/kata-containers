@@ -35,6 +35,11 @@ use containerd_shim_protos::events::task::{TaskExit, TaskOOM};
 use hypervisor::ch::CloudHypervisor;
 use hypervisor::device::topology::PCIePort;
 use hypervisor::device::util::{get_host_path, DEVICE_TYPE_CHAR};
+#[cfg(all(
+    feature = "openvmm",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+use hypervisor::openvmm::OpenVmm;
 use hypervisor::remote::Remote;
 use hypervisor::VsockConfig;
 use hypervisor::HYPERVISOR_REMOTE;
@@ -48,11 +53,6 @@ use hypervisor::{firecracker::Firecracker, HYPERVISOR_FIRECRACKER};
 use hypervisor::{
     is_vfio_ap_device, BlockConfigModern, Hypervisor, RestoreVmRequest, VfioDeviceBase,
 };
-#[cfg(all(
-    feature = "openvmm",
-    any(target_arch = "x86_64", target_arch = "aarch64")
-))]
-use hypervisor::{openvmm::OpenVmm, HYPERVISOR_NAME_OPENVMM};
 use hypervisor::{qemu::Qemu, HYPERVISOR_QEMU};
 use hypervisor::{
     utils::{
@@ -67,14 +67,14 @@ use kata_sys_util::hooks::HookStates;
 use kata_sys_util::protection::{available_guest_protection, GuestProtection};
 use kata_sys_util::spec::load_oci_spec;
 use kata_types::capabilities::CapabilityBits;
-#[cfg(feature = "openvmm")]
-use kata_types::config::hypervisor::snp_igvm_enabled;
 use kata_types::config::hypervisor::Hypervisor as HypervisorConfig;
 #[cfg(all(
     feature = "cloud-hypervisor",
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 use kata_types::config::hypervisor::HYPERVISOR_NAME_CH;
+#[cfg(feature = "openvmm")]
+use kata_types::config::hypervisor::{snp_igvm_enabled, HYPERVISOR_NAME_OPENVMM};
 use kata_types::config::hypervisor::{MemoryRestoreMode, VIRTIO_BLK_CCW, VIRTIO_BLK_PCI};
 use kata_types::config::{hypervisor::Factory, TomlConfig};
 use kata_types::initdata::{calculate_initdata_digest, ProtectedPlatform};
