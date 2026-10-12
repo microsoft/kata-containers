@@ -409,6 +409,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_create_container_security_context_container_override() {
+        runtests("createcontainer/security_context/container_override").await;
+    }
+
+    #[tokio::test]
+    async fn test_create_container_security_context_container_runas() {
+        runtests("createcontainer/security_context/container_runas").await;
+    }
+
+    #[tokio::test]
     async fn test_create_container_volumes_empty_dir() {
         runtests("createcontainer/volumes/emptydir").await;
     }

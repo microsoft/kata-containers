@@ -1196,9 +1196,12 @@ impl Container {
                     process.User
                 );
 
+                // containerd derives AdditionalGids from the final user only, so drop the
+                // groups of the user being replaced. Pod groups are applied afterwards.
+                process.User.AdditionalGids.clear();
                 process.User.AdditionalGids.insert(new_gid);
                 debug!(
-                    "get_process_fields: inserted GID = {new_gid} into AdditionalGids, User = {:?}",
+                    "get_process_fields: reset AdditionalGids to GID = {new_gid}, User = {:?}",
                     process.User
                 );
             }
@@ -1209,9 +1212,10 @@ impl Container {
                 let new_gid = gid.try_into().unwrap();
                 process.User.GID = new_gid;
 
+                process.User.AdditionalGids.clear();
                 process.User.AdditionalGids.insert(new_gid);
                 debug!(
-                    "get_process_fields: inserted GID = {new_gid} into AdditionalGids, User = {:?}",
+                    "get_process_fields: reset AdditionalGids to GID = {new_gid}, User = {:?}",
                     process.User
                 );
             }
@@ -1357,6 +1361,79 @@ mod tests {
             "nvidia.com/gpu_model".to_string(),
         ];
         assert_eq!(sum_limits_by_keys(&limits, &keys), Some(3));
+    }
+
+    fn process_with_user(uid: u32, gid: u32) -> policy::KataProcess {
+        let mut process = policy::KataProcess::default();
+        process.User.UID = uid;
+        process.User.GID = gid;
+        process.User.AdditionalGids.insert(gid);
+        process
+    }
+
+    fn container(security_context: &str) -> Container {
+        serde_yaml::from_str(&format!(
+            "name: c\nimage: busybox\nsecurityContext: {security_context}\n"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn container_run_as_group_replaces_pod_primary_gid() {
+        // Pod runAsUser 1001 / runAsGroup 2001, container 1002 / 2002.
+        let mut process = process_with_user(1001, 2001);
+
+        container("{runAsUser: 1002, runAsGroup: 2002}").get_process_fields(&mut process);
+
+        assert_eq!(process.User.UID, 1002);
+        assert_eq!(process.User.GID, 2002);
+        assert_eq!(
+            process
+                .User
+                .AdditionalGids
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![2002]
+        );
+    }
+
+    #[test]
+    fn container_run_as_user_drops_image_root_group() {
+        // Image user root; container runAsUser 65534 with no /etc/passwd entry keeps GID 0.
+        let mut process = process_with_user(0, 0);
+        process.User.AdditionalGids.insert(10);
+
+        container("{runAsUser: 65534}").get_process_fields(&mut process);
+
+        assert_eq!(process.User.UID, 65534);
+        assert_eq!(
+            process
+                .User
+                .AdditionalGids
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![process.User.GID]
+        );
+    }
+
+    #[test]
+    fn container_without_user_override_keeps_groups() {
+        let mut process = process_with_user(1001, 2001);
+        process.User.AdditionalGids.insert(997);
+
+        container("{allowPrivilegeEscalation: false}").get_process_fields(&mut process);
+
+        assert_eq!(
+            process
+                .User
+                .AdditionalGids
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![997, 2001]
+        );
     }
 
     #[test]
