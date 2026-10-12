@@ -27,6 +27,6 @@
   {
     "op": "add",
     "path": "/request_defaults/CreateContainerRequest/allow_env_regex/-",
-    "value": "^.*$"
+    "value": "(?s)^.*$"
   }
 ]

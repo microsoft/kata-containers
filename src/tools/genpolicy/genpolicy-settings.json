@@ -344,7 +344,7 @@
     "cluster_config": {
         "pause_container_image": "registry.k8s.io/pause:3.10.2",
         "guest_pull": false,
-        "emptydir_type": "block-encrypted",
+        "emptydir_type": "guest-local",
         "cgroup_mount_extras_allowed": [
             "nsdelegate",
             "memory_recursiveprot"
