@@ -14,6 +14,7 @@ ROOT_HASH_FILE ?= $(OUT_DIR)/root_hash_.txt
 RUNTIME_CONFIG ?= $(CURDIR)/out/configuration-openvmm-snp-runtime-rs.toml
 VP_COUNT ?= 2
 NETWORK_MODEL ?= none
+WORKLOAD_MEM ?= 2048
 MEMORY ?= 1G
 AGENT_IGVM = $(OUT_DIR)/kata-aci-agent-dmverity-reserve-416b-$(VP_COUNT)vp.bin
 AGENT_BINARY = $(abspath ../../../target/$(shell uname -m)-unknown-linux-gnu/release/kata-agent)
@@ -167,6 +168,7 @@ e2e-setup:
 	OUT_DIR="$(OUT_DIR)" \
 	RUNTIME_CONFIG="$(RUNTIME_CONFIG)" \
 	NETWORK_MODEL="$(NETWORK_MODEL)" \
+	WORKLOAD_MEM="$(WORKLOAD_MEM)" \
 	./e2e-setup.sh
 
 .PHONY: e2e-test

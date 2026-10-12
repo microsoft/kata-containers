@@ -174,6 +174,8 @@ leave them running.
 
 Static sizing uses workload limits when supplied and the configured workload
 defaults otherwise. The SNP configuration adds no CPU or memory overhead.
+`WORKLOAD_MEM` (MiB, default 2048) sets `static_sandbox_default_workload_mem`,
+the guest memory of pods without a memory limit.
 Explicit CPU limits must still match the VP count embedded in the IGVM.
 
 For example, build and validate a four-VP guest:

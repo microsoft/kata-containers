@@ -14,6 +14,7 @@ runtime_dir="${repo_dir}/src/runtime-rs"
 openvmm_dir="${OPENVMM_DIR:-${HOME}/openvmm-snp-mshv-aci-igvm}"
 openvmm="${OPENVMM:-${openvmm_dir}/target/release/openvmm}"
 vp_count="${VP_COUNT:-2}"
+workload_mem="${WORKLOAD_MEM:-2048}"
 out_dir="${OUT_DIR:-${script_dir}/out}"
 kernel_override="${KERNEL:-}"
 kata_image_override="${KATA_IMAGE:-}"
@@ -44,6 +45,8 @@ for tool in awk cargo containerd crictl install jq make modprobe systemctl; do
 done
 [[ "${vp_count}" =~ ^[1-9][0-9]*$ ]] ||
 	die "VP_COUNT must be a positive integer: ${vp_count}"
+[[ "${workload_mem}" =~ ^[1-9][0-9]*$ ]] ||
+	die "WORKLOAD_MEM must be a positive integer (MiB): ${workload_mem}"
 
 [[ -e /dev/mshv ]] || die "/dev/mshv is not available"
 [[ -d "${openvmm_dir}/.git" ]] || die "OpenVMM checkout does not exist: ${openvmm_dir}"
@@ -134,6 +137,7 @@ sed \
 	-e "s/^disable_new_netns = .*/disable_new_netns = ${disable_new_netns}/" \
 	-e "s/^default_vcpus = .*/default_vcpus = ${vp_count}/" \
 	-e "s/^static_sandbox_default_workload_vcpus = .*/static_sandbox_default_workload_vcpus = ${vp_count}/" \
+	-e "s/^static_sandbox_default_workload_mem = .*/static_sandbox_default_workload_mem = ${workload_mem}/" \
 	"${generated_config}" >"${runtime_config}"
 
 shim="${repo_dir}/target/release/containerd-shim-kata-v2"
