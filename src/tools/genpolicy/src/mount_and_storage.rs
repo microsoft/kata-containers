@@ -20,6 +20,8 @@ use std::str;
 const EMPTYDIR_TYPE_SHARED_FS: &str = "shared-fs";
 const EMPTYDIR_TYPE_BLOCK_ENCRYPTED: &str = "block-encrypted";
 const EMPTYDIR_TYPE_BLOCK_PLAIN: &str = "block-plain";
+// Guest-local `local` storage, used by runtime-rs when there is no shared filesystem.
+const EMPTYDIR_TYPE_GUEST_LOCAL: &str = "guest-local";
 
 pub fn get_policy_mounts(
     settings: &settings::Settings,
@@ -149,24 +151,25 @@ fn get_empty_dir_mount(
     pod_security_context: &Option<pod::PodSecurityContext>,
 ) {
     let settings_volumes = &settings.volumes;
+    let emptydir_type = settings.cluster_config.emptydir_type.as_str();
     let (volume, block_emptydir) = match emptyDir.medium.as_deref() {
         Some("Memory") => (&settings_volumes.emptyDir_memory, false),
-        _ if settings.cluster_config.emptydir_type == EMPTYDIR_TYPE_BLOCK_ENCRYPTED => {
+        _ if emptydir_type == EMPTYDIR_TYPE_BLOCK_ENCRYPTED => {
             (&settings_volumes.emptyDir_encrypted, true)
         }
-        _ if settings.cluster_config.emptydir_type == EMPTYDIR_TYPE_BLOCK_PLAIN => {
-            (&settings_volumes.emptyDir_plain, true)
-        }
-        _ if settings.cluster_config.emptydir_type == EMPTYDIR_TYPE_SHARED_FS => {
+        _ if emptydir_type == EMPTYDIR_TYPE_BLOCK_PLAIN => (&settings_volumes.emptyDir_plain, true),
+        _ if emptydir_type == EMPTYDIR_TYPE_SHARED_FS
+            || emptydir_type == EMPTYDIR_TYPE_GUEST_LOCAL =>
+        {
             (&settings_volumes.emptyDir, false)
         }
-        _ => panic!(
-            "Unsupported emptydir_type {:?}",
-            settings.cluster_config.emptydir_type
-        ),
+        _ => panic!("Unsupported emptydir_type {emptydir_type:?}"),
     };
 
-    if emptyDir.medium.as_deref() == Some("Memory") || block_emptydir {
+    if emptyDir.medium.as_deref() == Some("Memory")
+        || block_emptydir
+        || emptydir_type == EMPTYDIR_TYPE_GUEST_LOCAL
+    {
         get_guest_empty_dir_mount_and_storage(
             settings,
             p_mounts,

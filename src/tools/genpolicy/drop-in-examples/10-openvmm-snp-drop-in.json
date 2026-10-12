@@ -18,5 +18,10 @@
     "op": "replace",
     "path": "/cluster_config/guest_pull",
     "value": false
+  },
+  {
+    "op": "replace",
+    "path": "/cluster_config/emptydir_type",
+    "value": "guest-local"
   }
 ]
