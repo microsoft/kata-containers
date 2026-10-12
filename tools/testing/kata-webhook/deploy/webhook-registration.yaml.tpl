@@ -13,6 +13,7 @@ webhooks:
   - name: pod-annotate-webhook.kata.xyz
     sideEffects: None
     failurePolicy: Ignore
+    timeoutSeconds: 30
     admissionReviewVersions: ["v1", "v1beta1"]
     clientConfig:
       service:

@@ -20,8 +20,9 @@ spec:
     spec:
       containers:
         - name: pod-annotate-webhook
-          image: quay.io/kata-containers/kata-webhook-example:latest
-          imagePullPolicy: Always
+          # Imported on the node: docker save localhost/kata-webhook:genpolicy | ssh <node> sudo ctr -n k8s.io images import -
+          image: localhost/kata-webhook:genpolicy
+          imagePullPolicy: Never
           env:
             - name: RUNTIME_CLASS
               valueFrom:
@@ -38,11 +39,14 @@ spec:
           args:
             - -tls-cert-file=/etc/webhook/certs/cert.pem
             - -tls-key-file=/etc/webhook/certs/key.pem
-            - -exclude-namespaces=rook-ceph-system,rook-ceph
+            - -exclude-namespaces=rook-ceph-system,rook-ceph,kube-system,sonobuoy
+            - -genpolicy=/usr/local/bin/genpolicy
           volumeMounts:
             - name: webhook-certs
               mountPath: /etc/webhook/certs
               readOnly: true
+            - name: genpolicy-cache
+              mountPath: /cache
           resources:
             requests:
               cpu: "100m"
@@ -60,6 +64,8 @@ spec:
         - name: webhook-certs
           secret:
             secretName: pod-annotate-webhook-certs
+        - name: genpolicy-cache
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -79,4 +85,6 @@ kind: ConfigMap
 metadata:
   name: kata-webhook
 data:
-  runtime_class: kata
+  runtime_class: kata-openvmm
+  # The OpenVMM SNP guest gets exactly the pod memory limit; 512Mi is its minimum.
+  min_memory_limit: "512Mi"
