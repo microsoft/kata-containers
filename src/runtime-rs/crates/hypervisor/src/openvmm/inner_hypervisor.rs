@@ -33,13 +33,20 @@ fn build_kernel_cmdline(
     rootfs_driver: &str,
     rootfs_type: &str,
 ) -> Result<String> {
+    let use_dax = if rootfs_driver == VM_ROOTFS_DRIVER_PMEM {
+        true
+    } else {
+        false
+    };
+    info!(sl!(), "openvmm: use_dax={use_dax}");
+
     let mut params = KernelParams::new(debug);
 
     let mut rootfs_params = KernelParams::new_rootfs_kernel_params(
         kernel_verity_params,
         rootfs_driver,
         rootfs_type,
-        false,
+        use_dax,
     )?;
     params.append(&mut rootfs_params);
     params.append(&mut KernelParams::from_string(kernel_params));
