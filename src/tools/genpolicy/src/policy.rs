@@ -1098,6 +1098,15 @@ impl AgentPolicy {
             );
         }
 
+        ///////////////////////////////////////////////////////////////////////////////////////
+        // Container-level settings from user's YAML.
+        yaml_container.get_process_fields(&mut process);
+        debug!(
+            "get_container_process: after yaml_container.get_process_fields: User = {:?}",
+            &process.User
+        );
+
+        // After the container-level user, which resets AdditionalGids when it overrides the user or group.
         apply_pod_groups_to_process(
             &mut process,
             resource.get_pod_security_context(),
@@ -1106,14 +1115,6 @@ impl AgentPolicy {
         );
         debug!(
             "get_container_process: after apply_pod_fs_group_and_supplemental_groups: User = {:?}",
-            &process.User
-        );
-
-        ///////////////////////////////////////////////////////////////////////////////////////
-        // Container-level settings from user's YAML.
-        yaml_container.get_process_fields(&mut process);
-        debug!(
-            "get_container_process: after yaml_container.get_process_fields: User = {:?}",
             &process.User
         );
 
