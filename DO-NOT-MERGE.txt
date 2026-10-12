@@ -1,0 +1,15 @@
+DO NOT MERGE - policy bring-up integration branch
+
+This is a development base for a coworker's policy stack, not a release.
+Read README-policy-bringup.md for source history, buddy packages, build,
+node provisioning, policy/measurement boundaries and validation status.
+
+History preserves current msft-main, the amended #568 commit, and a separate
+replay of #572. The final DO-NOT-MERGE commit groups the later producer/tooling,
+temporary 300-second CreateVM timeout and bring-up instructions.
+
+The producer and matching shim from c8655693745004d06cd3b8160479a392701109b5
+passed focused hardware E2E, including the current katashim/version-1 ABI.
+Fresh node provisioning and final policy enforcement remain to be validated;
+see README-policy-bringup.md for the tested scope and host configuration.
+No prebuilt IGVMs or private host binaries are included.

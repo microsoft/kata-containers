@@ -313,7 +313,10 @@ impl VmmInstance {
 
     async fn create_vm(client: &VmClient, request: vmservice::CreateVMRequest) -> Result<()> {
         client
-            .create_vm(rpc_ctx(), &request)
+            .create_vm(
+                ttrpc::context::with_timeout(Duration::from_secs(300).as_nanos() as i64),
+                &request,
+            )
             .await
             .map(|_| ())
             .map_err(|e| anyhow!("openvmm create_vm RPC failed: {:?}", e))
