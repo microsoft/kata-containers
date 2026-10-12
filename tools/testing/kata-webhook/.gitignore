@@ -1,2 +1,3 @@
 deploy/webhook-certs.yaml
 deploy/webhook-registration.yaml
+/genpolicy/

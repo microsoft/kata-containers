@@ -1,0 +1,32 @@
+[
+  {
+    "op": "replace",
+    "path": "/request_defaults/ExecProcessRequest/regex",
+    "value": [".*"]
+  },
+  {
+    "op": "replace",
+    "path": "/request_defaults/ReadStreamRequest",
+    "value": true
+  },
+  {
+    "op": "replace",
+    "path": "/request_defaults/WriteStreamRequest",
+    "value": true
+  },
+  {
+    "op": "replace",
+    "path": "/request_defaults/CloseStdinRequest",
+    "value": true
+  },
+  {
+    "op": "replace",
+    "path": "/request_defaults/GetDiagnosticDataRequest",
+    "value": true
+  },
+  {
+    "op": "add",
+    "path": "/request_defaults/CreateContainerRequest/allow_env_regex/-",
+    "value": "^.*$"
+  }
+]
