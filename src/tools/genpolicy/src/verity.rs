@@ -75,6 +75,11 @@ pub fn root_hash(
         return Err(anyhow!("cannot compute a root hash over an empty file"));
     }
 
+    // A single data block has no hash levels: dm-verity's root hash is that block's hash.
+    if digests.len() == DIGEST_SIZE {
+        return Ok(hex(&digests));
+    }
+
     // Digests per hash block; the remainder of a partially filled hash block is
     // zeroed so that its hash is well defined.
     let per_block = hash_block_size / DIGEST_SIZE;
@@ -212,6 +217,20 @@ mod tests {
         let empty = dir.path().join("empty.img");
         std::fs::write(&empty, b"").unwrap();
         assert!(root_hash(&empty, 4096, 4096, &CONTAINERD_DEFAULT_SALT).is_err());
+    }
+
+    /// Expected value from `veritysetup format` (zero salt, 4096-byte blocks).
+    #[test]
+    fn single_block_root_hash_matches_veritysetup() {
+        let dir = tempfile::tempdir().unwrap();
+        let img = dir.path().join("one.img");
+        let mut data = b"hello world".to_vec();
+        data.resize(4096, 0);
+        std::fs::write(&img, &data).unwrap();
+        assert_eq!(
+            root_hash(&img, 4096, 4096, &CONTAINERD_DEFAULT_SALT).unwrap(),
+            "e3435dc48237ba3feb707c14adb3de071a5efb13808e805a6734c67a8d0b6781"
+        );
     }
 
     /// Guard the geometry validation: a zero data block size would divide by
