@@ -15,9 +15,9 @@ use tokio::sync::RwLock;
 
 use crate::volume::{
     direct_volumes::{
-        get_direct_volume_path, rawblock_volume, spdk_volume, vfio_volume, volume_mount_info,
-        KATA_DIRECT_VOLUME_TYPE, KATA_SPDK_VOLUME_TYPE, KATA_SPOOL_VOLUME_TYPE,
-        KATA_VFIO_VOLUME_TYPE,
+        get_direct_volume_path, rawblock_volume, smb_volume, spdk_volume, vfio_volume,
+        volume_mount_info, KATA_DIRECT_VOLUME_TYPE, KATA_SPDK_VOLUME_TYPE,
+        KATA_SPOOL_VOLUME_TYPE, KATA_VFIO_VOLUME_TYPE,
     },
     utils::KATA_MOUNT_BIND_TYPE,
     Volume,
@@ -75,6 +75,13 @@ pub(crate) async fn handle_direct_volume(
             return Ok(None);
         }
     };
+
+    if smb_volume::is_smb_volume(&mount_info) {
+        return Ok(Some(Arc::new(
+            smb_volume::SmbVolume::new(m, &mount_info)
+                .with_context(|| format!("new SMB volume {m:?}"))?,
+        )));
+    }
 
     let direct_volume: Arc<dyn Volume> = match to_volume_type(mount_info.volume_type.as_str()) {
         DirectVolumeType::RawBlock => Arc::new(
