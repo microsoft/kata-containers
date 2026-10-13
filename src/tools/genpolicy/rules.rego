@@ -1580,6 +1580,10 @@ allow_copy_file if {
     input.file_type == "Regular"
     allow_copy_file_path(input.path, "")
 
+    #contains(input.path, "resolv.conf")
+    #not contains(input.path, "hostpath")
+    not contains(input.path, "res.txt")
+
     print("allow_copy_file regular: true")
 }
 
@@ -1588,6 +1592,8 @@ allow_copy_file if {
 
     input.file_type == "Directory"
     allow_copy_file_path(input.path, "")
+
+    #contains(input.path, "serviceaccount")
 
     print("allow_copy_file directory: true")
 }

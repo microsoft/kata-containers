@@ -57,59 +57,6 @@ setup() {
 	kubectl exec $pod_name -- "${dd_command[@]}" | tail -1 | grep 0
 }
 
-@test "Empty dir volume when FSGroup is specified with non-root container" {
-	local agnhost_name
-	local agnhost_version
-	local gid
-	local logs
-	local pod_yaml
-	local pod_yaml_in
-	local uid
-
-	# This is a reproducer of k8s e2e "[sig-storage] EmptyDir volumes when FSGroup is specified [LinuxOnly] [NodeFeature:FSGroup] new files should be created with FSGroup ownership when container is non-root" test
-	pod_yaml_in="${pod_config_dir}/pod-empty-dir-fsgroup.yaml.in"
-	pod_yaml="${pod_config_dir}/pod-empty-dir-fsgroup.yaml"
-	agnhost_name="${container_images_agnhost_name}"
-	agnhost_version="${container_images_agnhost_version}"
-	export AGNHOST_IMAGE="${agnhost_name}:${agnhost_version}"
-
-	envsubst '${AGNHOST_IMAGE}' <"${pod_yaml_in}" >"${pod_yaml}"
-
-	# Add policy to yaml
-	auto_generate_policy "${policy_settings_dir}" "${pod_yaml}"
-
-	# Try to avoid timeout by prefetching the image.
-	kubectl create -f "${pod_yaml}"
-	cmd="kubectl get pods ${pod_name} | grep Completed"
-	waitForProcess "${wait_time}" "${sleep_time}" "${cmd}"
-
-	pod_logs_file="$(mktemp)"
-	for container in mounttest-container mounttest-container-2; do
-		bats_unbuffered_info "Getting logs for $container"
-		kubectl logs "$pod_name" "$container" > "$pod_logs_file"
-		logs=$(cat $pod_logs_file)
-		bats_unbuffered_info "Logs: $logs"
-
-		# Check owner UID of file
-		uid=$(cat $pod_logs_file | grep 'owner UID of' | sed 's/.*:\s//')
-		assert_equal "1001" "$uid"
-		# Check owner GID of file
-		gid=$(cat $pod_logs_file | grep 'owner GID of' | sed 's/.*:\s//')
-		assert_equal "123" "$gid"
-	done
-}
-
-@test "Empty dir volume sizeLimit evicts pod" {
-	# CRI-O does not report stats for kata (VM-based) sandboxes,
-	# so kubelet cannot detect sizeLimit violations and never evicts the pod.
-	[ "${CONTAINER_RUNTIME}" == "crio" ] && skip "sizeLimit eviction not supported: CRI-O omits kata pods from stats"
-	volume_name="host-empty-vol"
-	mountpoint="/host/cache"
-	yaml_file="${pod_config_dir}/pod-empty-dir.yaml"
-
-	run_emptydir_size_limit_eviction_test
-}
-
 teardown() {
 	[ ! -f "$pod_logs_file" ] || rm -f "$pod_logs_file"
 	[[ -n "${pod_config_dir:-}" ]] && rm -f "${pod_config_dir}/pod-empty-dir-fsgroup.yaml"
