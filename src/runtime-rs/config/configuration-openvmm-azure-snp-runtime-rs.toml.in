@@ -479,7 +479,9 @@ sandbox_cgroup_only = @DEFSANDBOXCGROUPONLY_OPENVMM@
 #   - block-plain
 #     Plugs a block device to be mounted directly in the guest.
 #
-emptydir_mode = "block-encrypted"
+# With shared_fs = "none", shared-fs keeps emptyDirs in guest memory.
+# block-encrypted needs confidential-data-hub, which this guest lacks.
+emptydir_mode = "shared-fs"
 
 # Enabled experimental feature list, format: ["a", "b"].
 # Experimental features are features not stable enough for production,
