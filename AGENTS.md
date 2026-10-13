@@ -1,271 +1,101 @@
-# msft-main Rebase Guide
+# AGENTS.md
 
-This file is a reusable guide for rebasing `msft-main` onto future upstream
-releases.
+Guidance for AI coding agents working on `microsoft/kata-containers`. Keep this
+file short: always-relevant context only. Step-by-step procedures live in skills
+under `.claude/skills/`.
 
-Use it as an operating checklist, not as a one-time record for a specific
-release.
+## What this repo is
 
-## Rebase Setup
+- Microsoft's fork of [kata-containers](https://github.com/kata-containers/kata-containers),
+  used for Pod Sandboxing and Confidential Containers on AKS with Azure Linux.
+- `msft-main` is the fork's default branch. It is periodically rebased onto an
+  upstream release tag. The `upstream` remote is upstream; `origin` is the fork.
+- Upstream conventions apply unless this file says otherwise. Read
+  `CONTRIBUTING.md` for coding style, patch format, and the AI policy.
 
-Before starting a rebase, record the exact upstream target and create a safety
-branch.
+## Where the fork differs from upstream
 
-- Working branch: `msft-main`
-- Upstream target: `<upstream-tag-or-commit>`
-- Safety branch: `msft-main-pre-rebase-<upstream-tag>-<timestamp>`
+Most fork changes live in:
 
-Suggested setup:
+- `src/runtime-rs/`: Azure CLH/OpenVMM configs, static sandbox sizing,
+  snapshot/restore, agent reconnect.
+- `src/runtime/` (runtime-go): static sandbox sizing, VM templating (factory).
+- `src/agent/`, `src/tools/genpolicy/`, `src/agent/samples/policy/`: policy.
+- `tools/osbuilder/node-builder/azure-linux/`, `tools/osbuilder/igvm-builder/`:
+  Azure Linux packaging and UVM build.
+- `.github/workflows/`, `tools/testing/gatekeeper/required-tests.yaml`: fork CI.
 
-```bash
-cd <kata-repo>
-git checkout msft-main
-git branch "msft-main-pre-rebase-<upstream-tag>-$(date +%Y%m%d-%H%M%S)"
-```
-
-## Behaviors That Must Survive Future Rebases
-
-### 1. Runtime-go static resource behavior
-
-Preserve all of the following in `src/runtime`:
-
-- If `static_sandbox_resource_mgmt=true` and the workload does not specify limits, use the configured defaults:
-  - `static_sandbox_default_workload_mem`
-  - `static_sandbox_default_workload_vcpus`
-- If workload limits are specified, do not add extra CPU or memory on top of those limits.
-- The Azure Linux node-builder must keep passing `STATIC=no` to the `src/runtime` make.
-  Upstream defaults `STATIC=yes` on x86_64, which exports `CGO_ENABLED=0`, and the Azure
-  Linux Go toolchain needs `CGO_ENABLED=1` for its default `GOEXPERIMENT=systemcrypto`.
-
-Primary files:
-
-- `src/runtime/pkg/oci/utils.go`
-- `src/runtime/pkg/katautils/config.go`
-- `src/runtime/config/configuration-clh.toml.in`
-- `src/runtime/Makefile`
-- `tools/osbuilder/node-builder/azure-linux/package_build.sh`
-
-### 2. Runtime-rs static resource behavior
-
-Preserve all of the following in `src/runtime-rs`:
-
-- If static resource management is enabled and workload resources are unset, fall back to:
-  - `static_sandbox_default_workload_mem`
-  - `static_sandbox_default_workload_vcpus`
-- If workload limits are specified, do not add extra CPU or memory beyond those workload limits.
-  Upstream sizes the sandbox as `overhead + workload`, so this is enforced by the node-builder
-  build flags zeroing the shipped hypervisor's overhead knobs (`DEFOVERHEADMEMSZ_CLH`,
-  `DEFOVERHEADVCPUS_CLH`), not by patching the runtime. Upstream keeps adding overhead knobs,
-  and their defaults are not zero.
-- Every runtime-rs hypervisor config template that enables `static_sandbox_resource_mgmt` must
-  also carry `static_sandbox_default_workload_mem` and `static_sandbox_default_workload_vcpus`.
-  These are fork-added keys and default to `0` when absent (`#[serde(default)]`).
-
-Primary files:
-
-- `src/runtime-rs/crates/resource/src/cpu_mem/initial_size.rs`
-- `src/runtime-rs/config/configuration-clh-azure-runtime-rs.toml.in`
-- `src/runtime-rs/config/configuration-clh-runtime-rs.toml.in`
-- `src/runtime-rs/config/configuration-dragonball.toml.in`
-- `src/runtime-rs/Makefile`
-- `tools/osbuilder/node-builder/azure-linux/package_build.sh`
-
-### 3. VM templating (factory) static sizing
-
-Preserve all of the following:
-
-- VM templates must be built from the static base size, not from the raw
-  `HypervisorConfig`. `oci.StaticHypervisorConfig()` substitutes
-  `static_sandbox_default_workload_mem` / `_vcpus` for `default_memory` /
-  `default_vcpus` when those are `0`, and clamps `DefaultMaxVCPUs` to the result.
-- Every factory `vf.Config` call site must use it. Upstream passes
-  `runtimeConfig.HypervisorConfig` directly, which boots the template at a size the
-  per-pod sandbox never matches, so the factory falls back to direct boot.
-- The `configuration-clh-preview*.toml` configs enable `[factory]` and are generated
-  by the node-builder, not shipped as templates.
-
-Primary files:
-
-- `src/runtime/pkg/oci/utils.go`
-- `src/runtime/cmd/kata-runtime/factory.go`
-- `src/runtime/pkg/katautils/create.go`
-- `src/runtime/virtcontainers/factory/factory_linux.go`
-- `tools/osbuilder/node-builder/azure-linux/package_build.sh`
-
-### 4. Fork-only test and CI policy
-
-Preserve the fork-specific CI and test exceptions unless the fork
-infrastructure changes:
-
-- `msft-main` branch targeting in GitHub workflows.
-- Disabled jobs for runners the fork does not have.
-- Disabled `required-tests` entries for unsupported AKS, s390x, GPU, and GHCR-dependent jobs.
-- Injected sandbox memory limits in some integration tests.
-- Disabled dragonball runtime-rs tests that fail with `MachineConfig(InvalidVcpuCount(0))`.
-
-Primary files:
-
-- `.github/workflows/ci.yaml`
-- `.github/workflows/docs.yaml`
-- `.github/workflows/static-checks-self-hosted.yaml`
-- `tools/testing/gatekeeper/required-tests.yaml`
-- `tests/integration/cri-containerd/integration-tests.sh`
-- `tests/integration/nydus/nydus-sandbox.yaml`
-
-## Changes That Often Do Not Need Replaying
-
-Do not mechanically replay old fork commits just because they existed on the
-previous branch tip. Re-evaluate them against the new upstream target.
-
-The following categories often drop cleanly or should be rechecked before being
-reapplied:
-
-- Obsolete Cloud Hypervisor pinning to fork-only repositories.
-- Changes that were already upstreamed in a newer form.
-- Formatting-only commits.
-- Regenerated client code if upstream already regenerated the same surface.
-- Local fixes that upstream later implemented differently but with equivalent behavior.
-
-Rule: only replay a fork commit if the behavior is still required and missing
-from the new upstream base.
-
-## Conflict Hotspots And What To Do
-
-### `.gitignore`
-
-Keep both:
-
-- newer upstream ignores
-- Microsoft-specific osbuilder and IGVM ignores
-
-### `versions.yaml`
-
-Default to upstream Cloud Hypervisor references from the new release tag.
-
-Do not re-pin to `microsoft/cloud-hypervisor` unless the fork explicitly needs
-it again.
-
-### Workflow branch conflicts
-
-When upstream changes workflow structure and the fork changes branch names, keep
-both:
-
-- upstream workflow structure
-- fork branch target `msft-main`
-
-### `tools/testing/gatekeeper/required-tests.yaml`
-
-This file changes frequently upstream. Re-express the fork skips against the
-current upstream job names instead of mechanically replaying old lines.
-
-The fork currently expects these skip categories:
-
-- unsupported runners
-- unsupported k8s environments
-- GHCR-dependent jobs
-- low-memory test incompatibilities
-- dragonball runtime-rs `InvalidVcpuCount(0)` failures
-
-### `src/runtime/pkg/katautils/config.go`
-
-Two common pitfalls:
-
-- keep newer upstream fields added to the `runtime` struct
-- do not reintroduce `SandboxWorkloadMemMin`
-
-### `src/runtime-rs/Makefile`
-
-Keep both:
-
-- the explicit `cargo build -p runtime-rs`
-- the fork's `RELEASE_CARGO_PROFILE_ENV` release-profile overrides
-
-Also do a final manual check for stray conflict markers in this file after the
-rebase completes. This file has been a repeat conflict hotspot.
-
-### `tools/osbuilder/node-builder/azure-linux/common.sh`, `package_build.sh`, `package_install.sh`
-
-Keep the Azure Linux node-builder shim config names aligned with the runtime
-Makefiles and config directories:
-
-- runtime-go release config: `configuration-clh.toml`
-- runtime-go debug config: `configuration-clh-debug.toml`
-- runtime-rs release config: `configuration-clh-azure-runtime-rs.toml`
-- runtime-rs debug config: `configuration-clh-azure-runtime-rs-debug.toml`
-
-Notes:
-
-- `src/runtime-rs/Makefile` is the source of truth for the release config name.
-- the runtime-rs debug config is created by `tools/osbuilder/node-builder/azure-linux/package_build.sh` by copying the release config and enabling debug options.
-
-Quick verification:
+List the fork's commits on top of its upstream base:
 
 ```bash
-cd <kata-repo>
-grep -n 'CONFIG_FILE_CLH_AZURE = configuration-clh-azure-runtime-rs.toml' src/runtime-rs/Makefile
-grep -n 'SHIM_CONFIG_FILE_NAME_RUNTIME_GO\|SHIM_CONFIG_FILE_NAME_RUNTIME_RS' tools/osbuilder/node-builder/azure-linux/common.sh
-bash -n tools/osbuilder/node-builder/azure-linux/common.sh tools/osbuilder/node-builder/azure-linux/package_build.sh tools/osbuilder/node-builder/azure-linux/package_install.sh
+git log --oneline $(git merge-base msft-main upstream/main)..msft-main
 ```
 
-### Static build scripts
+Before changing behavior that also exists upstream, check whether upstream
+already changed it (`git log upstream/main -S '<symbol>' -- <path>`).
 
-In `tools/packaging/static-build/cloud-hypervisor/build-static-clh.sh`, keep:
+## Fork invariants
 
-- `rm -rf cloud-hypervisor`
+Do not break these. Background and file lists are in the `msft-rebase` skill.
 
-If upstream changes the copy command, keep the newer upstream structure and only
-preserve the cleanup behavior if still needed.
+- With `static_sandbox_resource_mgmt=true`, unset workload limits fall back to
+  `static_sandbox_default_workload_mem` / `_vcpus`, and specified limits get no
+  extra CPU or memory added. Applies to both runtime-go and runtime-rs.
+- Every runtime-rs config template that enables `static_sandbox_resource_mgmt`
+  also sets both `static_sandbox_default_workload_*` keys.
+- VM templating (factory) builds from `oci.StaticHypervisorConfig()`, never the
+  raw `HypervisorConfig`.
+- Node-builder passes `STATIC=no` to the `src/runtime` make (Azure Linux Go
+  needs CGO for systemcrypto) and zeroes `DEFOVERHEADMEMSZ_CLH` /
+  `DEFOVERHEADVCPUS_CLH` for runtime-rs.
+- Node-builder shim config names match the runtime Makefiles
+  (`configuration-clh.toml`, `configuration-clh-azure-runtime-rs.toml`, and
+  their `-debug` variants).
+- Do not re-pin Cloud Hypervisor to fork repositories in `versions.yaml`.
 
-## Focused Validation Commands
+## Build and test
 
-Run these after the rebase:
+Run the narrowest check that covers the change, and run it before reporting the
+work as done. The Rust toolchain is pinned by `rust-toolchain.toml`; the root
+`Cargo.toml` is a workspace, so `cargo test -p <crate>` works from the root.
 
-```bash
-cd <kata-repo>
-cargo test -p resource --manifest-path src/runtime-rs/Cargo.toml --lib initial_size -- --nocapture
-```
+| Area | Command |
+|--|--|
+| One Rust crate | `cargo test -p <crate>` (e.g. `resource`, `kata-types`, `genpolicy`) |
+| runtime-rs | `make -C src/runtime-rs test`, `make -C src/runtime-rs check` |
+| agent | `make -C src/agent test`, `make -C src/agent check` |
+| genpolicy | `make -C src/tools/genpolicy test` |
+| runtime-go | `cd src/runtime && go test ./pkg/<package>` |
+| node-builder | `bash -n tools/osbuilder/node-builder/azure-linux/*.sh` and `shellcheck` |
 
-```bash
-cd <kata-repo>/src/runtime
-go test ./pkg/oci ./pkg/katautils
-```
+Some tests need root, KVM, or a container runtime. If a test can't run in the
+current environment, say so; do not skip or delete it.
 
-Useful inspection commands:
+## Commits and PRs
 
-```bash
-cd <kata-repo>
-git log --oneline --reverse <upstream-tag>..msft-main
-git grep -n 'static_sandbox_default_workload_mem\|static_sandbox_default_workload_vcpus\|InvalidVcpuCount\|sandbox_workload_mem_min' -- src/runtime src/runtime-rs tools/testing/gatekeeper/required-tests.yaml tests/integration
-```
+- Patch format is in `CONTRIBUTING.md`: `subsystem: summary` (75 characters max),
+  a body explaining why, and `Signed-off-by:`. Common fork subsystems:
+  `runtime-rs`, `runtime`, `agent`, `genpolicy`, `node-builder`, `tests`, `ci`.
+- One logical change per commit. Keep fork-only changes separate from changes
+  meant for upstream.
+- Fork PRs target `msft-main`. Fixes that are not fork-specific should land
+  upstream first, then be cherry-picked one commit at a time with
+  `git cherry-pick -x`.
+- AI disclosure: follow the AI policy in `CONTRIBUTING.md` (`Assisted-By:` or
+  `Generated-By:` trailers). Upstream asks contributors to write their own commit
+  messages and PR descriptions, so only draft them when asked, as a starting
+  point for the human to rewrite.
 
-Before pushing, scan tracked files for unresolved rebase markers:
+## Don't
 
-```bash
-cd <kata-repo>
-git grep -nE '^(<<<<<<<|=======|>>>>>>>)'
-```
+- Commit, push, rebase `msft-main`, or open PRs unless explicitly asked.
+- Edit generated files. Edit the source (for example `*.toml.in`, `*.proto`)
+  and regenerate.
+- Bump dependencies or touch `Cargo.lock` / `go.mod` / `go.sum` unless the task
+  requires it.
+- Reformat or refactor code unrelated to the task.
 
-If the only hits are banner lines inside scripts or help text, they are safe.
-Any true start-of-line conflict marker in source or config files must be
-removed before committing or pushing.
+## Skills
 
-## Rebase Review Checklist
-
-Use this checklist before you push:
-
-1. Confirm the branch still preserves the fork-specific resource-sizing behavior in runtime-go and runtime-rs.
-2. Confirm CI still targets `msft-main` and still skips unsupported jobs.
-3. Confirm `required-tests.yaml` skips match current upstream job names.
-4. Confirm node-builder config filenames still match the runtime Makefiles.
-5. Confirm there are no stray conflict markers.
-6. Confirm the validation commands above pass, or document any known failures.
-
-## Practical Rule For Future Rebases
-
-Prefer this order of decisions:
-
-1. Keep upstream if the fork change was already upstreamed.
-2. Keep fork behavior for resource sizing in runtime-go and runtime-rs.
-3. Keep fork CI and test skips when the limitation still exists.
-4. Avoid replaying stale Cloud Hypervisor pinning commits.
-5. Re-express `required-tests` skips against current job names instead of preserving old labels verbatim.
+- `msft-rebase`: rebase `msft-main` onto a new upstream release.
+- `mkdocs-docs` (from upstream): write or edit pages under `docs/`.
