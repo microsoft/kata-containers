@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dummy
+spec:
+  runtimeClassName: kata-cc-isolation
+  containers:
+  - name: dummy
+    image: "quay.io/prometheus/busybox:latest@sha256:0dcbf965a16f76d5aac8905769f72e43b22862cd01f6f42c7b62955aeb489c3c"
+    command: ["sleep", "infinity"]
+    volumeMounts:
+    - name: scratch
+      mountPath: /data
+  volumes:
+  - name: scratch
+    emptyDir: {}

@@ -1300,6 +1300,7 @@ allow_storages(p_container, i_storages, bundle_id, sandbox_id) if {
     img_pull_count == expected_image_guest_pull_count
     p_count == i_count - img_pull_count
     erofs_verity_partitions_unique(i_storages)
+    erofs_verity_layers_present(p_storages, i_storages)
 
     every i_storage in i_storages {
         allow_storage(p_container, i_storage, bundle_id, sandbox_id)
@@ -1401,6 +1402,18 @@ erofs_verity_partitions_unique(i_storages) if {
         startswith(o, "X-kata.partition-number=")
     ]
     count(partitions) == count({p | some p in partitions})
+}
+
+# Every declared layer must be presented, so a duplicated non-layer storage can't take the place of an omitted one.
+erofs_verity_layers_present(p_storages, i_storages) if {
+    every p_layer in [s | some s in p_storages; s.driver == "erofs-verity-layer"] {
+        some i_layer in i_storages
+        i_layer.driver == "blk"
+        i_layer.fstype == "erofs"
+        every p_option in p_layer.options {
+            p_option in i_layer.options
+        }
+    }
 }
 
 # Validates all storage fields except driver and source.
