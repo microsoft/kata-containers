@@ -455,20 +455,23 @@ pub struct CommonData {
     /// Default capabilities for a privileged container.
     pub privileged_caps: Vec<String>,
 
-    /// "host-erofs-dm-verity" binds each image layer to its dm-verity root hash; "none" doesn't.
-    #[serde(default = "default_image_layer_verification")]
-    pub image_layer_verification: String,
+    #[serde(default)]
+    pub image_layer_verification: ImageLayerVerification,
 }
 
-pub const IMAGE_LAYER_VERIFICATION_NONE: &str = "none";
-pub const IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY: &str = "host-erofs-dm-verity";
+/// How the policy binds container image layers. Unknown values are rejected when the settings are parsed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ImageLayerVerification {
+    /// Image layers are not bound by the policy.
+    #[default]
+    None,
+    /// Each image layer is bound to its dm-verity root hash.
+    HostErofsDmVerity,
+}
 
 /// Marker driver for a declared layer: the presented driver and source are runtime-chosen.
 pub const EROFS_VERITY_LAYER_DRIVER: &str = "erofs-verity-layer";
-
-fn default_image_layer_verification() -> String {
-    IMAGE_LAYER_VERIFICATION_NONE.to_string()
-}
 
 /// Configuration from "kubectl config".
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -734,7 +737,7 @@ impl AgentPolicy {
         );
         get_erofs_layer_storages(
             &mut storages,
-            &self.config.settings.common.image_layer_verification,
+            self.config.settings.common.image_layer_verification,
             yaml_container.registry.get_image_layers(),
         );
 
@@ -1388,10 +1391,10 @@ fn add_missing_strings(src: &Vec<String>, dest: &mut Vec<String>) {
 
 fn get_erofs_layer_storages(
     storages: &mut Vec<agent::Storage>,
-    image_layer_verification: &str,
+    image_layer_verification: ImageLayerVerification,
     image_layers: &[registry::ImageLayer],
 ) {
-    if image_layer_verification != IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY {
+    if image_layer_verification != ImageLayerVerification::HostErofsDmVerity {
         return;
     }
 
@@ -1512,5 +1515,30 @@ mod tests {
         apply_pod_groups_to_process(&mut process, Some(&context), false, true);
 
         assert_eq!(additional_gids(&process), vec![997, 998, 999, 2000]);
+    }
+
+    #[test]
+    fn image_layer_verification_accepts_known_values() {
+        for (value, expected) in [
+            ("none", ImageLayerVerification::None),
+            (
+                "host-erofs-dm-verity",
+                ImageLayerVerification::HostErofsDmVerity,
+            ),
+        ] {
+            let parsed: ImageLayerVerification =
+                serde_json::from_value(serde_json::json!(value)).unwrap();
+            assert_eq!(parsed, expected, "value: {value}");
+        }
+    }
+
+    #[test]
+    fn image_layer_verification_rejects_unknown_values() {
+        for value in ["host-erofs-dmverity", "Host-EROFS-DM-Verity", ""] {
+            assert!(
+                serde_json::from_value::<ImageLayerVerification>(serde_json::json!(value)).is_err(),
+                "value: {value}"
+            );
+        }
     }
 }

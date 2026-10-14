@@ -673,7 +673,7 @@ async fn get_users_from_layer(
 
 pub fn derive_verity_hashes(config: &Config) -> bool {
     config.settings.common.image_layer_verification
-        == crate::policy::IMAGE_LAYER_VERIFICATION_EROFS_DM_VERITY
+        == crate::policy::ImageLayerVerification::HostErofsDmVerity
 }
 
 pub fn get_verity_hash(
