@@ -1,0 +1,27 @@
+[
+  {
+    "op": "replace",
+    "path": "/common/root_path",
+    "value": "/run/kata-containers/shared/containers/passthrough/$(bundle-id)/rootfs"
+  },
+  {
+    "op": "replace",
+    "path": "/common/image_layer_verification",
+    "value": "host-erofs-dm-verity"
+  },
+  {
+    "op": "replace",
+    "path": "/cluster_config/pause_container_image",
+    "value": "mcr.microsoft.com/oss/v2/kubernetes/pause:3.6"
+  },
+  {
+    "op": "replace",
+    "path": "/cluster_config/guest_pull",
+    "value": false
+  },
+  {
+    "op": "replace",
+    "path": "/cluster_config/emptydir_type",
+    "value": "guest-local"
+  }
+]

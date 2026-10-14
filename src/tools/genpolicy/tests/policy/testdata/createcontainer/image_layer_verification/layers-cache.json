@@ -1,0 +1,20 @@
+[
+  {
+    "diff_id": "sha256:aa34e3131bf0650960e1ec314a32f7295b019a881db18dda84d319e96c3d68df",
+    "passwd": "root:x:0:0:root:/root:/bin/sh\ndaemon:x:1:1:daemon:/usr/sbin:/bin/false\nbin:x:2:2:bin:/bin:/bin/false\nsys:x:3:3:sys:/dev:/bin/false\nsync:x:4:100:sync:/bin:/bin/sync\nmail:x:8:8:mail:/var/spool/mail:/bin/false\nwww-data:x:33:33:www-data:/var/www:/bin/false\noperator:x:37:37:Operator:/var:/bin/false\nnobody:x:65534:65534:nobody:/home:/bin/false\n",
+    "group": "root:x:0:\ndaemon:x:1:\nbin:x:2:\nsys:x:3:\nadm:x:4:\ntty:x:5:\ndisk:x:6:\nlp:x:7:\nmail:x:8:\nkmem:x:9:\nwheel:x:10:root\ncdrom:x:11:\ndialout:x:18:\nfloppy:x:19:\nvideo:x:28:\naudio:x:29:\ntape:x:32:\nwww-data:x:33:\noperator:x:37:\nutmp:x:43:\nplugdev:x:46:\nstaff:x:50:\nlock:x:54:\nnetdev:x:82:\nusers:x:100:\nnobody:x:65534:\n",
+    "verity_hash": "8f0a8d67a9d2d5776f05b20c1f91e018310027de4dab783cc102df5a0a25666e"
+  },
+  {
+    "diff_id": "sha256:6b363bebefc7640d5f84741c62463459ca21279267ad7805cdb350db2fe02694",
+    "passwd": "",
+    "group": "",
+    "verity_hash": "a7dea2d54a79b64b248b9d85826fe8d01559e1f2b3d6879799f6d0e88ae69efb"
+  },
+  {
+    "diff_id": "sha256:9760f55e20e3f4eb6b837e1b323b3c6f29b1ef4a4617fe98625ead879e91b1c1",
+    "passwd": "",
+    "group": "",
+    "verity_hash": "3684ff30a773b77b8bc3a21a6cf14c9773262d271960e93de32fdac14acb77a7"
+  }
+]

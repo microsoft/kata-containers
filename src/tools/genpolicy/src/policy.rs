@@ -12,6 +12,7 @@ use crate::mount_and_storage;
 use crate::no_policy;
 use crate::pod;
 use crate::policy;
+use crate::registry;
 use crate::secret;
 use crate::utils;
 use crate::yaml;
@@ -453,7 +454,24 @@ pub struct CommonData {
 
     /// Default capabilities for a privileged container.
     pub privileged_caps: Vec<String>,
+
+    #[serde(default)]
+    pub image_layer_verification: ImageLayerVerification,
 }
+
+/// How the policy binds container image layers. Unknown values are rejected when the settings are parsed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ImageLayerVerification {
+    /// Image layers are not bound by the policy.
+    #[default]
+    None,
+    /// Each image layer is bound to its dm-verity root hash.
+    HostErofsDmVerity,
+}
+
+/// Marker driver for a declared layer: the presented driver and source are runtime-chosen.
+pub const EROFS_VERITY_LAYER_DRIVER: &str = "erofs-verity-layer";
 
 /// Configuration from "kubectl config".
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -716,6 +734,11 @@ impl AgentPolicy {
             &mut storages,
             yaml_container,
             &self.config.settings,
+        );
+        get_erofs_layer_storages(
+            &mut storages,
+            self.config.settings.common.image_layer_verification,
+            yaml_container.registry.get_image_layers(),
         );
 
         let mut linux = containerd::get_linux(is_privileged);
@@ -1082,6 +1105,15 @@ impl AgentPolicy {
             );
         }
 
+        ///////////////////////////////////////////////////////////////////////////////////////
+        // Container-level settings from user's YAML.
+        yaml_container.get_process_fields(&mut process);
+        debug!(
+            "get_container_process: after yaml_container.get_process_fields: User = {:?}",
+            process.User
+        );
+
+        // After the container-level user, which resets AdditionalGids when it overrides the user or group.
         apply_pod_groups_to_process(
             &mut process,
             resource.get_pod_security_context(),
@@ -1090,14 +1122,6 @@ impl AgentPolicy {
         );
         debug!(
             "get_container_process: after apply_pod_fs_group_and_supplemental_groups: User = {:?}",
-            process.User
-        );
-
-        ///////////////////////////////////////////////////////////////////////////////////////
-        // Container-level settings from user's YAML.
-        yaml_container.get_process_fields(&mut process);
-        debug!(
-            "get_container_process: after yaml_container.get_process_fields: User = {:?}",
             process.User
         );
 
@@ -1365,6 +1389,34 @@ fn add_missing_strings(src: &Vec<String>, dest: &mut Vec<String>) {
     debug!("src = {:?}, dest = {:?}", src, dest)
 }
 
+fn get_erofs_layer_storages(
+    storages: &mut Vec<agent::Storage>,
+    image_layer_verification: ImageLayerVerification,
+    image_layers: &[registry::ImageLayer],
+) {
+    if image_layer_verification != ImageLayerVerification::HostErofsDmVerity {
+        return;
+    }
+
+    // The runtime numbers GPT partitions in overlayfs lowerdir order: topmost layer first.
+    for (index, layer) in image_layers.iter().rev().enumerate() {
+        storages.push(agent::Storage {
+            driver: EROFS_VERITY_LAYER_DRIVER.to_string(),
+            fstype: "erofs".to_string(),
+            options: vec![
+                "X-kata.overlay-lower".to_string(),
+                "X-kata.multi-layer=true".to_string(),
+                "X-kata.gpt-partitioned=true".to_string(),
+                format!("X-kata.partition-number={}", index + 1),
+                "X-kata.dmverity-enabled=true".to_string(),
+                format!("X-kata.dmverity.roothash={}", layer.verity_hash),
+            ],
+            mount_point: "$(root_path)".to_string(),
+            ..Default::default()
+        });
+    }
+}
+
 pub fn get_kata_namespaces(
     is_pause_container: bool,
     use_host_network: bool,
@@ -1463,5 +1515,30 @@ mod tests {
         apply_pod_groups_to_process(&mut process, Some(&context), false, true);
 
         assert_eq!(additional_gids(&process), vec![997, 998, 999, 2000]);
+    }
+
+    #[test]
+    fn image_layer_verification_accepts_known_values() {
+        for (value, expected) in [
+            ("none", ImageLayerVerification::None),
+            (
+                "host-erofs-dm-verity",
+                ImageLayerVerification::HostErofsDmVerity,
+            ),
+        ] {
+            let parsed: ImageLayerVerification =
+                serde_json::from_value(serde_json::json!(value)).unwrap();
+            assert_eq!(parsed, expected, "value: {value}");
+        }
+    }
+
+    #[test]
+    fn image_layer_verification_rejects_unknown_values() {
+        for value in ["host-erofs-dmverity", "Host-EROFS-DM-Verity", ""] {
+            assert!(
+                serde_json::from_value::<ImageLayerVerification>(serde_json::json!(value)).is_err(),
+                "value: {value}"
+            );
+        }
     }
 }

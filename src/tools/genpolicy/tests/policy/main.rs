@@ -99,20 +99,24 @@ mod tests {
     /// its selected base request.
     /// An optional `settings-patch.json` file in the test case directory customizes
     /// the genpolicy settings used by that test.
+    /// An optional `layers-cache.json` file pins image layer data (e.g. dm-verity root hashes),
+    /// so that the test doesn't need to download and convert the layers.
     async fn runtests(test_case_dir: &str) {
+        let testdata_dir = path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/policy/testdata")
+            .join(test_case_dir);
         // Check if config_map.yaml exists.
         // If it does, we need to copy it to the workdir.
-        let is_config_map_file_present = path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/policy/testdata")
-            .join(test_case_dir)
-            .join("config_map.yaml")
-            .exists();
+        let is_config_map_file_present = testdata_dir.join("config_map.yaml").exists();
+        let is_layers_cache_file_present = testdata_dir.join("layers-cache.json").exists();
 
-        let files_to_copy = if is_config_map_file_present {
-            vec!["pod.yaml", "config_map.yaml"]
-        } else {
-            vec!["pod.yaml"]
-        };
+        let mut files_to_copy = vec!["pod.yaml"];
+        if is_config_map_file_present {
+            files_to_copy.push("config_map.yaml");
+        }
+        if is_layers_cache_file_present {
+            files_to_copy.push("layers-cache.json");
+        }
 
         // Prepare temp dir for running genpolicy.
         let (workdir, testdata_dir) = prepare_workdir(test_case_dir, &files_to_copy);
@@ -129,12 +133,20 @@ mod tests {
             None
         };
 
+        let layers_cache_file = is_layers_cache_file_present.then(|| {
+            workdir
+                .join("layers-cache.json")
+                .to_str()
+                .unwrap()
+                .to_string()
+        });
+
         let config = genpolicy::utils::Config {
             base64_out: false,
             config_files,
             containerd_socket_path: None, // Some(String::from("/var/run/containerd/containerd.sock")),
             insecure_registries: Vec::new(),
-            layers_cache: genpolicy::layers_cache::ImageLayersCache::new(&None),
+            layers_cache: genpolicy::layers_cache::ImageLayersCache::new(&layers_cache_file),
             raw_out: false,
             rego_rules_path: workdir.join("rules.rego").to_str().unwrap().to_string(),
             runtime_class_names: Vec::new(),
@@ -359,6 +371,11 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_create_container_image_layer_verification() {
+        runtests("createcontainer/image_layer_verification").await;
+    }
+
+    #[tokio::test]
     async fn test_create_container_sysctls() {
         runtests("createcontainer/sysctls").await;
     }
@@ -406,6 +423,16 @@ mod tests {
     #[tokio::test]
     async fn test_create_container_security_context_fsgroup() {
         runtests("createcontainer/security_context/fsgroup").await;
+    }
+
+    #[tokio::test]
+    async fn test_create_container_security_context_container_override() {
+        runtests("createcontainer/security_context/container_override").await;
+    }
+
+    #[tokio::test]
+    async fn test_create_container_security_context_container_runas() {
+        runtests("createcontainer/security_context/container_runas").await;
     }
 
     #[tokio::test]

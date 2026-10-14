@@ -1,0 +1,350 @@
+{
+  "bases": {
+    "create-container": {
+      "kind": "CreateContainerRequest",
+      "request": {
+        "OCI": {
+          "Annotations": {
+            "io.katacontainers.pkg.oci.bundle_path": "/run/containerd/io.containerd.runtime.v2.task/k8s.io/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "io.katacontainers.pkg.oci.container_type": "pod_container",
+            "io.kubernetes.cri.container-name": "dummy",
+            "io.kubernetes.cri.container-type": "container",
+            "io.kubernetes.cri.sandbox-id": "0000000000000000000000000000000000000000000000000000000000000000",
+            "io.kubernetes.cri.sandbox-name": "dummy",
+            "io.kubernetes.cri.sandbox-namespace": "default",
+            "io.kubernetes.cri.image-name": "quay.io/prometheus/busybox@sha256:0dcbf965a16f76d5aac8905769f72e43b22862cd01f6f42c7b62955aeb489c3c"
+          },
+          "Linux": {
+            "GIDMappings": [],
+            "MaskedPaths": [
+              "/proc/acpi",
+              "/proc/asound",
+              "/proc/kcore",
+              "/proc/keys",
+              "/proc/latency_stats",
+              "/proc/timer_list",
+              "/proc/timer_stats",
+              "/proc/sched_debug",
+              "/sys/firmware",
+              "/proc/scsi"
+            ],
+            "MountLabel": "",
+            "Namespaces": [
+              {
+                "Path": "",
+                "Type": "ipc"
+              },
+              {
+                "Path": "",
+                "Type": "uts"
+              },
+              {
+                "Path": "",
+                "Type": "mount"
+              },
+              {
+                "Path": "/run/netns/podns",
+                "Type": "network"
+              }
+            ],
+            "ReadonlyPaths": [
+              "/proc/bus",
+              "/proc/fs",
+              "/proc/irq",
+              "/proc/sys",
+              "/proc/sysrq-trigger"
+            ],
+            "Resources": {
+              "Devices": []
+            },
+            "RootfsPropagation": ""
+          },
+          "Mounts": [
+            {
+              "destination": "/data",
+              "options": [
+                "rbind",
+                "rprivate",
+                "rw"
+              ],
+              "source": "/run/kata-containers/shared/containers/0000000000000000000000000000000000000000000000000000000000000000/rootfs/local/scratch",
+              "type_": "local"
+            }
+          ],
+          "Process": {
+            "Args": [
+              "sleep",
+              "infinity"
+            ],
+            "Capabilities": {
+              "Ambient": [],
+              "Bounding": [
+                "CAP_CHOWN",
+                "CAP_DAC_OVERRIDE",
+                "CAP_FSETID",
+                "CAP_FOWNER",
+                "CAP_MKNOD",
+                "CAP_NET_RAW",
+                "CAP_SETGID",
+                "CAP_SETUID",
+                "CAP_SETFCAP",
+                "CAP_SETPCAP",
+                "CAP_NET_BIND_SERVICE",
+                "CAP_SYS_CHROOT",
+                "CAP_KILL",
+                "CAP_AUDIT_WRITE"
+              ],
+              "Effective": [
+                "CAP_CHOWN",
+                "CAP_DAC_OVERRIDE",
+                "CAP_FSETID",
+                "CAP_FOWNER",
+                "CAP_MKNOD",
+                "CAP_NET_RAW",
+                "CAP_SETGID",
+                "CAP_SETUID",
+                "CAP_SETFCAP",
+                "CAP_SETPCAP",
+                "CAP_NET_BIND_SERVICE",
+                "CAP_SYS_CHROOT",
+                "CAP_KILL",
+                "CAP_AUDIT_WRITE"
+              ],
+              "Permitted": [
+                "CAP_CHOWN",
+                "CAP_DAC_OVERRIDE",
+                "CAP_FSETID",
+                "CAP_FOWNER",
+                "CAP_MKNOD",
+                "CAP_NET_RAW",
+                "CAP_SETGID",
+                "CAP_SETUID",
+                "CAP_SETFCAP",
+                "CAP_SETPCAP",
+                "CAP_NET_BIND_SERVICE",
+                "CAP_SYS_CHROOT",
+                "CAP_KILL",
+                "CAP_AUDIT_WRITE"
+              ]
+            },
+            "Cwd": "/",
+            "NoNewPrivileges": false,
+            "SelinuxLabel": "",
+            "User": {
+              "AdditionalGids": [
+                0,
+                10
+              ],
+              "GID": 0,
+              "UID": 0,
+              "Username": ""
+            },
+            "Env": [
+              "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+              "HOSTNAME=dummy"
+            ]
+          },
+          "Root": {
+            "Path": "/run/kata-containers/shared/containers/passthrough/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/rootfs",
+            "Readonly": false
+          },
+          "Version": "1.1.0"
+        },
+        "storages": [
+          {
+            "driver": "local",
+            "driver_options": [],
+            "fs_group": null,
+            "fstype": "local",
+            "mount_point": "/run/kata-containers/shared/containers/0000000000000000000000000000000000000000000000000000000000000000/rootfs/local/scratch",
+            "options": [
+              "mode=0777"
+            ],
+            "source": "local",
+            "shared": false
+          },
+          {
+            "driver": "blk",
+            "driver_options": [],
+            "fs_group": null,
+            "fstype": "erofs",
+            "mount_point": "/run/kata-containers/shared/containers/passthrough/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/rootfs",
+            "options": [
+              "X-kata.overlay-lower",
+              "X-kata.multi-layer=true",
+              "X-kata.gpt-partitioned=true",
+              "X-kata.partition-number=1",
+              "X-kata.dmverity-enabled=true",
+              "X-kata.dmverity.roothash=a7dea2d54a79b64b248b9d85826fe8d01559e1f2b3d6879799f6d0e88ae69efb",
+              "X-kata.dmverity.hashoffset=1056768",
+              "X-kata.dmverity.salt=5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+              "X-kata.dmverity.no-superblock=true"
+            ],
+            "source": "02/00",
+            "shared": false
+          },
+          {
+            "driver": "blk",
+            "driver_options": [],
+            "fs_group": null,
+            "fstype": "erofs",
+            "mount_point": "/run/kata-containers/shared/containers/passthrough/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/rootfs",
+            "options": [
+              "X-kata.overlay-lower",
+              "X-kata.multi-layer=true",
+              "X-kata.gpt-partitioned=true",
+              "X-kata.partition-number=2",
+              "X-kata.dmverity-enabled=true",
+              "X-kata.dmverity.roothash=8f0a8d67a9d2d5776f05b20c1f91e018310027de4dab783cc102df5a0a25666e",
+              "X-kata.dmverity.hashoffset=1056768",
+              "X-kata.dmverity.salt=5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+              "X-kata.dmverity.no-superblock=true"
+            ],
+            "source": "02/00",
+            "shared": false
+          }
+        ]
+      }
+    }
+  },
+  "cases": [
+    {
+      "description": "all declared layers with their root hashes",
+      "allowed": true,
+      "base": "create-container",
+      "patch": []
+    },
+    {
+      "description": "top layer omitted and emptyDir duplicated to keep the storage count",
+      "allowed": false,
+      "base": "create-container",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/storages/1",
+          "value": {
+            "driver": "local",
+            "driver_options": [],
+            "fs_group": null,
+            "fstype": "local",
+            "mount_point": "/run/kata-containers/shared/containers/0000000000000000000000000000000000000000000000000000000000000000/rootfs/local/scratch",
+            "options": [
+              "mode=0777"
+            ],
+            "source": "local",
+            "shared": false
+          }
+        }
+      ]
+    },
+    {
+      "description": "top layer omitted",
+      "allowed": false,
+      "base": "create-container",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/storages/1"
+        }
+      ]
+    },
+    {
+      "description": "top layer replaced by a second copy of the bottom layer",
+      "allowed": false,
+      "base": "create-container",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/storages/1",
+          "value": {
+            "driver": "blk",
+            "driver_options": [],
+            "fs_group": null,
+            "fstype": "erofs",
+            "mount_point": "/run/kata-containers/shared/containers/passthrough/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/rootfs",
+            "options": [
+              "X-kata.overlay-lower",
+              "X-kata.multi-layer=true",
+              "X-kata.gpt-partitioned=true",
+              "X-kata.partition-number=2",
+              "X-kata.dmverity-enabled=true",
+              "X-kata.dmverity.roothash=8f0a8d67a9d2d5776f05b20c1f91e018310027de4dab783cc102df5a0a25666e",
+              "X-kata.dmverity.hashoffset=1056768",
+              "X-kata.dmverity.salt=5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+              "X-kata.dmverity.no-superblock=true"
+            ],
+            "source": "02/00",
+            "shared": false
+          }
+        }
+      ]
+    },
+    {
+      "description": "top layer with a different root hash",
+      "allowed": false,
+      "base": "create-container",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/storages/1/options/5",
+          "value": "X-kata.dmverity.roothash=0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "description": "top layer root hash presented at the bottom layer's partition",
+      "allowed": false,
+      "base": "create-container",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/storages/1",
+          "value": {
+            "driver": "blk",
+            "driver_options": [],
+            "fs_group": null,
+            "fstype": "erofs",
+            "mount_point": "/run/kata-containers/shared/containers/passthrough/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/rootfs",
+            "options": [
+              "X-kata.overlay-lower",
+              "X-kata.multi-layer=true",
+              "X-kata.gpt-partitioned=true",
+              "X-kata.partition-number=2",
+              "X-kata.dmverity-enabled=true",
+              "X-kata.dmverity.roothash=a7dea2d54a79b64b248b9d85826fe8d01559e1f2b3d6879799f6d0e88ae69efb",
+              "X-kata.dmverity.hashoffset=1056768",
+              "X-kata.dmverity.salt=5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+              "X-kata.dmverity.no-superblock=true"
+            ],
+            "source": "02/00",
+            "shared": false
+          }
+        }
+      ]
+    },
+    {
+      "description": "top layer with a second root hash borrowed from the bottom layer",
+      "allowed": false,
+      "base": "create-container",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/storages/1/options/-",
+          "value": "X-kata.dmverity.roothash=8f0a8d67a9d2d5776f05b20c1f91e018310027de4dab783cc102df5a0a25666e"
+        }
+      ]
+    },
+    {
+      "description": "top layer with an undeclared dm-verity option",
+      "allowed": false,
+      "base": "create-container",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/storages/1/options/-",
+          "value": "X-kata.dmverity.blocksize=512"
+        }
+      ]
+    }
+  ]
+}
