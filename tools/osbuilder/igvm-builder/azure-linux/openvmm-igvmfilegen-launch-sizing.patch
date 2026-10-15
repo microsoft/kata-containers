@@ -1,0 +1,1713 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 72a2b6be..d3969b99 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -8005,6 +8005,7 @@ dependencies = [
+ name = "snp_bootshim"
+ version = "0.0.0"
+ dependencies = [
++ "igvm_defs",
+  "loader_defs",
+  "minimal_rt",
+  "minimal_rt_build",
+diff --git a/vm/loader/igvmfilegen/src/snp_linux_direct.rs b/vm/loader/igvmfilegen/src/snp_linux_direct.rs
+index f34a0168..83d3e571 100644
+--- a/vm/loader/igvmfilegen/src/snp_linux_direct.rs
++++ b/vm/loader/igvmfilegen/src/snp_linux_direct.rs
+@@ -17,6 +17,7 @@
+ use igvmfilegen_config::Resources;
+ use igvmfilegen_config::SnpInjectionType;
+ use loader::importer::BootPageAcceptance;
++use loader::importer::IgvmParameterType;
+ use loader::importer::ImageLoad;
+ use loader::importer::X86Register;
+ use loader::linux::InitrdAddressType;
+@@ -26,9 +27,14 @@
+ use loader_defs::linux::SNP_BOOT_SHIM_PARAMS_VERSION;
+ use loader_defs::linux::SnpBootShimParams;
+ use loader_defs::linux::SnpBootShimRange;
++use loader_defs::linux::{
++    SNP_BOOT_SHIM_HIGH_RAM, SNP_BOOT_SHIM_LAUNCH_PAGES, SNP_BOOT_SHIM_LOW_MMIO,
++    SNP_BOOT_SHIM_MADT_OFFSET,
++};
+ use memory_range::MemoryRange;
+-use serial_16550_resources::ComPort;
+ use std::io::Seek;
++use vm_topology::layout::LayoutBuilder;
++use vm_topology::layout::Placement;
+ use vm_topology::memory::MemoryLayout;
+ use vm_topology::pcie::PcieHostBridge;
+ use vm_topology::processor::ProcessorTopology;
+@@ -86,10 +92,55 @@ fn new(memory_page_count: u64, processor_count: u32) -> anyhow::Result<Self> {
+         // Match the single RAM node instead of inheriting per-socket vnodes.
+         processors.set_vnodes(&vec![0; processor_count as usize]);
+ 
++        let mut ecam_range = MemoryRange::EMPTY;
++        let mut low_mmio = MemoryRange::EMPTY;
++        let mut high_mmio = MemoryRange::EMPTY;
++        let mut ram = Vec::new();
++        let mut allocator = LayoutBuilder::new();
++        allocator.fixed("chipset-low", MemoryRange::new(0xf800_0000..0x1_0000_0000));
++        allocator.request(
++            "ecam",
++            &mut ecam_range,
++            0x0800_0000,
++            0x10_0000,
++            Placement::Mmio32,
++        );
++        allocator.request(
++            "pci-low",
++            &mut low_mmio,
++            0x1000_0000,
++            0x20_0000,
++            Placement::Mmio32,
++        );
++        allocator.request(
++            "pci-high",
++            &mut high_mmio,
++            0x4_0000_0000,
++            0x20_0000,
++            Placement::Mmio64,
++        );
++        allocator.ram("ram", &mut ram, memory_size, PAGE_SIZE);
++        allocator
++            .allocate()
++            .context("allocating diagnostic PCIe layout")?;
++        tracing::info!(?ecam_range, ?low_mmio, ?high_mmio, "diagnostic PCIe layout");
++
+         Ok(Self {
+             memory,
+             processors,
+-            pcie_host_bridges: Vec::new(),
++            pcie_host_bridges: vec![PcieHostBridge {
++                index: 0,
++                segment: 0,
++                start_bus: 0,
++                end_bus: 127,
++                ecam_range,
++                low_mmio,
++                high_mmio,
++                cxl: None,
++                vnode: None,
++                preserve_bars: false,
++                preserve_boot_config: false,
++            }],
+         })
+     }
+ 
+@@ -192,11 +243,33 @@ pub fn build(params: BuildParams<'_>) -> anyhow::Result<IgvmOutput> {
+     } = params;
+ 
+     let layout = FixedGuestLayout::new(memory_page_count, processor_count)?;
+-    let acpi_builder = layout.acpi_builder();
++    let mut acpi_builder = layout.acpi_builder();
++    ensure!(
++        processor_count == 1,
++        "launch-time CPU tables need only the BSP template: set processor_count to 1"
++    );
++    ensure!(
++        c_bit_position == 51,
++        "launch-sizing prototype requires C-bit 51"
++    );
++    ensure!(
++        memory_page_count * PAGE_SIZE <= SNP_BOOT_SHIM_LOW_MMIO,
++        "minimum launch RAM overlaps PCI MMIO"
++    );
++    // Reserve two measured SRAT memory-affinity slots for the shim to fill.
++    let launch_acpi_memory = MemoryLayout::new(
++        SNP_BOOT_SHIM_LOW_MMIO + PAGE_SIZE,
++        &[MemoryRange::new(
++            SNP_BOOT_SHIM_LOW_MMIO..SNP_BOOT_SHIM_HIGH_RAM,
++        )],
++        &[],
++        &[],
++        None,
++    )?;
++    acpi_builder.mem_layout = &launch_acpi_memory;
+     let (mut kernel, mut initrd) = open_linux_resources(linux, resources)?;
+     let initrd_config = initrd_config(&mut initrd)?;
+     let mut loader = new_loader(policy, c_bit_position, memory_page_count, injection_type);
+-    let com1 = ComPort::Com1;
+ 
+     let load_info = loader::linux::load_x86(
+         &mut loader.loader(),
+@@ -207,7 +280,6 @@ pub fn build(params: BuildParams<'_>) -> anyhow::Result<IgvmOutput> {
+         |gpa| {
+             let tables = acpi_builder.build_acpi_tables(gpa, |dsdt| {
+                 dsdt.add_apic();
+-                dsdt.add_uart(b"\\_SB.UAR1", b"COM1", 1, com1.io_port(), com1.irq().into());
+                 dsdt.add_rtc();
+             });
+             loader::linux::AcpiTables {
+@@ -293,6 +365,9 @@ fn load_bootshim_and_handoff(
+         "SNP bootshim parameter page lies outside configured RAM"
+     );
+ 
++    let launch_gpa = params_gpa + PAGE_SIZE;
++    import_launch_params(loader, launch_gpa, memory_page_count * PAGE_SIZE)?;
++
+     let bootshim_ranges = loader
+         .unimported_ram_ranges([params_page])?
+         .into_iter()
+@@ -306,6 +381,7 @@ fn load_bootshim_and_handoff(
+         linux_entry,
+         linux_zero_page,
+         memory_page_count * PAGE_SIZE,
++        launch_gpa,
+         &bootshim_ranges,
+     )?;
+     {
+@@ -326,6 +402,39 @@ fn load_bootshim_and_handoff(
+     Ok(bootshim_ranges)
+ }
+ 
++fn import_launch_params(
++    loader: &mut IgvmLoader<X86Register>,
++    launch_gpa: u64,
++    ram_end: u64,
++) -> anyhow::Result<()> {
++    ensure!(
++        launch_gpa
++            .checked_add(u64::from(SNP_BOOT_SHIM_LAUNCH_PAGES) * PAGE_SIZE)
++            .is_some_and(|end| end <= ram_end),
++        "launch parameter area lies outside minimum RAM"
++    );
++    let mut importer = loader.loader();
++    let area = importer.create_parameter_area(
++        launch_gpa / PAGE_SIZE,
++        SNP_BOOT_SHIM_LAUNCH_PAGES,
++        "snp-launch-params",
++    )?;
++    importer.import_parameter(
++        area,
++        core::mem::offset_of!(loader_defs::linux::SnpBootShimLaunchParams, processor_count)
++            .try_into()?,
++        IgvmParameterType::VpCount,
++    )?;
++    importer.import_parameter(
++        area,
++        core::mem::offset_of!(loader_defs::linux::SnpBootShimLaunchParams, memory_map)
++            .try_into()?,
++        IgvmParameterType::MemoryMap,
++    )?;
++    importer.import_parameter(area, SNP_BOOT_SHIM_MADT_OFFSET, IgvmParameterType::Madt)?;
++    Ok(())
++}
++
+ fn align_up_to_page(value: u64) -> u64 {
+     value
+         .checked_add(PAGE_SIZE - 1)
+@@ -350,6 +459,7 @@ fn build_bootshim_params(
+     linux_entry: u64,
+     linux_zero_page: u64,
+     ram_end: u64,
++    launch_gpa: u64,
+     ranges: &[SnpBootShimRange],
+ ) -> anyhow::Result<SnpBootShimParams> {
+     ensure!(
+@@ -368,6 +478,7 @@ fn build_bootshim_params(
+     params.linux_entry = linux_entry;
+     params.linux_zero_page = linux_zero_page;
+     params.ram_end = ram_end;
++    params.launch_params_gpa = launch_gpa;
+     params.ranges[..ranges.len()].copy_from_slice(ranges);
+     Ok(params)
+ }
+@@ -521,7 +632,12 @@ fn assert_serialized_igvm_shape(
+                     assert!(!vtl2_protectable);
+                     required_memory_count += 1;
+                 }
+-                unexpected => panic!("unexpected directive in fixed SNP IGVM: {unexpected:?}"),
++                IgvmDirectiveHeader::ParameterArea { .. }
++                | IgvmDirectiveHeader::ParameterInsert(_)
++                | IgvmDirectiveHeader::VpCount(_)
++                | IgvmDirectiveHeader::MemoryMap(_)
++                | IgvmDirectiveHeader::Madt(_) => {}
++                unexpected => panic!("unexpected directive in SNP IGVM: {unexpected:?}"),
+             }
+         }
+ 
+@@ -678,7 +794,7 @@ fn normal_and_restricted_vmsas_use_the_selected_injection_mode() {
+ 
+     #[test]
+     fn sparse_igvm_serializes_and_preserves_measurement() {
+-        const RAM_PAGE_COUNT: u64 = 8;
++        const RAM_PAGE_COUNT: u64 = 16;
+         const PARAMS_PAGE: u64 = 6;
+         let params_gpa = PARAMS_PAGE * PAGE_SIZE;
+         let mut loader = test_loader(RAM_PAGE_COUNT);
+@@ -692,8 +808,10 @@ fn sparse_igvm_serializes_and_preserves_measurement() {
+                 .unwrap();
+         }
+ 
++        let launch_gpa = (PARAMS_PAGE + 1) * PAGE_SIZE;
++        import_launch_params(&mut loader, launch_gpa, RAM_PAGE_COUNT * PAGE_SIZE).unwrap();
+         let ranges = loader.unimported_ram_ranges([PARAMS_PAGE]).unwrap();
+-        assert_eq!(ranges, [0..1, 3..6, 7..8]);
++        assert_eq!(ranges, [0..1, 3..6, 10..16]);
+         let ranges = ranges
+             .iter()
+             .map(|range| SnpBootShimRange {
+@@ -705,6 +823,7 @@ fn sparse_igvm_serializes_and_preserves_measurement() {
+             0x200000,
+             loader::linux::ZERO_PAGE_BASE,
+             RAM_PAGE_COUNT * PAGE_SIZE,
++            launch_gpa,
+             &ranges,
+         )
+         .unwrap();
+@@ -764,6 +883,38 @@ fn sparse_igvm_serializes_and_preserves_measurement() {
+         );
+         assert_eq!(handoff, Some((TEST_SHIM_ENTRY, params_gpa)));
+         assert_eq!(serialized_params, Some(params));
++        assert_eq!(params.version, SNP_BOOT_SHIM_PARAMS_VERSION);
++        assert_eq!(params.launch_params_gpa, launch_gpa);
++        let directives = output.guest.directives();
++        assert_eq!(
++            directives
++                .iter()
++                .filter(|d| matches!(d, IgvmDirectiveHeader::ParameterArea { .. }))
++                .count(),
++            1
++        );
++        assert_eq!(
++            directives
++                .iter()
++                .filter(|d| matches!(d, IgvmDirectiveHeader::ParameterInsert(_)))
++                .count(),
++            1
++        );
++        assert!(
++            directives
++                .iter()
++                .any(|d| matches!(d, IgvmDirectiveHeader::VpCount(_)))
++        );
++        assert!(
++            directives
++                .iter()
++                .any(|d| matches!(d, IgvmDirectiveHeader::MemoryMap(_)))
++        );
++        assert!(
++            directives
++                .iter()
++                .any(|d| matches!(d, IgvmDirectiveHeader::Madt(_)))
++        );
+         assert_serialized_igvm_shape(
+             &output.guest,
+             RAM_PAGE_COUNT,
+@@ -834,13 +985,20 @@ fn rejects_too_many_bootshim_ranges() {
+             SNP_BOOT_SHIM_MAX_RANGES + 1
+         ];
+         assert!(
+-            build_bootshim_params(0x100000, 0x2000, 0x200000, &ranges)
++            build_bootshim_params(0x100000, 0x2000, 0x200000, 0x180000, &ranges)
+                 .unwrap_err()
+                 .to_string()
+                 .contains("supports at most")
+         );
+     }
+ 
++    #[test]
++    fn rejects_launch_area_outside_minimum_ram() {
++        let mut loader = test_loader(16);
++        assert!(import_launch_params(&mut loader, 14 * PAGE_SIZE, 16 * PAGE_SIZE).is_err());
++        assert!(import_launch_params(&mut loader, u64::MAX - PAGE_SIZE + 1, u64::MAX).is_err());
++    }
++
+     #[test]
+     #[should_panic(expected = "page alignment overflow")]
+     fn bootshim_placement_overflow_panics() {
+diff --git a/vm/loader/igvmfilegen_config/src/lib.rs b/vm/loader/igvmfilegen_config/src/lib.rs
+index 8a337387..1239969e 100644
+--- a/vm/loader/igvmfilegen_config/src/lib.rs
++++ b/vm/loader/igvmfilegen_config/src/lib.rs
+@@ -128,9 +128,9 @@ pub enum Image {
+     SnpLinuxDirect {
+         /// The Linux image to load.
+         linux: LinuxImage,
+-        /// The number of virtual processors in the guest.
++        /// The BSP template count; must be one. Actual CPU count comes from launch parameters.
+         processor_count: u32,
+-        /// The number of pages in the guest.
++        /// The minimum number of RAM pages required by the image.
+         memory_page_count: u64,
+         /// The page-table address bit used as the SNP encryption bit.
+         c_bit_position: u8,
+@@ -181,8 +181,8 @@ pub fn validate(&self) -> Result<(), ImageValidationError> {
+             ..
+         } = *self
+         {
+-            if processor_count == 0 {
+-                return Err(ImageValidationError::ZeroProcessorCount);
++            if processor_count != 1 {
++                return Err(ImageValidationError::InvalidProcessorCount);
+             }
+             if memory_page_count == 0 {
+                 return Err(ImageValidationError::ZeroMemoryPageCount);
+@@ -213,9 +213,9 @@ pub fn validate(&self) -> Result<(), ImageValidationError> {
+ /// Error returned when an image configuration contains invalid intrinsic fields.
+ #[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
+ pub enum ImageValidationError {
+-    /// The image requests no virtual processors.
+-    #[error("processor_count must be nonzero")]
+-    ZeroProcessorCount,
++    /// Only the BSP template is generated; CPUs are enumerated at launch.
++    #[error("processor_count must be 1 for the BSP template")]
++    InvalidProcessorCount,
+     /// The image requests no guest memory.
+     #[error("memory_page_count must be nonzero")]
+     ZeroMemoryPageCount,
+@@ -434,6 +434,17 @@ fn snp_linux_direct_image(
+         }
+     }
+ 
++    #[test]
++    fn snp_linux_direct_has_no_sizing_mode_switch() {
++        let image = snp_linux_direct_image(false, 1, 131072, 51);
++        let serialized = serde_json::to_value(&image).unwrap();
++        let fields = serialized["snp_linux_direct"].as_object().unwrap();
++        assert_eq!(fields.len(), 4);
++        assert!(!fields.contains_key("launch_time_sizing"));
++        let parsed: Image = serde_json::from_value(serialized).unwrap();
++        parsed.validate().unwrap();
++    }
++
+     #[test]
+     fn parse_snp_linux_direct_manifest() {
+         let config: Config =
+@@ -468,6 +479,7 @@ fn parse_snp_linux_direct_manifest() {
+                 processor_count,
+                 memory_page_count,
+                 c_bit_position,
++                ..
+             } => {
+                 assert!(linux.use_initrd);
+                 assert_eq!(
+@@ -498,7 +510,7 @@ fn parse_multi_vp_snp_linux_direct_manifest() {
+         else {
+             panic!("expected SNP Linux-direct image");
+         };
+-        assert_eq!(*processor_count, 2);
++        assert_eq!(*processor_count, 1);
+         guest.image.validate().unwrap();
+     }
+ 
+@@ -601,13 +613,14 @@ fn snp_linux_direct_rejects_invalid_c_bit_positions() {
+     }
+ 
+     #[test]
+-    fn snp_linux_direct_rejects_zero_processors() {
+-        let image = snp_linux_direct_image(false, 0, 40960, 51);
+-
+-        assert_eq!(
+-            image.validate(),
+-            Err(ImageValidationError::ZeroProcessorCount)
+-        );
++    fn snp_linux_direct_requires_bsp_template() {
++        for count in [0, 2, 256] {
++            let image = snp_linux_direct_image(false, count, 40960, 51);
++            assert_eq!(
++                image.validate(),
++                Err(ImageValidationError::InvalidProcessorCount)
++            );
++        }
+     }
+ 
+     #[test]
+diff --git a/vm/loader/loader_defs/src/linux.rs b/vm/loader/loader_defs/src/linux.rs
+index 4916db0e..60728885 100644
+--- a/vm/loader/loader_defs/src/linux.rs
++++ b/vm/loader/loader_defs/src/linux.rs
+@@ -9,6 +9,7 @@
+ #![expect(missing_docs)]
+ #![expect(non_camel_case_types)]
+ 
++use igvm_defs::IGVM_VHS_MEMORY_MAP_ENTRY;
+ use static_assertions::const_assert_eq;
+ use zerocopy::FromBytes;
+ use zerocopy::FromZeros;
+@@ -296,10 +297,50 @@ pub struct cc_setup_data {
+     pub _padding: [u32; 3],
+ }
+ 
+-/// Magic value for a measured [`SnpBootShimParams`] page.
+-pub const SNP_BOOT_SHIM_PARAMS_MAGIC: u64 = u64::from_le_bytes(*b"SNPBSHIM");
+-/// Version of the [`SnpBootShimParams`] handoff ABI.
++/// Identifies the Kata-specific measured [`SnpBootShimParams`] handoff.
++pub const SNP_BOOT_SHIM_PARAMS_MAGIC: u64 = u64::from_le_bytes(*b"katashim");
++/// Version of the Kata handoff ABI.
+ pub const SNP_BOOT_SHIM_PARAMS_VERSION: u32 = 1;
++/// One 4-KiB page for CPU count/memory map, followed by two pages for host MADT.
++pub const SNP_BOOT_SHIM_LAUNCH_PAGES: u32 = 3;
++/// Start MADT on the next page, separate from the fixed-size launch header.
++pub const SNP_BOOT_SHIM_MADT_OFFSET: u32 = hvdef::HV_PAGE_SIZE as u32;
++/// Bound untrusted MADT input to two pages; enough for the supported CPU count.
++pub const SNP_BOOT_SHIM_MADT_SIZE: usize = 2 * hvdef::HV_PAGE_SIZE as usize;
++/// Prototype CPU capacity, matched by the Kata image's nr_cpus=256 command line
++/// (Only up to 32 tested so far).
++pub const SNP_BOOT_SHIM_MAX_CPUS: usize = 256;
++/// We generate two ACPI output tables, MADT and SRAT, each with its own two-page
++/// buffer. For 256 CPUs, their x2APIC records occupy 4096 and 6144 bytes,
++/// respectively, leaving room for headers and the remaining platform/memory records.
++pub const SNP_BOOT_SHIM_CPU_TABLE_SIZE: usize = 2 * hvdef::HV_PAGE_SIZE as usize;
++/// 3.5-GiB low-RAM ceiling: the measured PCI platform places ECAM here,
++/// followed by low PCI MMIO and the chipset reservation below 4 GiB.
++pub const SNP_BOOT_SHIM_LOW_MMIO: u64 = 0xe000_0000;
++/// High RAM starts at 4 GiB, beyond the platform's low-address MMIO hole.
++pub const SNP_BOOT_SHIM_HIGH_RAM: u64 = 0x1_0000_0000;
++/// Initial measured PCI high-MMIO window ends at 20 GiB: a 16-GiB aperture
++/// starting at 4 GiB. The shim relocates it above actual RAM without resizing it.
++pub const SNP_BOOT_SHIM_HIGH_MMIO_END: u64 = 0x5_0000_0000;
++/// Exclusive RAM-address bound covered by the bootshim's 64-GiB identity map.
++/// Increasing this also requires extending map_high_memory()'s page tables.
++pub const SNP_BOOT_SHIM_MAX_GPA: u64 = 64 << 30;
++/// Tested prototype total-RAM cap, not an architectural SNP limit. Separate
++/// from MAX_GPA because the MMIO hole makes the RAM end exceed its byte count.
++pub const SNP_BOOT_SHIM_MAX_RAM: u64 = 32 << 30;
++
++/// Layout of the VpCount and MemoryMap inputs requested by the generator.
++/// This prototype supports one low RAM range, one high RAM range and a
++/// zero terminator. These fields are untrusted, unlike SnpBootShimParams.
++#[repr(C)]
++#[derive(Debug, Copy, Clone, Eq, PartialEq, IntoBytes, Immutable, KnownLayout, FromBytes)]
++pub struct SnpBootShimLaunchParams {
++    pub processor_count: u32,
++    /// Explicit padding keeps the canonical IGVM entries naturally 8-byte aligned.
++    pub reserved: [u8; 4],
++    pub memory_map: [IGVM_VHS_MEMORY_MAP_ENTRY; 3],
++}
++
+ const SNP_BOOT_SHIM_PARAMS_HEADER_SIZE: usize = 48;
+ /// Maximum number of RAM ranges that fit in one [`SnpBootShimParams`] page.
+ pub const SNP_BOOT_SHIM_MAX_RANGES: usize = (hvdef::HV_PAGE_SIZE as usize
+@@ -334,10 +375,10 @@ pub struct SnpBootShimParams {
+     pub linux_entry: u64,
+     /// Guest physical address of the Linux zero page passed in RSI.
+     pub linux_zero_page: u64,
+-    /// Exclusive end of the configured, contiguous guest RAM.
++    /// Exclusive end of the minimum contiguous RAM supplied by the image.
+     pub ram_end: u64,
+-    /// Reserved for future ABI versions and must be zero.
+-    pub reserved: u64,
++    /// GPA of the required unmeasured launch parameter area.
++    pub launch_params_gpa: u64,
+     /// Sorted, non-overlapping RAM ranges omitted from measured page data.
+     pub ranges: [SnpBootShimRange; SNP_BOOT_SHIM_MAX_RANGES],
+ }
+diff --git a/vm/loader/manifests/snp-linux-direct-multi-vp.json b/vm/loader/manifests/snp-linux-direct-multi-vp.json
+index 03d843bd..f551b2e7 100644
+--- a/vm/loader/manifests/snp-linux-direct-multi-vp.json
++++ b/vm/loader/manifests/snp-linux-direct-multi-vp.json
+@@ -15,10 +15,10 @@
+             },
+             "image": {
+                 "snp_linux_direct": {
+-                    "processor_count": 2,
++                    "processor_count": 1,
+                     "linux": {
+                         "use_initrd": true,
+-                        "command_line": "console=ttyS0 earlyprintk=serial earlycon panic=-1"
++                        "command_line": "console=ttyS0 earlyprintk=serial earlycon panic=-1 nr_cpus=256"
+                     },
+                     "memory_page_count": 40960,
+                     "c_bit_position": 51
+diff --git a/vm/loader/snp_bootshim/Cargo.toml b/vm/loader/snp_bootshim/Cargo.toml
+index 794211f4..b0798abc 100644
+--- a/vm/loader/snp_bootshim/Cargo.toml
++++ b/vm/loader/snp_bootshim/Cargo.toml
+@@ -7,6 +7,7 @@ edition.workspace = true
+ rust-version.workspace = true
+ 
+ [dependencies]
++igvm_defs.workspace = true
+ loader_defs.workspace = true
+ minimal_rt.workspace = true
+ x86defs.workspace = true
+diff --git a/vm/loader/snp_bootshim/README.md b/vm/loader/snp_bootshim/README.md
+new file mode 100644
+index 00000000..6d402764
+--- /dev/null
++++ b/vm/loader/snp_bootshim/README.md
+@@ -0,0 +1,133 @@
++# SNP Linux-direct runtime CPU-table prototype
++
++This Kata fork always sizes `snp_linux_direct` guests at launch, allowing one
++IGVM to boot with different CPU and RAM sizes. There is no fixed-profile mode
++or `launch_time_sizing` switch.
++
++```json
++{
++  "processor_count": 1,
++  "memory_page_count": 131072,
++  "c_bit_position": 51
++}
++```
++
++These are fields inside the existing image object; the `linux` configuration is
++still required. `processor_count=1` supplies only the BSP/platform template, not
++the maximum launch count. The bootshim constructs actual CPU records at boot.
++`memory_page_count` is the minimum RAM requirement (512 MiB in this example).
++The test image uses `nr_cpus=256` to match the bootshim's bounded capacity.
++The generator and bootshim must be built together: the launch parameter area
++is mandatory, and legacy handoff formats are rejected.
++The measured handoff uses the eight-byte magic `katashim` and starts a separate
++Kata ABI at version 1. Earlier `SNPBSHIM` handoffs are rejected by their magic;
++future incompatible Kata layout changes must increment the version.
++
++## Interface and trust boundary
++
++The generator emits the existing IGVM `VpCount`, `MemoryMap`, and `Madt`
++directives into a three-page parameter area. No new VMM RPC or kernel ABI is
++needed. OpenVMM imports those pages as private but unmeasured; their contents
++are **untrusted launch input**, not authenticated configuration.
++
++The measured launch-sizing `SnpBootShimParams` handoff uses `launch_params_gpa` as the
++parameter-area GPA. The GPA itself remains measured. VpCount is at offset 0,
++the memory map at offset 8, and host MADT at offset 4096 with an 8-KiB bound.
++Four explicit padding bytes after VpCount align the memory-map entries' 64-bit
++fields. The generator derives the first two offsets from the shared struct.
++At most two RAM ranges followed by a zero terminator are supported.
++
++The shim snapshots and validates the launch page, then:
++
++- preserves the measured low-memory reservations while updating Linux E820;
++- validates host MADT structure/checksum, enabled count, unique APIC IDs and
++  one-based ACPI UIDs (`UID = VP index + 1`);
++- constructs Local x2APIC and x2APIC-affinity records for the actual CPUs,
++  preserving their APIC IDs rather than assuming IDs are consecutive;
++- copies interrupt-routing/platform records only from measured templates;
++- fills the measured SRAT memory-affinity records;
++- reserves the 16-KiB output buffers as E820 ACPI memory and updates
++  XSDT/RSDT pointers, table lengths and checksums;
++- moves the measured PCI SSDT's high-MMIO window above high RAM;
++- installs a private 64-GiB identity map and accepts actual omitted RAM using
++  the existing GHCB/PVALIDATE path.
++
++The host MADT supplies only CPU identities. Its APIC MMIO addresses, interrupt
++routing and other platform records are ignored. A valid checksum detects
++malformed data, not an authenticated host. The kernel image, entrypoint,
++command line, rootfs verity parameters and PCI description remain measured.
++Bad launch input terminates the guest through the existing GHCB shutdown request.
++
++Linux still starts secondary CPUs. The old 6.1 conf-pods kernel directly
++registered CPUs from VpCount; this prototype supplies normal ACPI tables to
++the unchanged 6.18 kernel instead.
++
++Changing resource counts does not change the launch measurement. Consequently
++the measurement does **not** authenticate the actual CPU count or RAM size.
++Resource attestation, if required, needs a separate guest-verifier protocol.
++A malicious host can withhold resources or prevent boot; this interface does
++not promise availability.
++
++## Current prototype limits
++
++- x86_64 SNP, C-bit 51, one NUMA node, at most 256 CPUs.
++- APIC IDs may be non-consecutive; UIDs must cover 1 through VpCount, and the BSP
++  must be APIC ID zero. Output tables are bounded to 8 KiB each, not prefilled
++  with one CPU record per possible launch CPU.
++- One low RAM range starting at zero, ending no later than `0xe0000000`.
++  A gap below ECAM is allowed: OpenVMM can cap low RAM at 3 GiB.
++- Optional high RAM starting at 4 GiB; total RAM at most 32 GiB.
++- One PCI segment, ECAM at `0xe0000000`, 256-MiB low PCI window and 16-GiB high
++  PCI window. The latter starts at the 1-GiB-aligned end of RAM, at least 4 GiB.
++- No host-supplied AML, NUMA topology, command-line overrides, CPU hotplug or
++  memory hotplug.
++
++The PCI layout incorporates the earlier IGVM-generator PCI platform changes.
++This is not a general-purpose ACPI parser or
++a finalized upstream ABI. Other PCI layouts and NUMA need explicit design.
++CPU power-management/hotplug namespace support is not part of this prototype.
++
++Build and run the generator/config/bootshim tests on the remote build machine.
++The bare-metal executable additionally needs a
++`MINIMAL_RT_BUILD=1 cargo build -p snp_bootshim --target x86_64-unknown-none
++--profile boot-release` build; host-mode unit tests do not compile that path.
++
++## Glossary
++
++Acronyms and related architectural terms used in this document:
++
++| Term | Meaning in this prototype |
++|---|---|
++| ABI | Application Binary Interface; the binary layout and calling contract shared by the generator, bootshim and kernel. |
++| ACPI | Advanced Configuration and Power Interface; firmware tables describing CPUs, memory and platform devices to Linux. |
++| AML | ACPI Machine Language; executable firmware bytecode, such as device descriptions and methods in an SSDT. |
++| AP | Application Processor; a secondary CPU started by Linux after the boot CPU. |
++| APIC | Advanced Programmable Interrupt Controller; the x86 interrupt controller. An APIC ID identifies a CPU's interrupt destination. |
++| BSP | Bootstrap Processor; the initial CPU that runs the bootshim and enters Linux. |
++| C-bit | The address bit used to select encrypted/private memory in this SNP configuration; bit 51 in the current prototype. |
++| CPU | Central Processing Unit; CPU counts here refer to guest virtual processors, not necessarily physical host cores. |
++| E820 | The x86 firmware memory-map interface, named after BIOS interrupt `0x15`, function `0xe820`; its entries describe usable and reserved memory. |
++| ECAM | Enhanced Configuration Access Mechanism; the memory-mapped PCI Express configuration space. |
++| GHCB | Guest-Hypervisor Communication Block; the SEV-ES/SNP interface for communicating requests and results between the guest and hypervisor. |
++| GPA | Guest Physical Address; an address in the VM's physical address space, not a host physical or virtual address. |
++| IGVM | Independent Guest Virtual Machine; the image format carrying initial guest memory, processor state and launch directives. |
++| KiB / MiB / GiB | Kibibyte, mebibyte and gibibyte: respectively `2^10`, `2^20` and `2^30` bytes. |
++| MADT | Multiple APIC Description Table; the ACPI table containing processor interrupt-controller identities and interrupt-routing records. |
++| MMIO | Memory-Mapped Input/Output; address ranges used to access devices rather than ordinary RAM. |
++| NUMA | Non-Uniform Memory Access; a topology grouping CPUs and memory by locality. This prototype exposes one node. |
++| PCI | Peripheral Component Interconnect; the device-bus family used for the guest platform's PCI/PCI Express devices. |
++| PVALIDATE | The AMD instruction used by an SNP guest to validate or invalidate memory pages; used here when accepting additional RAM. |
++| RAM | Random-Access Memory; the guest memory sized at launch. |
++| rootfs | Root filesystem; supplied separately as a block-device image, with its dm-verity parameters bound into the measured command line. |
++| RPC | Remote Procedure Call; the control interface used by the runtime to request VMM operations. |
++| RSDT | Root System Description Table; an ACPI root table containing 32-bit addresses of other ACPI tables. |
++| SEV / SEV-ES | Secure Encrypted Virtualization / SEV Encrypted State; AMD virtualization protections extended by SNP. |
++| SNP | Secure Nested Paging; the AMD SEV extension providing additional guest-memory integrity and isolation protections. |
++| SRAT | System Resource Affinity Table; the ACPI table associating processors and memory ranges with NUMA proximity domains. |
++| SSDT | Secondary System Description Table; an ACPI table containing additional AML definitions, including this prototype's PCI resource windows. |
++| UID | Unique Identifier; the ACPI processor identifier, which this OpenVMM interface sets to `VP index + 1`. It is distinct from the APIC ID. |
++| VM | Virtual Machine; the guest system being launched. |
++| VMM | Virtual Machine Monitor; OpenVMM, which creates and manages the guest using the underlying hypervisor. |
++| VP / vCPU | Virtual Processor / virtual CPU; a guest execution context. A VP index is not necessarily its APIC ID. |
++| x2APIC | Extended xAPIC; an x86 interrupt-controller interface with 32-bit APIC IDs. The bootshim emits the corresponding ACPI CPU records. |
++| XSDT | Extended System Description Table; an ACPI root table containing 64-bit addresses of other ACPI tables. |
+diff --git a/vm/loader/snp_bootshim/src/cpu_tables.rs b/vm/loader/snp_bootshim/src/cpu_tables.rs
+new file mode 100644
+index 00000000..ff067b67
+--- /dev/null
++++ b/vm/loader/snp_bootshim/src/cpu_tables.rs
+@@ -0,0 +1,403 @@
++// Copyright (c) Microsoft Corporation.
++// Licensed under the MIT License.
++
++//! Build CPU records from validated launch identities, retaining only measured
++//! platform records. Host ACPI addresses, interrupt routing and AML are not used.
++
++use crate::launch::{
++    LaunchError, LaunchMemory, fix_checksum, read_u32, read_u64, write_u32, write_u64,
++};
++use loader_defs::linux::{SNP_BOOT_SHIM_MADT_SIZE, SNP_BOOT_SHIM_MAX_CPUS};
++
++pub struct CpuTopology {
++    apic_ids: [u32; SNP_BOOT_SHIM_MAX_CPUS],
++    count: usize,
++}
++
++fn table<'a>(data: &'a [u8], signature: &[u8; 4], minimum: usize) -> Result<&'a [u8], LaunchError> {
++    if data.get(..4) != Some(signature) {
++        return Err(LaunchError::Acpi);
++    }
++    let length = read_u32(data, 4)? as usize;
++    if length < minimum {
++        return Err(LaunchError::Acpi);
++    }
++    let data = data.get(..length).ok_or(LaunchError::Acpi)?;
++    if data.iter().fold(0u8, |sum, b| sum.wrapping_add(*b)) != 0 {
++        return Err(LaunchError::Acpi);
++    }
++    Ok(data)
++}
++
++fn record(data: &[u8], offset: usize) -> Result<&[u8], LaunchError> {
++    let length = *data.get(offset + 1).ok_or(LaunchError::Acpi)? as usize;
++    if length < 2 {
++        return Err(LaunchError::Acpi);
++    }
++    data.get(offset..offset + length).ok_or(LaunchError::Acpi)
++}
++
++pub fn parse_host_madt(data: &[u8], processor_count: u32) -> Result<CpuTopology, LaunchError> {
++    if processor_count == 0 || processor_count as usize > SNP_BOOT_SHIM_MAX_CPUS {
++        return Err(LaunchError::CpuCount);
++    }
++    let data = table(data, b"APIC", 44)?;
++    if data.len() > SNP_BOOT_SHIM_MADT_SIZE {
++        return Err(LaunchError::Acpi);
++    }
++    let mut topology = CpuTopology {
++        apic_ids: [u32::MAX; SNP_BOOT_SHIM_MAX_CPUS],
++        count: processor_count as usize,
++    };
++    let mut offset = 44;
++    let mut enabled = 0;
++    while offset < data.len() {
++        let entry = record(data, offset)?;
++        let cpu = match entry[0] {
++            0 if entry.len() == 8 => Some((entry[2] as u32, entry[3] as u32, read_u32(entry, 4)?)),
++            9 if entry.len() == 16 && entry[2..4] == [0, 0] => Some((
++                read_u32(entry, 12)?,
++                read_u32(entry, 4)?,
++                read_u32(entry, 8)?,
++            )),
++            0 | 9 => return Err(LaunchError::Acpi),
++            _ => None,
++        };
++        if let Some((uid, apic_id, flags)) = cpu {
++            if flags & !3 != 0 {
++                return Err(LaunchError::Acpi);
++            }
++            if flags & 1 != 0 {
++                // OpenVMM assigns ACPI UID = VP index + 1. Keep that ordering
++                // while allowing non-consecutive physical APIC IDs.
++                if uid == 0
++                    || uid > processor_count
++                    || apic_id == u32::MAX
++                    || topology.apic_ids[uid as usize - 1] != u32::MAX
++                    || topology.apic_ids[..topology.count].contains(&apic_id)
++                {
++                    return Err(LaunchError::Acpi);
++                }
++                topology.apic_ids[uid as usize - 1] = apic_id;
++                enabled += 1;
++            }
++        }
++        offset += entry.len();
++    }
++    if enabled != topology.count || topology.apic_ids[0] != 0 {
++        return Err(LaunchError::CpuCount);
++    }
++    Ok(topology)
++}
++
++fn append(out: &mut [u8], used: &mut usize, bytes: &[u8]) -> Result<(), LaunchError> {
++    let end = used.checked_add(bytes.len()).ok_or(LaunchError::Acpi)?;
++    out.get_mut(*used..end)
++        .ok_or(LaunchError::Acpi)?
++        .copy_from_slice(bytes);
++    *used = end;
++    Ok(())
++}
++
++fn finish(out: &mut [u8], used: usize) -> Result<usize, LaunchError> {
++    write_u32(out, 4, used.try_into().map_err(|_| LaunchError::Acpi)?)?;
++    fix_checksum(&mut out[..used]);
++    Ok(used)
++}
++
++pub fn build_madt(
++    measured: &[u8],
++    topology: &CpuTopology,
++    out: &mut [u8],
++) -> Result<usize, LaunchError> {
++    let measured = table(measured, b"APIC", 44)?;
++    let mut used = 0;
++    append(out, &mut used, &measured[..44])?;
++    let mut offset = 44;
++    while offset < measured.len() {
++        let entry = record(measured, offset)?;
++        if !matches!(entry[0], 0 | 9) {
++            append(out, &mut used, entry)?;
++        }
++        offset += entry.len();
++    }
++    for (uid, &apic_id) in topology.apic_ids[..topology.count].iter().enumerate() {
++        let mut entry = [0u8; 16];
++        entry[0] = 9; // Processor Local x2APIC
++        entry[1] = 16;
++        write_u32(&mut entry, 4, apic_id)?;
++        write_u32(&mut entry, 8, 1)?;
++        write_u32(&mut entry, 12, uid as u32 + 1)?;
++        append(out, &mut used, &entry)?;
++    }
++    finish(out, used)
++}
++
++pub fn build_srat(
++    measured: &[u8],
++    topology: &CpuTopology,
++    memory: &LaunchMemory,
++    out: &mut [u8],
++) -> Result<usize, LaunchError> {
++    if topology.count != memory.processor_count as usize {
++        return Err(LaunchError::CpuCount);
++    }
++    let measured = table(measured, b"SRAT", 48)?;
++    let mut used = 0;
++    append(out, &mut used, &measured[..48])?;
++    let mut offset = 48;
++    let mut slots = 0;
++    while offset < measured.len() {
++        let entry = record(measured, offset)?;
++        if !matches!(entry[0], 0 | 2) {
++            let entry_start = used;
++            append(out, &mut used, entry)?;
++            if entry[0] == 1 {
++                if entry.len() != 40 || slots >= memory.ranges.len() || read_u32(entry, 2)? != 0 {
++                    return Err(LaunchError::Acpi);
++                }
++                let range = memory.ranges[slots];
++                let entry = &mut out[entry_start..used];
++                write_u64(entry, 8, range.start_gpn * 4096)?;
++                write_u64(entry, 16, range.page_count * 4096)?;
++                write_u32(entry, 28, u32::from(slots < memory.count))?;
++                slots += 1;
++            }
++        }
++        offset += entry.len();
++    }
++    if slots != 2 {
++        return Err(LaunchError::Acpi);
++    }
++    for &apic_id in &topology.apic_ids[..topology.count] {
++        let mut entry = [0u8; 24];
++        entry[0] = 2; // Processor Local x2APIC Affinity, NUMA node zero
++        entry[1] = 24;
++        write_u32(&mut entry, 8, apic_id)?;
++        write_u32(&mut entry, 12, 1)?;
++        append(out, &mut used, &entry)?;
++    }
++    finish(out, used)
++}
++
++pub fn repoint_root(root: &mut [u8], replacements: &[(u64, u64); 2]) -> Result<(), LaunchError> {
++    let width = match root.get(..4) {
++        Some(b"XSDT") => 8,
++        Some(b"RSDT") => 4,
++        _ => return Err(LaunchError::Acpi),
++    };
++    if root.len() < 36 || !(root.len() - 36).is_multiple_of(width) {
++        return Err(LaunchError::Acpi);
++    }
++    let mut updated = 0;
++    for offset in (36..root.len()).step_by(width) {
++        let address = if width == 8 {
++            read_u64(root, offset)?
++        } else {
++            u64::from(read_u32(root, offset)?)
++        };
++        if let Some(&(_, replacement)) = replacements.iter().find(|&&(old, _)| old == address) {
++            if width == 8 {
++                write_u64(root, offset, replacement)?;
++            } else {
++                write_u32(
++                    root,
++                    offset,
++                    replacement.try_into().map_err(|_| LaunchError::Acpi)?,
++                )?;
++            }
++            updated += 1;
++        }
++    }
++    if updated != replacements.len() {
++        return Err(LaunchError::Acpi);
++    }
++    fix_checksum(root);
++    Ok(())
++}
++
++pub fn reserve_tables(
++    zero: &mut loader_defs::linux::boot_params,
++    start: u64,
++    size: u64,
++) -> Result<(), LaunchError> {
++    use loader_defs::linux::{E820_ACPI, E820_RAM, e820entry};
++    let end = start.checked_add(size).ok_or(LaunchError::E820)?;
++    let count = zero.e820_entries as usize;
++    if size == 0
++        || !start.is_multiple_of(4096)
++        || !size.is_multiple_of(4096)
++        || count + 2 > zero.e820_map.len()
++    {
++        return Err(LaunchError::E820);
++    }
++    for index in 0..count {
++        let entry = zero.e820_map[index];
++        let ram_start = u64::from(entry.addr);
++        let ram_end = ram_start
++            .checked_add(u64::from(entry.size))
++            .ok_or(LaunchError::E820)?;
++        if u32::from(entry.typ) == E820_RAM && start > ram_start && end < ram_end {
++            zero.e820_map.copy_within(index + 1..count, index + 3);
++            zero.e820_map[index].size = (start - ram_start).into();
++            zero.e820_map[index + 1] = e820entry {
++                addr: start.into(),
++                size: size.into(),
++                typ: E820_ACPI.into(),
++            };
++            zero.e820_map[index + 2] = e820entry {
++                addr: end.into(),
++                size: (ram_end - end).into(),
++                typ: E820_RAM.into(),
++            };
++            zero.e820_entries += 2;
++            return Ok(());
++        }
++    }
++    Err(LaunchError::E820)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use loader_defs::linux::{SNP_BOOT_SHIM_CPU_TABLE_SIZE, SnpBootShimRange};
++
++    fn host_madt(ids: &[u32]) -> Vec<u8> {
++        let mut table = vec![0u8; 44 + 16 * ids.len()];
++        table[..4].copy_from_slice(b"APIC");
++        for (uid, id) in ids.iter().enumerate() {
++            let offset = 44 + uid * 16;
++            table[offset] = 9;
++            table[offset + 1] = 16;
++            write_u32(&mut table, offset + 4, *id).unwrap();
++            write_u32(&mut table, offset + 8, 1).unwrap();
++            write_u32(&mut table, offset + 12, uid as u32 + 1).unwrap();
++        }
++        let length = table.len();
++        finish(&mut table, length).unwrap();
++        table
++    }
++
++    #[test]
++    fn builds_runtime_cpu_count_and_preserves_apic_gaps() {
++        let host = host_madt(&[0, 2, 64, 512]);
++        let topology = parse_host_madt(&host, 4).unwrap();
++        let measured = host_madt(&[0]);
++        let mut out = [0u8; SNP_BOOT_SHIM_CPU_TABLE_SIZE];
++        let length = build_madt(&measured, &topology, &mut out).unwrap();
++        let result = parse_host_madt(&out[..length], 4).unwrap();
++        assert_eq!(&result.apic_ids[..4], &[0, 2, 64, 512]);
++    }
++
++    #[test]
++    fn rejects_bad_host_topology() {
++        assert!(parse_host_madt(&host_madt(&[0]), 0).is_err());
++        assert!(parse_host_madt(&host_madt(&[0]), 257).is_err());
++        assert!(parse_host_madt(&host_madt(&[0, 0]), 2).is_err());
++        assert!(parse_host_madt(&host_madt(&[0, 2]), 3).is_err());
++        assert!(parse_host_madt(&host_madt(&[1, 2]), 2).is_err());
++        assert!(parse_host_madt(&host_madt(&[0, u32::MAX]), 2).is_err());
++        let mut bad = host_madt(&[0, 2]);
++        bad[9] ^= 1;
++        assert!(parse_host_madt(&bad, 2).is_err());
++        assert!(parse_host_madt(&host_madt(&[0])[..43], 1).is_err());
++        let mut bad_uid = host_madt(&[0, 2]);
++        write_u32(&mut bad_uid, 44 + 12, 0).unwrap();
++        let length = bad_uid.len();
++        finish(&mut bad_uid, length).unwrap();
++        assert!(parse_host_madt(&bad_uid, 2).is_err());
++        write_u32(&mut bad_uid, 44 + 12, 2).unwrap();
++        finish(&mut bad_uid, length).unwrap();
++        assert!(parse_host_madt(&bad_uid, 2).is_err());
++    }
++
++    #[test]
++    fn ignores_host_interrupt_routing_and_keeps_measured_records() {
++        let mut measured = host_madt(&[0]);
++        let ioapic = [1, 12, 7, 0, 0, 0, 0xc0, 0xfe, 0, 0, 0, 0];
++        measured.extend(ioapic);
++        let length = measured.len();
++        finish(&mut measured, length).unwrap();
++        let mut host = host_madt(&[0, 16]);
++        host.extend([1, 12, 99, 0, 1, 2, 3, 4, 5, 6, 7, 8]);
++        let length = host.len();
++        finish(&mut host, length).unwrap();
++        let topology = parse_host_madt(&host, 2).unwrap();
++        let mut out = [0u8; SNP_BOOT_SHIM_CPU_TABLE_SIZE];
++        build_madt(&measured, &topology, &mut out).unwrap();
++        assert_eq!(&out[44..56], &ioapic);
++    }
++
++    #[test]
++    fn maximum_topology_fits_bounded_tables() {
++        let ids = (0..SNP_BOOT_SHIM_MAX_CPUS as u32).collect::<Vec<_>>();
++        let topology = parse_host_madt(&host_madt(&ids), ids.len() as u32).unwrap();
++        let mut out = [0u8; SNP_BOOT_SHIM_CPU_TABLE_SIZE];
++        assert!(build_madt(&host_madt(&[0]), &topology, &mut out).is_ok());
++        assert!(build_madt(&host_madt(&[0]), &topology, &mut out[..128]).is_err());
++        let mut measured = vec![0u8; 48 + 2 * 40];
++        measured[..4].copy_from_slice(b"SRAT");
++        for offset in [48, 88] {
++            measured[offset] = 1;
++            measured[offset + 1] = 40;
++        }
++        let length = measured.len();
++        finish(&mut measured, length).unwrap();
++        let memory = LaunchMemory {
++            ranges: [
++                SnpBootShimRange {
++                    start_gpn: 0,
++                    page_count: (3 << 30) / 4096,
++                },
++                SnpBootShimRange {
++                    start_gpn: (4 << 30) / 4096,
++                    page_count: (5 << 30) / 4096,
++                },
++            ],
++            count: 2,
++            processor_count: ids.len() as u32,
++        };
++        let length = build_srat(&measured, &topology, &memory, &mut out).unwrap();
++        assert_eq!(length, 128 + ids.len() * 24);
++        assert_eq!(read_u64(&out, 48 + 16).unwrap(), 3 << 30);
++        assert_eq!(read_u32(&out, 128 + 8).unwrap(), 0);
++        assert_eq!(read_u32(&out, length - 24 + 8).unwrap(), 255);
++        assert_eq!(out[..length].iter().fold(0u8, |a, b| a.wrapping_add(*b)), 0);
++    }
++
++    #[test]
++    fn reserves_output_tables_without_changing_ram_total() {
++        use loader_defs::linux::{E820_ACPI, E820_RAM, boot_params, e820entry};
++        let mut zero = boot_params {
++            e820_entries: 1,
++            ..Default::default()
++        };
++        zero.e820_map[0] = e820entry {
++            addr: 0u64.into(),
++            size: (1u64 << 30).into(),
++            typ: E820_RAM.into(),
++        };
++        reserve_tables(&mut zero, 64 << 20, 16384).unwrap();
++        assert_eq!(zero.e820_entries, 3);
++        assert_eq!(u32::from(zero.e820_map[1].typ), E820_ACPI);
++        assert_eq!(
++            zero.e820_map[..3]
++                .iter()
++                .map(|e| u64::from(e.size))
++                .sum::<u64>(),
++            1 << 30
++        );
++        assert!(reserve_tables(&mut zero, 64 << 20, 16384).is_err());
++    }
++
++    #[test]
++    fn updates_root_table_pointers_and_checksum() {
++        let mut root = [0u8; 52];
++        root[..4].copy_from_slice(b"XSDT");
++        write_u64(&mut root, 36, 0x19000).unwrap();
++        write_u64(&mut root, 44, 0x19100).unwrap();
++        repoint_root(&mut root, &[(0x19000, 0x4000000), (0x19100, 0x4002000)]).unwrap();
++        assert_eq!(read_u64(&root, 36).unwrap(), 0x4000000);
++        assert_eq!(root.iter().fold(0u8, |a, b| a.wrapping_add(*b)), 0);
++    }
++}
+diff --git a/vm/loader/snp_bootshim/src/launch.rs b/vm/loader/snp_bootshim/src/launch.rs
+new file mode 100644
+index 00000000..aff2758d
+--- /dev/null
++++ b/vm/loader/snp_bootshim/src/launch.rs
+@@ -0,0 +1,422 @@
++// Copyright (c) Microsoft Corporation.
++// Licensed under the MIT License.
++
++use igvm_defs::MemoryMapEntryType;
++#[cfg(minimal_rt)]
++use loader_defs::linux::{
++    SNP_BOOT_SHIM_CPU_TABLE_SIZE, SNP_BOOT_SHIM_MADT_OFFSET, SNP_BOOT_SHIM_MADT_SIZE,
++};
++use loader_defs::linux::{
++    SNP_BOOT_SHIM_HIGH_MMIO_END, SNP_BOOT_SHIM_HIGH_RAM, SNP_BOOT_SHIM_LOW_MMIO,
++    SNP_BOOT_SHIM_MAX_CPUS, SNP_BOOT_SHIM_MAX_GPA, SNP_BOOT_SHIM_MAX_RAM, SnpBootShimLaunchParams,
++    SnpBootShimRange,
++};
++
++use super::PAGE_SIZE;
++
++#[derive(Debug, Eq, PartialEq)]
++pub enum LaunchError {
++    CpuCount,
++    MemoryMap,
++    Acpi,
++    E820,
++}
++
++pub struct LaunchMemory {
++    pub ranges: [SnpBootShimRange; 2],
++    pub count: usize,
++    pub processor_count: u32,
++}
++
++pub fn validate_launch(
++    input: &SnpBootShimLaunchParams,
++    minimum_ram: u64,
++) -> Result<LaunchMemory, LaunchError> {
++    if input.processor_count == 0 || input.processor_count as usize > SNP_BOOT_SHIM_MAX_CPUS {
++        return Err(LaunchError::CpuCount);
++    }
++    if input.reserved != [0; 4] {
++        return Err(LaunchError::MemoryMap);
++    }
++    let mut memory = LaunchMemory {
++        ranges: [SnpBootShimRange {
++            start_gpn: 0,
++            page_count: 0,
++        }; 2],
++        count: 0,
++        processor_count: input.processor_count,
++    };
++    let mut total = 0u64;
++    let mut terminated = false;
++    for entry in &input.memory_map {
++        if entry.entry_type != MemoryMapEntryType::MEMORY || entry.flags != 0 || entry.reserved != 0
++        {
++            return Err(LaunchError::MemoryMap);
++        }
++        if entry.number_of_pages == 0 {
++            if entry.starting_gpa_page_number != 0 {
++                return Err(LaunchError::MemoryMap);
++            }
++            terminated = true;
++            continue;
++        }
++        if terminated || memory.count == memory.ranges.len() {
++            return Err(LaunchError::MemoryMap);
++        }
++        let start = entry
++            .starting_gpa_page_number
++            .checked_mul(PAGE_SIZE)
++            .ok_or(LaunchError::MemoryMap)?;
++        let size = entry
++            .number_of_pages
++            .checked_mul(PAGE_SIZE)
++            .ok_or(LaunchError::MemoryMap)?;
++        let end = start.checked_add(size).ok_or(LaunchError::MemoryMap)?;
++        if end > SNP_BOOT_SHIM_MAX_GPA {
++            return Err(LaunchError::MemoryMap);
++        }
++        if memory.count == 0 {
++            if start != 0 || end < minimum_ram || end > SNP_BOOT_SHIM_LOW_MMIO {
++                return Err(LaunchError::MemoryMap);
++            }
++        } else if start != SNP_BOOT_SHIM_HIGH_RAM {
++            return Err(LaunchError::MemoryMap);
++        }
++        total = total.checked_add(size).ok_or(LaunchError::MemoryMap)?;
++        memory.ranges[memory.count] = SnpBootShimRange {
++            start_gpn: entry.starting_gpa_page_number,
++            page_count: entry.number_of_pages,
++        };
++        memory.count += 1;
++    }
++    if !terminated || memory.count == 0 || total > SNP_BOOT_SHIM_MAX_RAM {
++        return Err(LaunchError::MemoryMap);
++    }
++    Ok(memory)
++}
++
++pub(super) fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, LaunchError> {
++    Ok(u32::from_le_bytes(
++        bytes
++            .get(offset..offset + 4)
++            .ok_or(LaunchError::Acpi)?
++            .try_into()
++            .unwrap(),
++    ))
++}
++
++pub(super) fn read_u64(bytes: &[u8], offset: usize) -> Result<u64, LaunchError> {
++    Ok(u64::from_le_bytes(
++        bytes
++            .get(offset..offset + 8)
++            .ok_or(LaunchError::Acpi)?
++            .try_into()
++            .unwrap(),
++    ))
++}
++
++pub(super) fn fix_checksum(table: &mut [u8]) {
++    table[9] = 0;
++    table[9] = 0u8.wrapping_sub(table.iter().fold(0u8, |sum, b| sum.wrapping_add(*b)));
++}
++
++fn update_pci_window(table: &mut [u8], memory: &LaunchMemory) -> Result<(), LaunchError> {
++    let mut matches = 0;
++    // Match the complete high-MMIO QwordMemory descriptor in our measured
++    // PCI SSDT, not arbitrary host-provided AML.
++    for offset in 36..table.len().saturating_sub(45) {
++        if table[offset..offset + 5] != [0x8a, 0x2b, 0, 0, 0xc] {
++            continue;
++        }
++        if read_u64(table, offset + 14)? != SNP_BOOT_SHIM_HIGH_RAM
++            || read_u64(table, offset + 22)? != SNP_BOOT_SHIM_HIGH_MMIO_END - 1
++            || read_u64(table, offset + 38)? != SNP_BOOT_SHIM_HIGH_MMIO_END - SNP_BOOT_SHIM_HIGH_RAM
++        {
++            continue;
++        }
++        let last = memory.ranges[memory.count - 1];
++        let ram_end = (last.start_gpn + last.page_count) * PAGE_SIZE;
++        let base = ram_end
++            .max(SNP_BOOT_SHIM_HIGH_RAM)
++            .next_multiple_of(1 << 30);
++        let length = SNP_BOOT_SHIM_HIGH_MMIO_END - SNP_BOOT_SHIM_HIGH_RAM;
++        write_u64(table, offset + 14, base)?;
++        write_u64(table, offset + 22, base + length - 1)?;
++        matches += 1;
++    }
++    if matches != 1 {
++        return Err(LaunchError::Acpi);
++    }
++    fix_checksum(table);
++    Ok(())
++}
++
++pub(super) fn write_u32(bytes: &mut [u8], offset: usize, value: u32) -> Result<(), LaunchError> {
++    bytes
++        .get_mut(offset..offset + 4)
++        .ok_or(LaunchError::Acpi)?
++        .copy_from_slice(&value.to_le_bytes());
++    Ok(())
++}
++
++pub(super) fn write_u64(bytes: &mut [u8], offset: usize, value: u64) -> Result<(), LaunchError> {
++    bytes
++        .get_mut(offset..offset + 8)
++        .ok_or(LaunchError::Acpi)?
++        .copy_from_slice(&value.to_le_bytes());
++    Ok(())
++}
++
++#[cfg(minimal_rt)]
++#[repr(C, align(4096))]
++struct CpuTables {
++    madt: [u8; SNP_BOOT_SHIM_CPU_TABLE_SIZE],
++    srat: [u8; SNP_BOOT_SHIM_CPU_TABLE_SIZE],
++}
++
++#[cfg(minimal_rt)]
++static mut CPU_TABLES: CpuTables = CpuTables {
++    madt: [0; SNP_BOOT_SHIM_CPU_TABLE_SIZE],
++    srat: [0; SNP_BOOT_SHIM_CPU_TABLE_SIZE],
++};
++
++#[cfg(minimal_rt)]
++static mut HOST_MADT: [u8; SNP_BOOT_SHIM_MADT_SIZE] = [0; SNP_BOOT_SHIM_MADT_SIZE];
++
++#[cfg(minimal_rt)]
++pub fn update_linux(
++    params: &loader_defs::linux::SnpBootShimParams,
++    memory: &LaunchMemory,
++) -> Result<(), LaunchError> {
++    use loader_defs::linux::{E820_RAM, boot_params, e820entry};
++
++    let snapshot_ptr = &raw mut HOST_MADT;
++    // SAFETY: The measured handoff bounds the imported parameter area. This
++    // single-threaded snapshot does not accept any host pointer from its data.
++    let snapshot = unsafe {
++        core::ptr::copy_nonoverlapping(
++            (params.launch_params_gpa + u64::from(SNP_BOOT_SHIM_MADT_OFFSET)) as *const u8,
++            snapshot_ptr.cast::<u8>(),
++            SNP_BOOT_SHIM_MADT_SIZE,
++        );
++        &*snapshot_ptr
++    };
++    let topology = crate::cpu_tables::parse_host_madt(snapshot, memory.processor_count)?;
++    let tables_ptr = &raw mut CPU_TABLES;
++    // SAFETY: The BSP exclusively owns these measured, imported output pages.
++    let tables = unsafe { &mut *tables_ptr };
++    let table_base = tables_ptr as u64;
++    let table_size = size_of::<CpuTables>() as u64;
++    if table_base + table_size > params.ram_end {
++        return Err(LaunchError::E820);
++    }
++    // SAFETY: The measured handoff identifies this already-validated page.
++    let zero = unsafe { &mut *(params.linux_zero_page as *mut boot_params) };
++    let mut extended = false;
++    let count = zero.e820_entries as usize;
++    for entry in zero.e820_map.get_mut(..count).ok_or(LaunchError::E820)? {
++        let start = u64::from(entry.addr);
++        if u32::from(entry.typ) == E820_RAM
++            && start >= 0x10_0000
++            && start.checked_add(u64::from(entry.size)) == Some(params.ram_end)
++        {
++            entry.size = (memory.ranges[0].page_count * PAGE_SIZE - start).into();
++            extended = true;
++        }
++    }
++    if !extended {
++        return Err(LaunchError::E820);
++    }
++    if memory.count == 2 {
++        let range = memory.ranges[1];
++        *zero.e820_map.get_mut(count).ok_or(LaunchError::E820)? = e820entry {
++            addr: (range.start_gpn * PAGE_SIZE).into(),
++            size: (range.page_count * PAGE_SIZE).into(),
++            typ: E820_RAM.into(),
++        };
++        zero.e820_entries += 1;
++    }
++    crate::cpu_tables::reserve_tables(zero, table_base, table_size)?;
++
++    // SAFETY: The Linux loader imports the RSDP at this fixed measured GPA.
++    let rsdp = unsafe { core::slice::from_raw_parts(0xe0000 as *const u8, 36) };
++    if &rsdp[..8] != b"RSD PTR " {
++        return Err(LaunchError::Acpi);
++    }
++    let xsdt_gpa = u64::from_le_bytes(rsdp[24..32].try_into().unwrap());
++    let rsdt_gpa = u64::from(read_u32(rsdp, 16)?);
++    let mut addresses = [0u64; 32];
++    let count = {
++        let xsdt = measured_table(xsdt_gpa)?;
++        if &xsdt[..4] != b"XSDT" || (xsdt.len() - 36) % 8 != 0 {
++            return Err(LaunchError::Acpi);
++        }
++        let count = (xsdt.len() - 36) / 8;
++        if count > addresses.len() {
++            return Err(LaunchError::Acpi);
++        }
++        for (address, bytes) in addresses.iter_mut().zip(xsdt[36..].as_chunks::<8>().0) {
++            *address = u64::from_le_bytes(*bytes);
++        }
++        count
++    };
++    let mut found_madt = false;
++    let mut found_srat = false;
++    let mut found_pci = false;
++    let mut replacements = [(0u64, 0u64); 2];
++    for &address in &addresses[..count] {
++        let table = measured_table(address)?;
++        match &table[..4] {
++            b"APIC" if !found_madt => {
++                crate::cpu_tables::build_madt(table, &topology, &mut tables.madt)?;
++                replacements[0] = (address, tables.madt.as_ptr() as u64);
++                found_madt = true;
++            }
++            b"SRAT" if !found_srat => {
++                crate::cpu_tables::build_srat(table, &topology, memory, &mut tables.srat)?;
++                replacements[1] = (address, tables.srat.as_ptr() as u64);
++                found_srat = true;
++            }
++            b"SSDT" if !found_pci => {
++                update_pci_window(table, memory)?;
++                found_pci = true;
++            }
++            b"APIC" | b"SRAT" | b"SSDT" => return Err(LaunchError::Acpi),
++            _ => {}
++        }
++    }
++    if !found_madt || !found_srat || !found_pci {
++        return Err(LaunchError::Acpi);
++    }
++    crate::cpu_tables::repoint_root(measured_table(xsdt_gpa)?, &replacements)?;
++    if rsdt_gpa != 0 {
++        crate::cpu_tables::repoint_root(measured_table(rsdt_gpa)?, &replacements)?;
++    }
++    Ok(())
++}
++
++#[cfg(minimal_rt)]
++fn measured_table(address: u64) -> Result<&'static mut [u8], LaunchError> {
++    if !(0x1000..0xe0000 - 36).contains(&address) {
++        return Err(LaunchError::Acpi);
++    }
++    // SAFETY: Only measured RSDP/XSDT pointers are passed here. Bounds exclude
++    // the Linux image and launch-parameter page; table accesses are sequential.
++    let header = unsafe { core::slice::from_raw_parts(address as *const u8, 36) };
++    let length = read_u32(header, 4)? as usize;
++    if length < 36 || address + length as u64 > 0xe0000 {
++        return Err(LaunchError::Acpi);
++    }
++    // SAFETY: The measured table's complete extent was checked above.
++    Ok(unsafe { core::slice::from_raw_parts_mut(address as *mut u8, length) })
++}
++
++#[cfg(minimal_rt)]
++#[repr(C, align(4096))]
++#[derive(Copy, Clone)]
++struct PageTable([u64; 512]);
++
++#[cfg(minimal_rt)]
++static mut PAGE_TABLES: [PageTable; 66] = [PageTable([0; 512]); 66];
++
++#[cfg(minimal_rt)]
++pub fn map_high_memory() {
++    const C_BIT: u64 = 1 << 51;
++    let table_ptr = &raw mut PAGE_TABLES;
++    // SAFETY: Single-threaded bootstrap owns these measured BSS pages. They
++    // reside below the minimum RAM limit and are mapped by the initial CR3.
++    let tables = unsafe { &mut *table_ptr };
++    tables[0].0[0] = (&raw const tables[1]) as u64 | C_BIT | 3;
++    for gb in 0..64 {
++        tables[1].0[gb] = (&raw const tables[gb + 2]) as u64 | C_BIT | 3;
++        for page in 0..512 {
++            tables[gb + 2].0[page] = ((gb as u64) << 30) | ((page as u64) << 21) | C_BIT | 0x83;
++        }
++    }
++    let cr3 = (&raw const tables[0]) as u64 | C_BIT;
++    // SAFETY: These tables identity-map all bootstrap code/data and the
++    // bounded guest RAM address space with private 2-MiB entries.
++    unsafe {
++        core::arch::asm!("mov cr3, {}", in(reg) cr3, options(nostack));
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use igvm_defs::IGVM_VHS_MEMORY_MAP_ENTRY;
++
++    fn input() -> SnpBootShimLaunchParams {
++        let empty = IGVM_VHS_MEMORY_MAP_ENTRY {
++            starting_gpa_page_number: 0,
++            number_of_pages: 0,
++            entry_type: MemoryMapEntryType::MEMORY,
++            flags: 0,
++            reserved: 0,
++        };
++        let mut p = SnpBootShimLaunchParams {
++            processor_count: 2,
++            reserved: [0; 4],
++            memory_map: [empty; 3],
++        };
++        p.memory_map[0].number_of_pages = (1 << 30) / PAGE_SIZE;
++        p
++    }
++
++    #[test]
++    fn validates_low_and_high_ram() {
++        let mut p = input();
++        assert_eq!(validate_launch(&p, 512 << 20).unwrap().count, 1);
++        p.memory_map[0].number_of_pages = SNP_BOOT_SHIM_LOW_MMIO / PAGE_SIZE;
++        p.memory_map[1].starting_gpa_page_number = SNP_BOOT_SHIM_HIGH_RAM / PAGE_SIZE;
++        p.memory_map[1].number_of_pages = (2 << 30) / PAGE_SIZE;
++        assert_eq!(validate_launch(&p, 512 << 20).unwrap().count, 2);
++        p.memory_map[0].number_of_pages = (3 << 30) / PAGE_SIZE;
++        assert_eq!(validate_launch(&p, 512 << 20).unwrap().count, 2);
++    }
++
++    #[test]
++    fn rejects_bad_launch_inputs() {
++        let mut p = input();
++        p.processor_count = 0;
++        assert!(validate_launch(&p, 512 << 20).is_err());
++        p = input();
++        p.memory_map[0].number_of_pages = 1;
++        assert!(validate_launch(&p, 512 << 20).is_err());
++        p = input();
++        p.memory_map[0].number_of_pages = u64::MAX;
++        assert!(validate_launch(&p, 512 << 20).is_err());
++        p = input();
++        p.memory_map[0].entry_type = MemoryMapEntryType::VTL2_PROTECTABLE;
++        assert!(validate_launch(&p, 512 << 20).is_err());
++        p = input();
++        p.memory_map[0].number_of_pages = SNP_BOOT_SHIM_LOW_MMIO / PAGE_SIZE;
++        p.memory_map[1].starting_gpa_page_number = SNP_BOOT_SHIM_LOW_MMIO / PAGE_SIZE;
++        p.memory_map[1].number_of_pages = 1;
++        assert!(validate_launch(&p, 512 << 20).is_err());
++    }
++
++    #[test]
++    fn pci_mmio_moves_above_high_ram() {
++        let mut p = input();
++        p.memory_map[0].number_of_pages = SNP_BOOT_SHIM_LOW_MMIO / PAGE_SIZE;
++        p.memory_map[1].starting_gpa_page_number = SNP_BOOT_SHIM_HIGH_RAM / PAGE_SIZE;
++        p.memory_map[1].number_of_pages = (1536 << 20) / PAGE_SIZE;
++        let memory = validate_launch(&p, 512 << 20).unwrap();
++        let mut table = vec![0u8; 36 + 46];
++        table[..4].copy_from_slice(b"SSDT");
++        table[36..41].copy_from_slice(&[0x8a, 0x2b, 0, 0, 0xc]);
++        write_u64(&mut table, 50, SNP_BOOT_SHIM_HIGH_RAM).unwrap();
++        write_u64(&mut table, 58, SNP_BOOT_SHIM_HIGH_MMIO_END - 1).unwrap();
++        write_u64(
++            &mut table,
++            74,
++            SNP_BOOT_SHIM_HIGH_MMIO_END - SNP_BOOT_SHIM_HIGH_RAM,
++        )
++        .unwrap();
++        update_pci_window(&mut table, &memory).unwrap();
++        assert_eq!(read_u64(&table, 50).unwrap(), 6 << 30);
++        assert_eq!(read_u64(&table, 58).unwrap(), (22 << 30) - 1);
++        assert_eq!(table.iter().fold(0u8, |a, b| a.wrapping_add(*b)), 0);
++    }
++}
+diff --git a/vm/loader/snp_bootshim/src/main.rs b/vm/loader/snp_bootshim/src/main.rs
+index 75c58505..a23bce30 100644
+--- a/vm/loader/snp_bootshim/src/main.rs
++++ b/vm/loader/snp_bootshim/src/main.rs
+@@ -22,11 +22,15 @@
+ // only tests and the minimal-runtime entry point call it.
+ #![cfg_attr(not(any(minimal_rt, test)), allow(dead_code))]
+ 
++use loader_defs::linux::SNP_BOOT_SHIM_LAUNCH_PAGES;
+ use loader_defs::linux::SNP_BOOT_SHIM_PARAMS_MAGIC;
+ use loader_defs::linux::SNP_BOOT_SHIM_PARAMS_VERSION;
+ use loader_defs::linux::SnpBootShimParams;
+ use loader_defs::linux::SnpBootShimRange;
+ 
++mod cpu_tables;
++mod launch;
++
+ const PAGE_SIZE: u64 = 4096;
+ 
+ #[derive(Debug, Eq, PartialEq)]
+@@ -38,7 +42,6 @@ enum ParamsError {
+     InvalidRamEnd,
+     InvalidLinuxEntry,
+     InvalidLinuxZeroPage,
+-    ReservedNotZero,
+     EmptyRange,
+     RangeOverflow,
+     RangeOutsideRam,
+@@ -74,8 +77,15 @@ fn validate_params(
+     if params.ram_end == 0 || !params.ram_end.is_multiple_of(PAGE_SIZE) {
+         return Err(ParamsError::InvalidRamEnd);
+     }
+-    if params.reserved != 0 {
+-        return Err(ParamsError::ReservedNotZero);
++    if params.launch_params_gpa == 0
++        || !params.launch_params_gpa.is_multiple_of(PAGE_SIZE)
++        || params.launch_params_gpa == params_gpa
++        || params
++            .launch_params_gpa
++            .checked_add(u64::from(SNP_BOOT_SHIM_LAUNCH_PAGES) * PAGE_SIZE)
++            .is_none_or(|end| end > params.ram_end)
++    {
++        return Err(ParamsError::RangeOutsideRam);
+     }
+     let params_end = params_gpa
+         .checked_add(PAGE_SIZE)
+@@ -124,6 +134,11 @@ fn validate_params(
+         if start < params_end && params_gpa < end {
+             return Err(ParamsError::ParamsRangeOverlap);
+         }
++        if start < params.launch_params_gpa + u64::from(SNP_BOOT_SHIM_LAUNCH_PAGES) * PAGE_SIZE
++            && params.launch_params_gpa < end
++        {
++            return Err(ParamsError::ParamsRangeOverlap);
++        }
+         previous_end = end;
+     }
+ 
+@@ -339,6 +354,17 @@ fn jump_to_linux() -> ! {
+     }
+ }
+ 
++#[cfg(minimal_rt)]
++fn launch_fault(code: u64) -> ! {
++    // SAFETY: Report a non-secret bootstrap error through the GHCB termination
++    // protocol so invalid launch input fails closed with a host-visible reason.
++    unsafe {
++        minimal_rt::arch::msr::write_msr(x86defs::X86X_AMD_MSR_GHCB, 0x100 | (code << 12));
++        core::arch::asm!("rep vmmcall", options(nostack));
++    }
++    minimal_rt::arch::fault()
++}
++
+ #[cfg(minimal_rt)]
+ extern "C" fn start(params_gpa: u64) -> ! {
+     if !params_gpa.is_multiple_of(PAGE_SIZE) {
+@@ -350,12 +376,38 @@ extern "C" fn start(params_gpa: u64) -> ! {
+     let params = unsafe { &*(params_gpa as *const SnpBootShimParams) };
+     let ranges = match validate_params(params, params_gpa) {
+         Ok(ranges) => ranges,
+-        Err(_) => minimal_rt::arch::fault(),
++        Err(error) => launch_fault(0x50 + error as u64),
++    };
++
++    // SAFETY: The measured handoff selects this imported, private but
++    // unmeasured page. Snapshot it once and validate before using it.
++    let input = unsafe {
++        core::ptr::read_volatile(
++            params.launch_params_gpa as *const loader_defs::linux::SnpBootShimLaunchParams,
++        )
+     };
++    let memory = launch::validate_launch(&input, params.ram_end)
++        .unwrap_or_else(|error| launch_fault(0x10 + error as u64));
++    launch::update_linux(params, &memory).unwrap_or_else(|error| launch_fault(0x20 + error as u64));
++    launch::map_high_memory();
+ 
+     for &range in ranges {
+         if arch::accept_range(range).is_err() {
+-            minimal_rt::arch::fault();
++            launch_fault(0x30);
++        }
++    }
++    for (index, range) in memory.ranges[..memory.count].iter().enumerate() {
++        let start_gpn = if index == 0 {
++            params.ram_end / PAGE_SIZE
++        } else {
++            range.start_gpn
++        };
++        let extra = SnpBootShimRange {
++            start_gpn,
++            page_count: range.start_gpn + range.page_count - start_gpn,
++        };
++        if arch::accept_range(extra).is_err() {
++            launch_fault(0x40);
+         }
+     }
+ 
+@@ -400,7 +452,7 @@ fn valid_params() -> SnpBootShimParams {
+             linux_entry: 0x10_0000,
+             linux_zero_page: 0x2000,
+             ram_end: 0x20_0000,
+-            reserved: 0,
++            launch_params_gpa: 0x180000,
+             ranges: {
+                 let mut ranges = [SnpBootShimRange {
+                     start_gpn: 0,
+@@ -426,6 +478,23 @@ fn validates_empty_ranges() {
+         assert_eq!(validate_params(&params, 0x1000).unwrap(), []);
+     }
+ 
++    #[test]
++    fn validates_launch_parameter_page_and_rejects_overlap() {
++        let mut params = valid_params();
++        params.launch_params_gpa = 0x180000;
++        assert!(validate_params(&params, 0x1000).is_ok());
++        params.launch_params_gpa = 0x1000;
++        assert_eq!(
++            validate_params(&params, 0x1000),
++            Err(ParamsError::RangeOutsideRam)
++        );
++        params.launch_params_gpa = 0x4000;
++        assert_eq!(
++            validate_params(&params, 0x1000),
++            Err(ParamsError::ParamsRangeOverlap)
++        );
++    }
++
+     #[test]
+     fn validates_ordered_multiple_ranges() {
+         let params = valid_params();
+@@ -438,18 +507,22 @@ fn validates_ordered_multiple_ranges() {
+     #[test]
+     fn rejects_bad_magic_and_version() {
+         let mut params = valid_params();
+-        params.magic = 0;
+-        assert_eq!(
+-            validate_params(&params, 0x1000),
+-            Err(ParamsError::InvalidMagic)
+-        );
++        for magic in [0, u64::from_le_bytes(*b"SNPBSHIM")] {
++            params.magic = magic;
++            assert_eq!(
++                validate_params(&params, 0x1000),
++                Err(ParamsError::InvalidMagic)
++            );
++        }
+ 
+         params = valid_params();
+-        params.version += 1;
+-        assert_eq!(
+-            validate_params(&params, 0x1000),
+-            Err(ParamsError::UnsupportedVersion)
+-        );
++        for version in [0, SNP_BOOT_SHIM_PARAMS_VERSION + 1] {
++            params.version = version;
++            assert_eq!(
++                validate_params(&params, 0x1000),
++                Err(ParamsError::UnsupportedVersion)
++            );
++        }
+     }
+ 
+     #[test]
+@@ -587,7 +660,7 @@ fn rejects_invalid_linux_entry_and_zero_page() {
+     }
+ 
+     #[test]
+-    fn rejects_too_many_ranges_and_nonzero_reserved_data() {
++    fn rejects_too_many_ranges_and_invalid_launch_area() {
+         let mut params = valid_params();
+         params.range_count = (SNP_BOOT_SHIM_MAX_RANGES + 1) as u32;
+         assert_eq!(
+@@ -595,11 +668,13 @@ fn rejects_too_many_ranges_and_nonzero_reserved_data() {
+             Err(ParamsError::TooManyRanges)
+         );
+ 
+-        params = valid_params();
+-        params.reserved = 1;
+-        assert_eq!(
+-            validate_params(&params, 0x1000),
+-            Err(ParamsError::ReservedNotZero)
+-        );
++        for address in [0, 1, 0x1ff000, !(PAGE_SIZE - 1)] {
++            params = valid_params();
++            params.launch_params_gpa = address;
++            assert_eq!(
++                validate_params(&params, 0x1000),
++                Err(ParamsError::RangeOutsideRam)
++            );
++        }
+     }
+ }

@@ -8,66 +8,76 @@
 
 install_igvm_tool()
 {
-	echo "Installing IGVM tool"
-	if [[ -d "${IGVM_EXTRACT_FOLDER}" ]]; then
-		echo "${IGVM_EXTRACT_FOLDER} folder already exists, assuming tool is already installed"
+	echo "Installing OpenVMM IGVM tools (igvmfilegen, snp_bootshim)"
+	if [[ -x "${OPENVMM_TOOLS_DIR}/igvmfilegen" && -f "${OPENVMM_TOOLS_DIR}/snp_bootshim" ]]; then
+		echo "${OPENVMM_TOOLS_DIR} already holds the tools, assuming they are installed"
 		return
 	fi
 
-	# the igvm tool on Azure Linux will soon be properly installed through dnf via kata-packages-uvm-build
-	# as of now, even when installing with pip3, we cannot delete the source folder as the ACPI tables are not being installed anywhere, hence relying on this folder
-	echo "Determining and downloading latest IGVM tooling release, and extracting including ACPI tables"
-	IGVM_VER=$(curl -sL "https://api.github.com/repos/microsoft/igvm-tooling/releases/latest" | jq -r .tag_name | sed 's/^v//')
-	curl -sL "https://github.com/microsoft/igvm-tooling/archive/refs/tags/${IGVM_VER}.tar.gz" | tar --no-same-owner -xz
-	mv "igvm-tooling-${IGVM_VER}" "${IGVM_EXTRACT_FOLDER}"
+	local version="${OPENVMM_VERSION:-}"
+	if [[ -z "${version}" ]]; then
+		[[ -f "${VERSIONS_YAML}" ]] || die "Set OPENVMM_VERSION, '${VERSIONS_YAML}' not found"
+		command -v yq &>/dev/null || die "yq is required to read the OpenVMM version from versions.yaml"
+		version="$(yq '.assets.hypervisor.openvmm.version' "${VERSIONS_YAML}")"
+		[[ -n "${version}" && "${version}" != "null" ]] || die "No OpenVMM version in '${VERSIONS_YAML}'"
+	fi
 
-	echo "Installing IGVM module msigvm (${IGVM_VER}) via pip3"
-	pushd "${IGVM_EXTRACT_FOLDER}/src" || exit
-	pip3 install --no-deps ./
+	if [[ ! -d "${OPENVMM_SRC_DIR}" ]]; then
+		echo "Cloning OpenVMM ${version} from ${OPENVMM_REPO}"
+		git clone --depth 1 --branch "${version}" "${OPENVMM_REPO}" "${OPENVMM_SRC_DIR}"
+		git -C "${OPENVMM_SRC_DIR}" apply "${OPENVMM_PATCH}"
+	fi
+
+	echo "Building igvmfilegen and snp_bootshim"
+	local target_dir="${OPENVMM_SRC_DIR}/target"
+	pushd "${OPENVMM_SRC_DIR}" || exit
+	PROTOC="${PROTOC:-$(command -v protoc)}" CARGO_TARGET_DIR="${target_dir}" cargo build --locked --release -p igvmfilegen
+	MINIMAL_RT_BUILD=1 CARGO_TARGET_DIR="${target_dir}" cargo build --locked --profile boot-release --target x86_64-unknown-none -p snp_bootshim
 	popd || exit
+
+	mkdir -p "${OPENVMM_TOOLS_DIR}"
+	cp "${target_dir}/release/igvmfilegen" "${OPENVMM_TOOLS_DIR}/"
+	cp "${target_dir}/x86_64-unknown-none/boot-release/snp_bootshim" "${OPENVMM_TOOLS_DIR}/"
 }
 
 uninstall_igvm_tool()
 {
-	echo "Uninstalling IGVM tool"
+	echo "Uninstalling OpenVMM IGVM tools"
 
-	rm -rf "${IGVM_EXTRACT_FOLDER}"
-	pip3 uninstall -y msigvm
+	rm -rf "${OPENVMM_TOOLS_DIR}" "${OPENVMM_SRC_DIR}"
 }
 
 build_igvm_files()
 {
-	echo "Reading Kata image dm_verity root hash information from root_hash file"
-	ROOT_HASH_FILE="${SCRIPT_DIR}/../root_hash.txt"
+	# Prebuilt tools (e.g. from a pipeline) take precedence over the ones built by install_igvm_tool
+	local igvmfilegen="${IGVMFILEGEN:-${OPENVMM_TOOLS_DIR}/igvmfilegen}"
+	local snp_bootshim="${SNP_BOOTSHIM:-${OPENVMM_TOOLS_DIR}/snp_bootshim}"
 
-	if [[ ! -f "${ROOT_HASH_FILE}" ]]; then
-		echo "Could not find image root hash file '${ROOT_HASH_FILE}', aborting"
-		exit 1
-	fi
+	[[ -x "${igvmfilegen}" ]] || die "igvmfilegen not found at '${igvmfilegen}': run '$0 -i' or set IGVMFILEGEN"
+	[[ -f "${snp_bootshim}" ]] || die "snp_bootshim not found at '${snp_bootshim}': run '$0 -i' or set SNP_BOOTSHIM"
+	[[ -f "${BZIMAGE_BIN}" ]] || die "Guest kernel '${BZIMAGE_BIN}' not found: install kernel-uvm-cc or set KERNEL_UVM_CC_LOCATION"
+	[[ -f "${ROOT_HASH_FILE}" ]] || die "Could not find image root hash file '${ROOT_HASH_FILE}'"
 
-	IMAGE_ROOT_HASH=$(sed -e 's/Root hash:\s*//g;t;d' "${ROOT_HASH_FILE}")
-	IMAGE_SALT=$(sed -e 's/Salt:\s*//g;t;d' "${ROOT_HASH_FILE}")
-	IMAGE_DATA_BLOCKS=$(sed -e 's/Data blocks:\s*//g;t;d' "${ROOT_HASH_FILE}")
-	IMAGE_DATA_BLOCK_SIZE=$(sed -e 's/Data block size:\s*//g;t;d' "${ROOT_HASH_FILE}")
-	IMAGE_DATA_SECTORS_PER_BLOCK=$((IMAGE_DATA_BLOCK_SIZE / 512))
-	IMAGE_DATA_SECTORS=$((IMAGE_DATA_BLOCKS * IMAGE_DATA_SECTORS_PER_BLOCK))
-	IMAGE_HASH_BLOCK_SIZE=$(sed -e 's/Hash block size:\s*//g;t;d' "${ROOT_HASH_FILE}")
+	local out_dir work_dir
+	out_dir="$(readlink -f "${OUT_DIR:-.}")"
+	work_dir="$(mktemp -d)"
 
-	# reloading the config file as various variables depend on above values
-	load_config_distro
+	echo "Building (debug) IGVM files and their SNP launch measurements"
+	local variant debug_flag igvm
+	for variant in release debug; do
+		debug_flag=()
+		igvm="${IGVM_FILE_NAME}"
+		if [[ "${variant}" == "debug" ]]; then
+			debug_flag=("--debug")
+			igvm="${IGVM_DBG_FILE_NAME}"
+		fi
+		python3 "${IGVM_MANIFEST_PY}" "${ROOT_HASH_FILE}" --svn "${SVN:-0}" "${debug_flag[@]}" \
+			--kernel "${BZIMAGE_BIN}" --bootshim "${snp_bootshim}" \
+			--manifest "${work_dir}/manifest-${variant}.json" --resources "${work_dir}/resources.json"
+		# Also writes the launch measurement next to the IGVM as <name>-snp.{json,cbor,idblock}
+		"${igvmfilegen}" manifest --manifest "${work_dir}/manifest-${variant}.json" \
+			--resources "${work_dir}/resources.json" --output "${out_dir}/${igvm}"
+	done
 
-	echo "Building (debug) IGVM files and creating their reference measurement files"
-	# we could call into the installed binary '~/.local/bin/igvmgen' when adding to PATH or, better, into 'python3 -m msigvm'
-	# however, as we still need the installation directory for the ACPI tables, we leave things as is for now
-	# at the same time we seem to need to call pip3 install for invoking the tool at all
-	python3 "${IGVM_PY_FILE}" "${IGVM_BUILD_VARS[@]}" -o "${IGVM_FILE_NAME}" -measurement_file "${IGVM_MEASUREMENT_FILE_NAME}" -append "${IGVM_KERNEL_PROD_PARAMS}" -svn "${SVN}"
-	python3 "${IGVM_PY_FILE}" "${IGVM_BUILD_VARS[@]}" -o "${IGVM_DBG_FILE_NAME}" -measurement_file "${IGVM_DBG_MEASUREMENT_FILE_NAME}" -append "${IGVM_KERNEL_DEBUG_PARAMS}" -svn "${SVN}"
-
-	out_dir="${OUT_DIR:-.}"
-	if [[ "${PWD}" -ef "$(readlink -f "${out_dir}")" ]]; then
-		echo "OUT_DIR matches with current dir, not moving build artifacts"
-	else
-		echo "Moving build artifacts to ${out_dir}"
-		mv "${IGVM_FILE_NAME}" "${IGVM_DBG_FILE_NAME}" "${IGVM_MEASUREMENT_FILE_NAME}" "${IGVM_DBG_MEASUREMENT_FILE_NAME}" "${out_dir}"
-	fi
+	rm -rf "${work_dir}"
 }

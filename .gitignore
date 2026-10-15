@@ -35,11 +35,12 @@ src/tarfs/**/*.o
 src/tarfs/**/modules.order
 src/tarfs/**/Module.symvers
 src/tarfs-cvm/
-tools/osbuilder/kata-containers-igvm.img
-tools/osbuilder/kata-containers-igvm-debug.img
-tools/osbuilder/igvm-debug-measurement.cose
-tools/osbuilder/igvm-measurement.cose
-tools/osbuilder/root_hash.txt
+tools/osbuilder/kata-openvmm-snp*.bin
+tools/osbuilder/kata-openvmm-snp*-snp.*
+tools/osbuilder/SHA256SUMS
+tools/osbuilder/root_hash_*.txt
+tools/osbuilder/igvm-builder/openvmm-src/
+tools/osbuilder/igvm-builder/openvmm-tools/
 tools/osbuilder/igvm.log
 tools/osbuilder/kata-opa.service
 tools/osbuilder/rootfs-builder/opa/

@@ -23,10 +23,10 @@ TARGET_ROOTFS         := $(ROOTFS_BUILD_DEST)/$(DISTRO)_rootfs
 TARGET_ROOTFS_MARKER  := $(ROOTFS_BUILD_DEST)/.$(DISTRO)$(ROOTFS_MARKER_SUFFIX)
 TARGET_IMAGE          := $(IMAGES_BUILD_DEST)/kata-containers.img
 TARGET_INITRD         := $(IMAGES_BUILD_DEST)/kata-containers-initrd.img
-TARGET_IGVM           := $(IGVM_BUILD_DEST)/kata-containers-igvm.img
-TARGET_IGVM_MSMT      := $(IGVM_BUILD_DEST)/igvm-measurement.cose
-TARGET_IGVM_DEBUG     := $(IGVM_BUILD_DEST)/kata-containers-igvm-debug.img
-TARGET_IGVM_DEBUG_MSMT:= $(IGVM_BUILD_DEST)/igvm-debug-measurement.cose
+TARGET_IGVM           := $(IGVM_BUILD_DEST)/kata-openvmm-snp.bin
+TARGET_IGVM_MSMT      := $(addprefix $(IGVM_BUILD_DEST)/kata-openvmm-snp-snp.,json cbor idblock)
+TARGET_IGVM_DEBUG     := $(IGVM_BUILD_DEST)/kata-openvmm-snp-debug.bin
+TARGET_IGVM_DEBUG_MSMT:= $(addprefix $(IGVM_BUILD_DEST)/kata-openvmm-snp-debug-snp.,json cbor idblock)
 TARGET_IGVM_LOG       := $(IGVM_BUILD_DEST)/igvm.log
 
 VERSION_FILE   := ./VERSION
