@@ -32,16 +32,9 @@ rootfs_make_flags=(
 if [[ "${CONF_PODS}" == "yes" ]]; then
 	rootfs_make_flags+=(
 		"AGENT_POLICY=yes"
-		"CONF_GUEST=yes"
+		"CONFIDENTIAL_GUEST=yes"
 		"AGENT_POLICY_FILE=${agent_policy_file_abs}"
 	)
-fi
-
-if [[ "${CONF_PODS}" == "yes" ]]; then
-	set_uvm_kernel_vars
-	if [[ -z "${UVM_KERNEL_HEADER_DIR}" ]]; then
-		exit 1
-	fi
 fi
 
 pushd "${repo_dir}" || exit
@@ -58,21 +51,17 @@ sudo cp "${AGENT_INSTALL_DIR}"/usr/lib/systemd/system/kata-containers.target "${
 sudo cp "${AGENT_INSTALL_DIR}"/usr/lib/systemd/system/kata-agent.service "${ROOTFS_PATH}"/usr/lib/systemd/system/kata-agent.service
 
 if [[ "${CONF_PODS}" == "yes" ]]; then
-	echo "Building tarfs kernel driver and installing into rootfs"
-	pushd src/tarfs || exit
-	make KDIR="${UVM_KERNEL_HEADER_DIR}"
-	sudo make KDIR="${UVM_KERNEL_HEADER_DIR}" KVER="${UVM_KERNEL_VERSION}" INSTALL_MOD_PATH="${ROOTFS_PATH}" install
-	popd || exit
-
 	echo "Building dm-verity protected image based on rootfs"
 	pushd tools/osbuilder || exit
 	sudo -E PATH="${PATH}" make DISTRO=cbl-mariner MEASURED_ROOTFS=yes DM_VERITY_FORMAT=kernelinit IMAGE_SIZE_ALIGNMENT_MB=2 image
 	popd || exit
 
-	echo "Building IGVM and UVM measurement files"
+	echo "Building OpenVMM SNP IGVMs and launch measurements"
 	pushd tools/osbuilder || exit
-	sudo chmod o+r root_hash.txt
-	sudo make igvm DISTRO=cbl-mariner IGVM_SVN="${IGVM_SVN}"
+	# -E keeps IGVMFILEGEN, SNP_BOOTSHIM and KERNEL_UVM_CC_LOCATION for igvm-builder
+	sudo -E PATH="${PATH}" make igvm DISTRO=cbl-mariner IGVM_SVN="${IGVM_SVN}"
+	sha256sum "${IMG_FILE_NAME}" "${IGVM_FILE_NAME}" "${IGVM_DBG_FILE_NAME}" "${UVM_MEASUREMENT_FILE_NAMES[@]}" \
+		| sudo tee "${UVM_CHECKSUMS_FILE_NAME}"
 	popd || exit
 else
 	echo "Building image based on rootfs"
