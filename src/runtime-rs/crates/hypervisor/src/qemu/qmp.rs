@@ -1547,6 +1547,8 @@ impl Qmp {
 
     /// Hotunplug block device.
     pub fn hotunplug_block_device(&mut self, block_driver: &str, index: u64) -> Result<()> {
+        warn!("hotunplug_block_device: block_driver = {block_driver} , index = {index}");
+
         let node_name = block_node_name(index);
 
         let result = (|| -> Result<()> {
