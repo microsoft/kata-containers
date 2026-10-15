@@ -31,7 +31,7 @@ install_igvm_tool()
 	echo "Building igvmfilegen and snp_bootshim"
 	local target_dir="${OPENVMM_SRC_DIR}/target"
 	pushd "${OPENVMM_SRC_DIR}" || exit
-	PROTOC="${PROTOC:-$(command -v protoc)}" CARGO_TARGET_DIR="${target_dir}" cargo build --locked --release -p igvmfilegen
+	PROTOC="${PROTOC:-$(command -v protoc)}" OPENSSL_NO_VENDOR=Y CARGO_TARGET_DIR="${target_dir}" cargo build --locked --release -p igvmfilegen
 	MINIMAL_RT_BUILD=1 CARGO_TARGET_DIR="${target_dir}" cargo build --locked --profile boot-release --target x86_64-unknown-none -p snp_bootshim
 	popd || exit
 
