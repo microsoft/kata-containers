@@ -35,6 +35,11 @@ use super::{
 
 pub type ArcMutexDevice = Arc<Mutex<dyn Device>>;
 
+#[async_trait::async_trait]
+pub trait GuestDeviceRemoval: std::fmt::Debug + Send + Sync {
+    async fn prepare_remove(&self, pci_path: &str) -> Result<()>;
+}
+
 macro_rules! declare_index {
     ($self:ident, $index:ident, $released_index:ident) => {{
         let current_index = if let Some(index) = $self.$released_index.pop() {
@@ -105,6 +110,7 @@ pub struct DeviceManager {
     hypervisor: Arc<dyn Hypervisor>,
     shared_info: SharedInfo,
     pcie_topology: Option<PCIeTopology>,
+    guest_device_removal: Option<Arc<dyn GuestDeviceRemoval>>,
 }
 
 impl DeviceManager {
@@ -118,7 +124,12 @@ impl DeviceManager {
             hypervisor,
             shared_info: SharedInfo::new().await,
             pcie_topology: PCIeTopology::new(topo_config),
+            guest_device_removal: None,
         })
+    }
+
+    pub fn set_guest_device_removal(&mut self, handler: Arc<dyn GuestDeviceRemoval>) {
+        self.guest_device_removal = Some(handler);
     }
 
     pub fn get_pcie_topology(&self) -> Option<PCIeTopology> {
@@ -185,6 +196,25 @@ impl DeviceManager {
     pub async fn try_remove_device(&mut self, device_id: &str) -> Result<()> {
         if let Some(dev) = self.devices.get(device_id) {
             let mut device_guard = dev.lock().await;
+            let mut shared_block = false;
+            if let DeviceType::BlockModern(block) = device_guard.get_device_info().await {
+                let block = block.lock().await;
+                shared_block = block.attach_count > 1;
+                if block.attach_count == 1 {
+                    if let Some(handler) = &self.guest_device_removal {
+                        let pci_path = block
+                            .config
+                            .pci_path
+                            .as_ref()
+                            .context("cannot release guest block device without its PCI path")?
+                            .to_string();
+                        handler
+                            .prepare_remove(&pci_path)
+                            .await
+                            .context("guest did not release block device; leaving it attached")?;
+                    }
+                }
+            }
             let result = match device_guard
                 .detach(&mut self.pcie_topology.as_mut(), self.hypervisor.as_ref())
                 .await
@@ -206,7 +236,7 @@ impl DeviceManager {
             };
 
             // if detach success, remove it from device manager
-            if result.is_ok() {
+            if result.is_ok() && !shared_block {
                 drop(device_guard);
                 self.devices.remove(device_id);
             }
@@ -699,9 +729,55 @@ mod tests {
     };
     use anyhow::{anyhow, Context, Result};
     use kata_types::config::hypervisor::TopologyConfigInfo;
+    use std::convert::TryFrom;
     use std::sync::Arc;
     use tests_utils::load_test_config;
     use tokio::sync::RwLock;
+
+    #[derive(Debug, Default)]
+    struct RefuseGuestRemoval(std::sync::atomic::AtomicUsize);
+
+    #[async_trait::async_trait]
+    impl super::GuestDeviceRemoval for RefuseGuestRemoval {
+        async fn prepare_remove(&self, pci_path: &str) -> Result<()> {
+            assert_eq!(pci_path, "02");
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(anyhow!("guest device is busy"))
+        }
+    }
+
+    #[actix_rt::test]
+    async fn final_block_detach_requires_guest_release() {
+        let mut manager = DeviceManager::new(Arc::new(Qemu::new()), None)
+            .await
+            .unwrap();
+        let device = crate::BlockDeviceModernHandle::new(
+            "disk".into(),
+            BlockConfigModern {
+                pci_path: Some(crate::device::pci_path::PciPath::try_from("02").unwrap()),
+                ..Default::default()
+            },
+        );
+        device.arc().lock().await.attach_count = 2;
+        manager.devices.insert(
+            "disk".into(),
+            Arc::new(tokio::sync::Mutex::new(device.clone())),
+        );
+        let handler = Arc::new(RefuseGuestRemoval::default());
+        manager.set_guest_device_removal(handler.clone());
+
+        manager.try_remove_device("disk").await.unwrap();
+        assert!(manager.devices.contains_key("disk"));
+        assert_eq!(device.attach_count().await, 1);
+        assert_eq!(handler.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+        for _ in 0..2 {
+            assert!(manager.try_remove_device("disk").await.is_err());
+            assert!(manager.devices.contains_key("disk"));
+            assert_eq!(device.attach_count().await, 1);
+        }
+        assert_eq!(handler.0.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(manager.shared_info.released_block_index.is_empty());
+    }
 
     async fn new_device_manager() -> Result<Arc<RwLock<DeviceManager>>> {
         let hypervisor_name: &str = "qemu";

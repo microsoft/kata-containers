@@ -299,6 +299,15 @@ impl From<PrepareGuestMountRequest> for agent::PrepareGuestMountRequest {
     }
 }
 
+impl From<crate::PrepareDeviceRemovalRequest> for agent::PrepareDeviceRemovalRequest {
+    fn from(from: crate::PrepareDeviceRemovalRequest) -> Self {
+        Self {
+            pci_path: from.pci_path,
+            ..Default::default()
+        }
+    }
+}
+
 impl From<RemoveContainerRequest> for agent::RemoveContainerRequest {
     fn from(from: RemoveContainerRequest) -> Self {
         Self {

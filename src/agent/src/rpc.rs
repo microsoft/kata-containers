@@ -1060,6 +1060,30 @@ impl agent_ttrpc::AgentService for AgentService {
         Ok(Empty::new())
     }
 
+    async fn prepare_device_removal(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::PrepareDeviceRemovalRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "prepare_device_removal", req);
+        is_allowed(&req).await?;
+        let _sandbox = self.sandbox.lock().await;
+        tokio::task::spawn_blocking(move || {
+            let result = crate::device::removal::prepare_device_removal(&req.pci_path);
+            match &result {
+                Ok(()) => info!(sl(), "guest block device released"; "pci-path" => &req.pci_path),
+                Err(error) => error!(sl(), "guest block device release failed";
+                    "pci-path" => &req.pci_path, "error" => format!("{error:#}")),
+            }
+            result
+        })
+        .await
+        .map_err(anyhow::Error::from)
+        .and_then(|result| result)
+        .map_ttrpc_err(same)?;
+        Ok(Empty::new())
+    }
+
     async fn exec_process(
         &self,
         ctx: &TtrpcContext,

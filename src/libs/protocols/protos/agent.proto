@@ -30,6 +30,9 @@ service AgentService {
 	// If any process can not be killed or if it can not be killed after
 	// the RemoveContainerRequest timeout, RemoveContainer will return an error.
 	rpc RemoveContainer(RemoveContainerRequest) returns (google.protobuf.Empty);
+	// Release an idle virtio-blk driver before the host disconnects its PCI device.
+	// The host must keep the device attached until this RPC succeeds.
+	rpc PrepareDeviceRemoval(PrepareDeviceRemovalRequest) returns (google.protobuf.Empty);
 	rpc ExecProcess(ExecProcessRequest) returns (google.protobuf.Empty);
 	rpc SignalProcess(SignalProcessRequest) returns (google.protobuf.Empty);
 	rpc WaitProcess(WaitProcessRequest) returns (WaitProcessResponse); // wait & reap like waitpid(2)
@@ -134,6 +137,11 @@ message RemoveContainerRequest {
 	// Setting timeout to 0 means RemoveContainer will
 	// wait for ever.
 	uint32 timeout = 2;
+}
+
+message PrepareDeviceRemovalRequest {
+	// Guest PCI topology path, using the same format as a "blk" storage source.
+	string pci_path = 1;
 }
 
 message ExecProcessRequest {

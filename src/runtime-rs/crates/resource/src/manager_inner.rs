@@ -49,6 +49,27 @@ use crate::{
     ResourceConfig, ResourceUpdateOp,
 };
 
+struct AgentDeviceRemoval(Arc<dyn Agent>);
+
+impl std::fmt::Debug for AgentDeviceRemoval {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AgentDeviceRemoval")
+    }
+}
+
+#[async_trait::async_trait]
+impl hypervisor::device::device_manager::GuestDeviceRemoval for AgentDeviceRemoval {
+    async fn prepare_remove(&self, pci_path: &str) -> Result<()> {
+        self.0
+            .prepare_device_removal(agent::PrepareDeviceRemovalRequest {
+                pci_path: pci_path.to_string(),
+            })
+            .await
+            .context("prepare guest device removal")?;
+        Ok(())
+    }
+}
+
 pub(crate) struct ResourceManagerInner {
     sid: String,
     toml_config: Arc<TomlConfig>,
@@ -77,9 +98,12 @@ impl ResourceManagerInner {
     ) -> Result<Self> {
         let topo_config = TopologyConfigInfo::new(&toml_config);
         // create device manager
-        let dev_manager = DeviceManager::new(hypervisor.clone(), topo_config.as_ref())
+        let mut dev_manager = DeviceManager::new(hypervisor.clone(), topo_config.as_ref())
             .await
             .context("failed to create device manager")?;
+        if toml_config.runtime.hypervisor_name == hypervisor::HYPERVISOR_NAME_OPENVMM {
+            dev_manager.set_guest_device_removal(Arc::new(AgentDeviceRemoval(agent.clone())));
+        }
         let device_manager = Arc::new(RwLock::new(dev_manager));
 
         let cgroups_resource = CgroupsResource::new(sid, &toml_config)?;
@@ -1195,9 +1219,14 @@ impl Persist for ResourceManagerInner {
         let topo_config = TopologyConfigInfo::new(&args.config);
 
         let mem_resource = MemResource::default();
-        let device_manager = Arc::new(RwLock::new(
-            DeviceManager::new(resource_args.hypervisor.clone(), topo_config.as_ref()).await?,
-        ));
+        let mut dev_manager =
+            DeviceManager::new(resource_args.hypervisor.clone(), topo_config.as_ref()).await?;
+        if args.config.runtime.hypervisor_name == hypervisor::HYPERVISOR_NAME_OPENVMM {
+            dev_manager.set_guest_device_removal(Arc::new(AgentDeviceRemoval(
+                resource_args.agent.clone(),
+            )));
+        }
+        let device_manager = Arc::new(RwLock::new(dev_manager));
 
         let swap_resource = if resource_args
             .hypervisor

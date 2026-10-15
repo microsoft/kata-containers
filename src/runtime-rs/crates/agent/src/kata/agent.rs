@@ -260,6 +260,7 @@ impl_agent!(
     create_container | crate::CreateContainerRequest | crate::Empty | None,
     start_container | crate::ContainerID | crate::Empty | None,
     remove_container | crate::RemoveContainerRequest | crate::Empty | None,
+    prepare_device_removal | crate::PrepareDeviceRemovalRequest | crate::Empty | Some(30_000),
     signal_process | crate::SignalProcessRequest | crate::Empty | None,
     update_container | crate::UpdateContainerRequest | crate::Empty | None,
     prepare_guest_mount | crate::PrepareGuestMountRequest | crate::Empty | None,

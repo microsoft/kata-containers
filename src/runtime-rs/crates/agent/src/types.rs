@@ -186,6 +186,11 @@ pub struct RemoveContainerRequest {
     pub timeout: u32,
 }
 
+#[derive(Debug, Default)]
+pub struct PrepareDeviceRemovalRequest {
+    pub pci_path: String,
+}
+
 impl RemoveContainerRequest {
     pub fn new(id: &str, timeout: u32) -> Self {
         Self {

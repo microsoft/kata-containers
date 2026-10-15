@@ -84,6 +84,25 @@ To install the `protoc` command on a Fedora/CentOS/RHEL system:
 $ sudo dnf install -y protobuf-compiler
 ```
 
+## Preparing block devices for removal
+
+The runtime-rs OpenVMM backend uses `PrepareDeviceRemoval` before detaching the
+last attachment of a virtio-blk PCI device. Container filesystems and dm-verity
+mappings must be released first. The agent claims the whole disk with `O_EXCL`
+to reject filesystem/device-mapper holders, waiting up to five seconds for
+deferred cleanup, then unbinds its `virtio_blk` driver while the virtual device
+is still accessible.
+
+The host removes the device only after the RPC succeeds. An RPC failure or
+timeout leaves the device attached for retry or sandbox teardown. A shared disk
+is not unbound while another host attachment remains. The request is policy
+checked; custom policies must permit `PrepareDeviceRemovalRequest`.
+
+This requires a matching agent/runtime pair. It avoids relying on the guest
+driver's surprise-removal reset path, but still requires the VMM to support SNP
+host-access revocation when the driver frees shared DMA memory. Other
+hypervisors and the Go runtime retain their existing removal paths.
+
 ## Custom guest image and kernel assets
 
 If you wish to develop or test changes to the agent, you will need to create a

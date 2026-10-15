@@ -36,6 +36,7 @@ default PauseContainerRequest := false
 default PrepareGuestMountRequest := false
 default ReadStreamRequest := false
 default RemoveContainerRequest := true
+default PrepareDeviceRemovalRequest := true
 default RemoveStaleVirtiofsShareMountsRequest := true
 default ReseedRandomDevRequest := false
 default ResizeVolumeRequest := false

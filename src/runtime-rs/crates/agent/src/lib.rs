@@ -21,13 +21,13 @@ pub use types::{
     GetGuestDetailsRequest, GetIPTablesRequest, GetIPTablesResponse, GuestDetailsResponse,
     HealthCheckResponse, IPAddress, IPFamily, Interface, Interfaces, ListProcessesRequest,
     MemHotplugByProbeRequest, MetricsResponse, OnlineCPUMemRequest, OomEventResponse,
-    PrepareGuestMountRequest, ReadStreamRequest, ReadStreamResponse, RemoveContainerRequest,
-    ReseedRandomDevRequest, ResizeVolumeRequest, Route, Routes, SetGuestDateTimeRequest,
-    SetHostnameRequest, SetIPTablesRequest, SetIPTablesResponse, SignalProcessRequest,
-    StatsContainerResponse, Storage, TtyWinResizeRequest, UpdateContainerRequest,
-    UpdateInterfaceRequest, UpdateRoutesRequest, VersionCheckResponse, VolumeStatsRequest,
-    VolumeStatsResponse, WaitProcessRequest, WaitProcessResponse, WriteStreamRequest,
-    WriteStreamResponse,
+    PrepareDeviceRemovalRequest, PrepareGuestMountRequest, ReadStreamRequest, ReadStreamResponse,
+    RemoveContainerRequest, ReseedRandomDevRequest, ResizeVolumeRequest, Route, Routes,
+    SetGuestDateTimeRequest, SetHostnameRequest, SetIPTablesRequest, SetIPTablesResponse,
+    SignalProcessRequest, StatsContainerResponse, Storage, TtyWinResizeRequest,
+    UpdateContainerRequest, UpdateInterfaceRequest, UpdateRoutesRequest, VersionCheckResponse,
+    VolumeStatsRequest, VolumeStatsResponse, WaitProcessRequest, WaitProcessResponse,
+    WriteStreamRequest, WriteStreamResponse,
 };
 
 use anyhow::Result;
@@ -97,6 +97,7 @@ pub trait Agent: AgentManager + HealthService + Send + Sync {
     async fn create_container(&self, req: CreateContainerRequest) -> Result<Empty>;
     async fn pause_container(&self, req: ContainerID) -> Result<Empty>;
     async fn remove_container(&self, req: RemoveContainerRequest) -> Result<Empty>;
+    async fn prepare_device_removal(&self, req: PrepareDeviceRemovalRequest) -> Result<Empty>;
     async fn resume_container(&self, req: ContainerID) -> Result<Empty>;
     async fn start_container(&self, req: ContainerID) -> Result<Empty>;
     async fn stats_container(&self, req: ContainerID) -> Result<StatsContainerResponse>;

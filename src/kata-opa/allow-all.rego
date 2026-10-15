@@ -28,6 +28,7 @@ default PrepareGuestMountRequest := true
 default PullImageRequest := true
 default ReadStreamRequest := true
 default RemoveContainerRequest := true
+default PrepareDeviceRemovalRequest := true
 default RemoveStaleVirtiofsShareMountsRequest := true
 default ReseedRandomDevRequest := true
 default ResumeContainerRequest := true
