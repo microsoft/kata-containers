@@ -39,35 +39,9 @@ rm -rf "${AGENT_INSTALL_DIR}"
 echo "Clean UVM build"
 pushd tools/osbuilder/ || exit
 sudo -E PATH="${PATH}" make DISTRO=cbl-mariner clean
-popd || exit
-
-echo "Clean IGVM tool installation"
-
-
 if [[ "${CONF_PODS}" == "yes" ]]; then
-
-	echo "Clean tardev-snapshotter tarfs driver build"
-	pushd src/tarfs || exit
-	set_uvm_kernel_vars
-	if [[ -n "${UVM_KERNEL_HEADER_DIR}" ]]; then
-		make clean KDIR="${UVM_KERNEL_HEADER_DIR}"
-	fi
-	popd || exit
-
-	echo "Clean utarfs binary build"
-	pushd src/utarfs/ || exit
-	make clean
-	popd || exit
-
-	echo "Clean tardev-snapshotter overlay binary build"
-	pushd src/overlay/ || exit
-	make clean
-	popd || exit
-
-	echo "Clean tardev-snapshotter service build"
-	pushd src/tardev-snapshotter/ || exit
-	make clean
-	popd || exit
+	sudo rm -f root_hash_.txt "${UVM_CHECKSUMS_FILE_NAME}"
 fi
+popd || exit
 
 popd || exit
