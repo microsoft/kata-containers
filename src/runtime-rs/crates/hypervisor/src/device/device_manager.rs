@@ -5,7 +5,7 @@
 //
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -34,6 +34,11 @@ use super::{
 };
 
 pub type ArcMutexDevice = Arc<Mutex<dyn Device>>;
+
+#[async_trait::async_trait]
+pub trait BlockDeviceRemoval: std::fmt::Debug + Send + Sync {
+    async fn prepare(&self, config: &BlockConfigModern) -> Result<()>;
+}
 
 macro_rules! declare_index {
     ($self:ident, $index:ident, $released_index:ident) => {{
@@ -105,6 +110,8 @@ pub struct DeviceManager {
     hypervisor: Arc<dyn Hypervisor>,
     shared_info: SharedInfo,
     pcie_topology: Option<PCIeTopology>,
+    block_device_removal: Option<Arc<dyn BlockDeviceRemoval>>,
+    pending_block_removals: HashSet<String>,
 }
 
 impl DeviceManager {
@@ -118,7 +125,13 @@ impl DeviceManager {
             hypervisor,
             shared_info: SharedInfo::new().await,
             pcie_topology: PCIeTopology::new(topo_config),
+            block_device_removal: None,
+            pending_block_removals: HashSet::new(),
         })
+    }
+
+    pub fn set_block_device_removal(&mut self, handler: Arc<dyn BlockDeviceRemoval>) {
+        self.block_device_removal = Some(handler);
     }
 
     pub fn get_pcie_topology(&self) -> Option<PCIeTopology> {
@@ -134,6 +147,11 @@ impl DeviceManager {
     }
 
     async fn try_add_device(&mut self, device_id: &str) -> Result<()> {
+        if self.pending_block_removals.contains(device_id) {
+            return Err(anyhow!(
+                "block device {device_id} has pending guest removal"
+            ));
+        }
         // find the device
         let device = self
             .devices
@@ -185,6 +203,21 @@ impl DeviceManager {
     pub async fn try_remove_device(&mut self, device_id: &str) -> Result<()> {
         if let Some(dev) = self.devices.get(device_id) {
             let mut device_guard = dev.lock().await;
+            let mut shared_block = false;
+            if let DeviceType::BlockModern(block) = device_guard.get_device_info().await {
+                let block = block.lock().await;
+                shared_block = block.attach_count > 1;
+                if block.attach_count == 1 && block.config.driver_option == KATA_BLK_DEV_TYPE {
+                    if let Some(handler) = &self.block_device_removal {
+                        // A timed-out RPC may still finish unbinding in the guest.
+                        self.pending_block_removals.insert(device_id.to_string());
+                        handler
+                            .prepare(&block.config)
+                            .await
+                            .context("preparing guest block device for removal")?;
+                    }
+                }
+            }
             let result = match device_guard
                 .detach(&mut self.pcie_topology.as_mut(), self.hypervisor.as_ref())
                 .await
@@ -206,9 +239,10 @@ impl DeviceManager {
             };
 
             // if detach success, remove it from device manager
-            if result.is_ok() {
+            if result.is_ok() && !shared_block {
                 drop(device_guard);
                 self.devices.remove(device_id);
+                self.pending_block_removals.remove(device_id);
             }
 
             return result;
@@ -687,7 +721,7 @@ pub async fn find_cold_plugged_vfio_ap(
 
 #[cfg(test)]
 mod tests {
-    use super::DeviceManager;
+    use super::{BlockDeviceRemoval, DeviceManager};
     use crate::{
         device::{device_manager::get_block_device_info, DeviceConfig, DeviceType},
         qemu::Qemu,
@@ -698,6 +732,119 @@ mod tests {
     use std::sync::Arc;
     use tests_utils::load_test_config;
     use tokio::sync::RwLock;
+
+    #[derive(Debug)]
+    struct RemovalPreparation {
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+        fail: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl BlockDeviceRemoval for RemovalPreparation {
+        async fn prepare(&self, _config: &BlockConfigModern) -> Result<()> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.fail {
+                return Err(anyhow!("guest disk is busy"));
+            }
+            Ok(())
+        }
+    }
+
+    async fn removal_test_manager(
+        count: u64,
+        driver: &str,
+        fail: bool,
+    ) -> (
+        DeviceManager,
+        Arc<std::sync::atomic::AtomicUsize>,
+        Arc<tokio::sync::Mutex<crate::BlockDeviceModern>>,
+    ) {
+        let mut dm = DeviceManager::new(Arc::new(Qemu::new()), None)
+            .await
+            .unwrap();
+        let mut handle = crate::BlockDeviceModernHandle::new(
+            "disk".to_string(),
+            BlockConfigModern {
+                driver_option: driver.to_string(),
+                index: 7,
+                ..Default::default()
+            },
+        );
+        use crate::device::Device;
+        for _ in 0..count {
+            handle.increase_attach_count().await.unwrap();
+        }
+        let block = handle.arc();
+        dm.devices.insert(
+            "disk".to_string(),
+            Arc::new(tokio::sync::Mutex::new(handle)),
+        );
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        dm.set_block_device_removal(Arc::new(RemovalPreparation {
+            calls: calls.clone(),
+            fail,
+        }));
+        (dm, calls, block)
+    }
+
+    #[tokio::test]
+    async fn shared_block_is_retained_and_not_prepared() {
+        let (mut dm, calls, block) = removal_test_manager(2, KATA_BLK_DEV_TYPE, true).await;
+        dm.try_remove_device("disk").await.unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(block.lock().await.attach_count, 1);
+        assert!(dm.devices.contains_key("disk"));
+        assert!(dm.shared_info.released_block_index.is_empty());
+
+        assert!(dm.try_remove_device("disk").await.is_err());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(block.lock().await.attach_count, 1);
+    }
+
+    #[tokio::test]
+    async fn preparation_failure_prevents_detach_and_index_reuse() {
+        let (mut dm, calls, block) = removal_test_manager(1, KATA_BLK_DEV_TYPE, true).await;
+        let err = dm.try_remove_device("disk").await.unwrap_err();
+        assert!(format!("{err:#}").contains("guest disk is busy"));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(block.lock().await.attach_count, 1);
+        assert!(dm.devices.contains_key("disk"));
+        assert!(dm.shared_info.released_block_index.is_empty());
+        assert!(dm.try_add_device("disk").await.is_err());
+        assert!(dm.devices.contains_key("disk"));
+        assert_eq!(block.lock().await.attach_count, 1);
+    }
+
+    #[tokio::test]
+    async fn host_failure_after_preparation_is_retryable() {
+        let (mut dm, calls, block) = removal_test_manager(1, KATA_BLK_DEV_TYPE, false).await;
+        for expected_calls in 1..=2 {
+            // QEMU has no QMP connection, so host unplug must fail after preparation.
+            let err = dm.try_remove_device("disk").await.unwrap_err();
+            assert!(format!("{err:#}").contains("QMP not initialized"));
+            assert_eq!(
+                calls.load(std::sync::atomic::Ordering::SeqCst),
+                expected_calls
+            );
+            assert_eq!(block.lock().await.attach_count, 1);
+            assert!(dm.devices.contains_key("disk"));
+            assert!(dm.shared_info.released_block_index.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn other_block_transports_are_not_prepared() {
+        for driver in [
+            crate::KATA_SCSI_DEV_TYPE,
+            crate::KATA_MMIO_BLK_DEV_TYPE,
+            crate::KATA_CCW_DEV_TYPE,
+            crate::KATA_NVDIMM_DEV_TYPE,
+        ] {
+            let (mut dm, calls, _) = removal_test_manager(1, driver, true).await;
+            assert!(dm.try_remove_device("disk").await.is_err());
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        }
+    }
 
     async fn new_device_manager() -> Result<Arc<RwLock<DeviceManager>>> {
         let hypervisor_name: &str = "qemu";

@@ -85,6 +85,46 @@ The built-in VMM mode (Dragonball) is recommended for production, offering super
 
 Communication with guest OS agent via ttRPC. Supports `KataAgent` for full container lifecycle management.
 
+#### Preparing virtio-blk PCI disks for removal
+
+Before unplugging the final reference to a virtio-blk PCI disk, the shared
+device manager sends `PrepareBlockDeviceRemoval` to the guest agent. This applies
+to container rootfs disks (including EROFS snapshotter images) and block volumes,
+independently of the VMM, so it can be tested with QEMU as well as OpenVMM.
+Other block transports retain their existing removal behavior.
+
+The container must first be stopped and its storage unmounted, including
+device-mapper/verity mappings. The agent resolves the disk by its PCI topology
+path, checks the disk and partition holders, exclusively claims the whole disk,
+flushes it, and synchronously unbinds `virtio_blk`. Linux tears down the block
+device and virtqueues **while the backend can still complete I/O**. Only then
+does runtime-rs request VMM removal. The PCI transport stays bound, allowing
+QEMU's normal ACPI eject handshake to proceed; OpenVMM can surprise-remove the
+now-unused PCI function.
+
+Preparation errors, including busy disks, policy denial, timeouts, and an agent
+that does not implement the RPC, prevent unplug and index reuse. If host removal
+fails after preparation, retrying preparation recognizes the already-unbound
+disk. The disk cannot be used again after preparation; removal must be retried
+or the sandbox stopped. Once preparation is attempted, the runtime blocks new
+attachments to that disk, since a timed-out RPC may still complete in the guest.
+Shared disks are prepared only on their final reference.
+
+Deploy the updated runtime **and** agent (rebuild the guest image/initrd), and
+start a new sandbox. Agent-policy deployments must explicitly authorize
+`PrepareBlockDeviceRemovalRequest` in their policy (with genpolicy, set
+`request_defaults.PrepareBlockDeviceRemovalRequest` to `true` and regenerate);
+existing policies do not automatically allow the new operation.
+This is not a replacement for the Linux
+virtio-blk surprise-removal fix, and it does not make arbitrary active raw-device
+users safe: callers must release all consumers before requesting removal.
+
+For an integration check, run a restarting pod with an EROFS-backed image on
+each VMM. Verify `guest block device prepared for host removal` precedes host
+unplug in the logs, repeated restarts do not hang, and another container in the
+same sandbox remains functional. Also try preparation with a mounted partition
+or live dm-verity mapping: it must fail without host unplug.
+
 ### persist
 
 State serialization to disk for sandbox recovery after restart. Stores `state.json` under `/run/kata/<sandbox-id>/`.

@@ -3,11 +3,35 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use anyhow::{anyhow, Result};
+use agent::{Agent, PrepareBlockDeviceRemovalRequest};
+use anyhow::{anyhow, Context, Result};
+use async_trait::async_trait;
+use hypervisor::device::device_manager::BlockDeviceRemoval;
 use hypervisor::{
     BlockConfigModern, KATA_BLK_DEV_TYPE, KATA_CCW_DEV_TYPE, KATA_MMIO_BLK_DEV_TYPE,
     KATA_NVDIMM_DEV_TYPE, KATA_SCSI_DEV_TYPE,
 };
+use std::sync::Arc;
+
+pub(crate) struct GuestBlockDeviceRemoval(pub Arc<dyn Agent>);
+
+impl std::fmt::Debug for GuestBlockDeviceRemoval {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("GuestBlockDeviceRemoval")
+    }
+}
+
+#[async_trait]
+impl BlockDeviceRemoval for GuestBlockDeviceRemoval {
+    async fn prepare(&self, config: &BlockConfigModern) -> Result<()> {
+        let pci_path = agent_storage_source_from_block_config(config)?;
+        self.0
+            .prepare_block_device_removal(PrepareBlockDeviceRemovalRequest { pci_path })
+            .await
+            .context("agent prepare block device removal")?;
+        Ok(())
+    }
+}
 
 /// Return the source value to pass to the agent for a hypervisor block device.
 pub(crate) fn agent_storage_source_from_block_config(config: &BlockConfigModern) -> Result<String> {

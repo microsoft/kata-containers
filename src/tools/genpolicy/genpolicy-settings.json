@@ -410,6 +410,7 @@
         },
         "CloseStdinRequest": false,
         "GetDiagnosticDataRequest": false,
+        "PrepareBlockDeviceRemovalRequest": false,
         "ReadStreamRequest": false,
         "UpdateEphemeralMountsRequest": false,
         "WriteStreamRequest": false

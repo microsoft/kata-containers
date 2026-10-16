@@ -480,6 +480,35 @@ mod tests {
     use tempfile::NamedTempFile;
 
     #[tokio::test]
+    async fn test_block_device_removal_policy_requires_opt_in() {
+        let rules = include_str!("../../../tools/genpolicy/rules.rego");
+        for (defaults, expected) in [
+            ("{}", false),
+            (r#"{"PrepareBlockDeviceRemovalRequest": false}"#, false),
+            (r#"{"PrepareBlockDeviceRemovalRequest": true}"#, true),
+        ] {
+            let mut policy = AgentPolicy::new();
+            policy
+                .set_policy(&format!(
+                    "{rules}\npolicy_data := {{\"request_defaults\": {defaults}}}\n"
+                ))
+                .await
+                .unwrap();
+            assert_eq!(
+                policy
+                    .allow_request(
+                        "PrepareBlockDeviceRemovalRequest",
+                        r#"{"pci_path":"01/00"}"#
+                    )
+                    .await
+                    .unwrap()
+                    .0,
+                expected
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn test_policy_state_changes_can_be_deferred() {
         let mut policy = AgentPolicy::new();
         policy

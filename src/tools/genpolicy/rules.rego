@@ -33,6 +33,7 @@ default MemAgentMemcgConfig := false
 default MemHotplugByProbeRequest := false
 default OnlineCPUMemRequest := true
 default PauseContainerRequest := false
+default PrepareBlockDeviceRemovalRequest := false
 default ReadStreamRequest := false
 default RemoveContainerRequest := false
 default RemoveStaleVirtiofsShareMountsRequest := true
@@ -1869,6 +1870,10 @@ WriteStreamRequest if {
 
 GetDiagnosticDataRequest if {
     policy_data.request_defaults.GetDiagnosticDataRequest == true
+}
+
+PrepareBlockDeviceRemovalRequest if {
+    policy_data.request_defaults.PrepareBlockDeviceRemovalRequest == true
 }
 
 RemoveContainerRequest := {"ops": ops, "allowed": true} if {

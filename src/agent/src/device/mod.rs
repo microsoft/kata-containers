@@ -36,6 +36,7 @@ use tokio::time::Duration;
 use tracing::instrument;
 
 pub mod block_device_handler;
+pub mod block_device_removal;
 pub mod network_device_handler;
 pub mod nvdimm_device_handler;
 pub mod scsi_device_handler;

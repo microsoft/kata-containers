@@ -42,7 +42,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 /// EROFS rootfs type identifier
 pub(crate) const EROFS_ROOTFS_TYPE: &str = "erofs";
@@ -376,7 +376,7 @@ async fn extract_block_device_info(
 /// - Overlay metadata that combines the writable upper with the EROFS lower.
 pub(crate) struct ErofsMultiLayerRootfs {
     guest_path: String,
-    device_ids: Vec<String>,
+    device_ids: Mutex<Vec<String>>,
     // Writable layer storage (upper layer), typically ext4 and optional when
     // the agent creates a /run-backed upper.
     rwlayer_storage: Option<Storage>,
@@ -856,7 +856,7 @@ impl ErofsMultiLayerRootfs {
 
         Ok(Self {
             guest_path: container_path,
-            device_ids,
+            device_ids: Mutex::new(device_ids),
             rwlayer_storage,
             erofs_storages,
             gpt_metadata_paths,
@@ -902,7 +902,7 @@ impl Rootfs for ErofsMultiLayerRootfs {
     }
 
     async fn get_device_id(&self) -> Result<Option<String>> {
-        Ok(self.device_ids.first().cloned())
+        Ok(self.device_ids.lock().await.first().cloned())
     }
 
     async fn cleanup(&self, device_manager: &RwLock<DeviceManager>) -> Result<()> {
@@ -916,8 +916,10 @@ impl Rootfs for ErofsMultiLayerRootfs {
         };
 
         let mut dm = device_manager.write().await;
-        for device_id in &self.device_ids {
+        let mut device_ids = self.device_ids.lock().await;
+        while let Some(device_id) = device_ids.first() {
             dm.try_remove_device(device_id).await?;
+            device_ids.remove(0);
         }
 
         // Clean up GPT metadata files (head, padding).

@@ -76,6 +76,10 @@ service AgentService {
 	rpc GetOOMEvent(GetOOMEventRequest) returns (OOMEvent);
 	rpc AddSwap(AddSwapRequest) returns (google.protobuf.Empty);
 	rpc AddSwapPath(AddSwapPathRequest) returns (google.protobuf.Empty);
+	// Drain and unbind a virtio-blk PCI disk while its backend is still available.
+	// Call only after all consumers (including mounts and device-mapper) are gone.
+	// A successful response permits host-side PCI removal; errors must prevent it.
+	rpc PrepareBlockDeviceRemoval(PrepareBlockDeviceRemovalRequest) returns (google.protobuf.Empty);
 	rpc GetVolumeStats(VolumeStatsRequest) returns (VolumeStatsResponse);
 	rpc ResizeVolume(ResizeVolumeRequest) returns (google.protobuf.Empty);
 	rpc SetPolicy(SetPolicyRequest) returns (google.protobuf.Empty);
@@ -111,6 +115,11 @@ message CreateContainerRequest {
 
 message StartContainerRequest {
 	string container_id = 1;
+}
+
+message PrepareBlockDeviceRemovalRequest {
+	// Guest PCI topology path, in the same format as a "blk" Storage source.
+	string pci_path = 1;
 }
 
 message RemoveContainerRequest {

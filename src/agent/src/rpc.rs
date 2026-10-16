@@ -1159,6 +1159,25 @@ impl agent_ttrpc::AgentService for AgentService {
         Ok(Empty::new())
     }
 
+    async fn prepare_block_device_removal(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::PrepareBlockDeviceRemovalRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "prepare_block_device_removal", req);
+        is_allowed(&req).await?;
+        let sandbox = self.sandbox.clone().lock_owned().await;
+        tokio::task::spawn_blocking(move || {
+            let _sandbox = sandbox;
+            crate::device::block_device_removal::prepare_block_device_removal(&req.pci_path)
+        })
+        .await
+        .map_ttrpc_err(same)?
+        .map_ttrpc_err(same)?;
+        info!(sl(), "guest block device prepared for host removal");
+        Ok(Empty::new())
+    }
+
     async fn write_stdin(
         &self,
         _ctx: &TtrpcContext,

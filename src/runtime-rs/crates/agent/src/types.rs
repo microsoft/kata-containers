@@ -13,6 +13,11 @@ use oci_spec::runtime as oci;
 
 pub const DEFAULT_REMOVE_CONTAINER_REQUEST_TIMEOUT: u32 = 10;
 
+#[derive(Debug, PartialEq, Clone, Default)]
+pub struct PrepareBlockDeviceRemovalRequest {
+    pub pci_path: String,
+}
+
 #[derive(PartialEq, Clone, Default)]
 pub struct Empty {}
 

@@ -34,6 +34,7 @@ pub struct ContainerInner {
     pub(crate) rootfs: Vec<Arc<dyn Rootfs>>,
     pub(crate) volumes: Vec<Arc<dyn Volume>>,
     pub(crate) linux_resources: Option<LinuxResources>,
+    guest_removed: bool,
 }
 
 impl ContainerInner {
@@ -51,6 +52,7 @@ impl ContainerInner {
             rootfs: vec![],
             volumes: vec![],
             linux_resources,
+            guest_removed: false,
         }
     }
 
@@ -189,24 +191,22 @@ impl ContainerInner {
         let exit_status = self.get_exit_status().await;
         let _locked_exit_status = exit_status.read().await;
         info!(self.logger, "container terminated");
-        let remove_request = agent::RemoveContainerRequest {
-            container_id: cid.to_string(),
-            ..Default::default()
-        };
-        self.agent
-            .remove_container(remove_request)
-            .await
-            .or_else(|e| {
-                if force {
+        if !self.guest_removed {
+            let remove_request = agent::RemoveContainerRequest {
+                container_id: cid.to_string(),
+                ..Default::default()
+            };
+            match self.agent.remove_container(remove_request).await {
+                Ok(_) => self.guest_removed = true,
+                Err(e) if force => {
                     warn!(
                         self.logger,
                         "stop container: agent remove container failed: {}", e
                     );
-                    Ok(agent::Empty::new())
-                } else {
-                    Err(e)
                 }
-            })?;
+                Err(e) => return Err(e),
+            }
+        }
 
         // close the exit channel to wakeup wait service
         // send to notify watchers who are waiting for the process exit
@@ -329,6 +329,7 @@ impl ContainerInner {
 
     async fn clean_volumes(&mut self, device_manager: &RwLock<DeviceManager>) -> Result<()> {
         let mut unhandled = Vec::new();
+        let mut first_error = None;
         for v in self.volumes.iter() {
             if let Err(err) = v.cleanup(device_manager).await {
                 unhandled.push(Arc::clone(v));
@@ -338,16 +339,19 @@ impl ContainerInner {
                     v.get_volume_mount(),
                     err
                 );
+                first_error.get_or_insert(err);
             }
         }
-        if !unhandled.is_empty() {
-            self.volumes = unhandled;
+        self.volumes = unhandled;
+        if let Some(err) = first_error {
+            return Err(err).context("failed to clean container volumes");
         }
         Ok(())
     }
 
     async fn clean_rootfs(&mut self, device_manager: &RwLock<DeviceManager>) -> Result<()> {
         let mut unhandled = Vec::new();
+        let mut first_error = None;
         for rootfs in self.rootfs.iter() {
             if let Err(err) = rootfs.cleanup(device_manager).await {
                 unhandled.push(Arc::clone(rootfs));
@@ -357,11 +361,92 @@ impl ContainerInner {
                     self.container_id(),
                     err
                 );
+                first_error.get_or_insert(err);
             }
         }
-        if !unhandled.is_empty() {
-            self.rootfs = unhandled;
+        self.rootfs = unhandled;
+        if let Some(err) = first_error {
+            return Err(err).context("failed to clean container rootfs");
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    struct RetryRootfs {
+        fail: AtomicBool,
+        calls: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl Rootfs for RetryRootfs {
+        async fn get_guest_rootfs_path(&self) -> Result<String> {
+            Ok(String::new())
+        }
+
+        async fn get_rootfs_mount(&self) -> Result<Vec<oci_spec::runtime::Mount>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_storage(&self) -> Option<Vec<agent::Storage>> {
+            None
+        }
+
+        async fn get_device_id(&self) -> Result<Option<String>> {
+            Ok(None)
+        }
+
+        async fn cleanup(&self, _device_manager: &RwLock<DeviceManager>) -> Result<()> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if self.fail.swap(false, Ordering::SeqCst) {
+                return Err(anyhow!("guest disk is busy"));
+            }
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn rootfs_cleanup_propagates_errors_and_retains_only_failed_resources() {
+        let process = ContainerProcess::new("test-container", "").unwrap();
+        let process = Process::new(&process, 0, "", None, None, None, false);
+        let mut inner = ContainerInner::new(
+            Arc::new(agent::kata::KataAgent::new(Default::default())),
+            process,
+            slog::Logger::root(slog::Discard, slog::o!()),
+            None,
+        );
+        let successful = Arc::new(RetryRootfs {
+            fail: AtomicBool::new(false),
+            calls: AtomicUsize::new(0),
+        });
+        let retry = Arc::new(RetryRootfs {
+            fail: AtomicBool::new(true),
+            calls: AtomicUsize::new(0),
+        });
+        inner.rootfs = vec![successful.clone(), retry.clone()];
+        let dm = RwLock::new(
+            DeviceManager::new(Arc::new(hypervisor::qemu::Qemu::new()), None)
+                .await
+                .unwrap(),
+        );
+
+        let err = inner.clean_rootfs(&dm).await.unwrap_err();
+        assert!(format!("{err:#}").contains("guest disk is busy"));
+        assert_eq!(inner.rootfs.len(), 1);
+        inner.clean_rootfs(&dm).await.unwrap();
+        assert!(inner.rootfs.is_empty());
+        assert_eq!(successful.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(retry.calls.load(Ordering::SeqCst), 2);
+
+        // A host cleanup retry must not repeat a successful guest RemoveContainer.
+        inner.guest_removed = true;
+        inner
+            .cleanup_container("test-container", false, &dm)
+            .await
+            .unwrap();
     }
 }

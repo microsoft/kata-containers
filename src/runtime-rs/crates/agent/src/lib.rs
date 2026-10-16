@@ -13,6 +13,7 @@ pub mod kata;
 mod log_forwarder;
 mod sock;
 pub mod types;
+pub use types::PrepareBlockDeviceRemovalRequest;
 pub use types::{
     ARPNeighbor, ARPNeighbors, AddArpNeighborRequest, AddSwapPathRequest, AddSwapRequest,
     BlkioStatsEntry, CheckRequest, CloseStdinRequest, ContainerID, ContainerProcessID,
@@ -102,6 +103,10 @@ pub trait Agent: AgentManager + HealthService + Send + Sync {
     async fn get_guest_details(&self, req: GetGuestDetailsRequest) -> Result<GuestDetailsResponse>;
     async fn add_swap(&self, req: AddSwapRequest) -> Result<Empty>;
     async fn add_swap_path(&self, req: AddSwapPathRequest) -> Result<Empty>;
+    async fn prepare_block_device_removal(
+        &self,
+        req: PrepareBlockDeviceRemovalRequest,
+    ) -> Result<Empty>;
     async fn set_policy(&self, req: SetPolicyRequest) -> Result<Empty>;
 
     // diagnostics

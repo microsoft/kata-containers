@@ -419,6 +419,10 @@ pub struct RequestDefaults {
 
     /// Allow Host to retrieve diagnostic data from the Guest.
     pub GetDiagnosticDataRequest: bool,
+
+    /// Allow Host to unbind unused virtio-blk disks before PCI removal.
+    #[serde(default)]
+    pub PrepareBlockDeviceRemovalRequest: bool,
 }
 
 /// Struct used to read data from the settings file and copy that data into the policy.
@@ -1392,6 +1396,24 @@ pub fn get_kata_namespaces(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn block_device_removal_policy_requires_opt_in() {
+        let settings: serde_json::Value =
+            serde_json::from_str(include_str!("../genpolicy-settings.json")).unwrap();
+        let mut defaults = settings["request_defaults"].clone();
+        let parsed: RequestDefaults = serde_json::from_value(defaults.clone()).unwrap();
+        assert!(!parsed.PrepareBlockDeviceRemovalRequest);
+        defaults
+            .as_object_mut()
+            .unwrap()
+            .remove("PrepareBlockDeviceRemovalRequest");
+        let parsed: RequestDefaults = serde_json::from_value(defaults.clone()).unwrap();
+        assert!(!parsed.PrepareBlockDeviceRemovalRequest);
+        defaults["PrepareBlockDeviceRemovalRequest"] = serde_json::Value::Bool(true);
+        let parsed: RequestDefaults = serde_json::from_value(defaults).unwrap();
+        assert!(parsed.PrepareBlockDeviceRemovalRequest);
+    }
 
     fn pod_security_context(yaml: &str) -> pod::PodSecurityContext {
         serde_yaml::from_str(yaml).unwrap()

@@ -36,6 +36,15 @@ fn trans_vec<F: Sized + Clone, T: From<F>>(from: Vec<F>) -> Vec<T> {
     from.into_iter().map(|f| f.into()).collect()
 }
 
+impl From<crate::PrepareBlockDeviceRemovalRequest> for agent::PrepareBlockDeviceRemovalRequest {
+    fn from(from: crate::PrepareBlockDeviceRemovalRequest) -> Self {
+        Self {
+            pci_path: from.pci_path,
+            ..Default::default()
+        }
+    }
+}
+
 fn from_option<F: Sized, T: From<F>>(from: Option<F>) -> protobuf::MessageField<T> {
     match from {
         Some(f) => protobuf::MessageField::from_option(Some(T::from(f))),
