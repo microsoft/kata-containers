@@ -102,6 +102,12 @@ does runtime-rs request VMM removal. The PCI transport stays bound, allowing
 QEMU's normal ACPI eject handshake to proceed; OpenVMM can surprise-remove the
 now-unused PCI function.
 
+Deferred dm-verity removal may return before the kernel releases its backing
+partitions. Preparation waits up to two seconds for holders and exclusive
+claims to clear, polling every 20 milliseconds. Only busy conditions are retried;
+other errors fail immediately. A disk that remains busy is never unbound or
+unplugged.
+
 Preparation errors, including busy disks, policy denial, timeouts, and an agent
 that does not implement the RPC, prevent unplug and index reuse. If host removal
 fails after preparation, retrying preparation recognizes the already-unbound

@@ -8,9 +8,20 @@ use std::fs::{self, File, OpenOptions};
 use std::io::ErrorKind;
 use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use crate::device::pcipath_to_sysfs;
 use crate::linux_abi::{create_pci_root_bus_path, pcipath_from_dev_tree_path, SYSFS_DIR};
+
+const DISK_RELEASE_TIMEOUT: Duration = Duration::from_secs(2);
+const DISK_RELEASE_POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+#[derive(Debug, thiserror::Error)]
+#[error("block device {device} is still held by {holder}")]
+struct BlockDeviceBusy {
+    device: String,
+    holder: String,
+}
 
 pub fn prepare_block_device_removal(pci_path: &str) -> Result<()> {
     let (root_complex, path) = pcipath_from_dev_tree_path(pci_path)?;
@@ -68,13 +79,14 @@ fn prepare_virtio_block_device(virtio_device: &Path, dev_root: &Path) -> Result<
         bail!("expected one block disk, found {}", disks.len());
     }
     let disk = &disks[0];
-    ensure_disk_has_no_holders(disk)?;
-
     let name = disk.file_name().context("missing block disk name")?;
     let device_path = dev_root.join(name);
     // A whole-disk exclusive claim also rejects mounted/claimed partitions.
     // Keep the claim until unbind finishes, preventing new mounts in between.
-    let device = open_exclusive_disk(&device_path)?;
+    let device = wait_for_disk_release(DISK_RELEASE_TIMEOUT, || {
+        ensure_disk_has_no_holders(disk)?;
+        open_exclusive_disk(&device_path)
+    })?;
     device.sync_all().context("flushing block disk")?;
 
     let virtio_name = virtio_device
@@ -88,6 +100,33 @@ fn prepare_virtio_block_device(virtio_device: &Path, dev_root: &Path) -> Result<
     }
     drop(device);
     Ok(())
+}
+
+fn wait_for_disk_release<T>(
+    timeout: Duration,
+    mut operation: impl FnMut() -> Result<T>,
+) -> Result<T> {
+    let start = Instant::now();
+    loop {
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(err)
+                if err.downcast_ref::<BlockDeviceBusy>().is_some()
+                    || err
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|e| e.raw_os_error() == Some(libc::EBUSY)) =>
+            {
+                let remaining = timeout.saturating_sub(start.elapsed());
+                if remaining.is_zero() {
+                    return Err(err)
+                        .context("timed out waiting for block device users to release it");
+                }
+                // Deferred dm removal can return before its backing device is released.
+                std::thread::sleep(DISK_RELEASE_POLL_INTERVAL.min(remaining));
+            }
+            Err(err) => return Err(err),
+        }
+    }
 }
 
 fn ensure_disk_has_no_holders(disk: &Path) -> Result<()> {
@@ -105,11 +144,11 @@ fn ensure_disk_has_no_holders(disk: &Path) -> Result<()> {
 
 fn ensure_no_holders(device: &Path) -> Result<()> {
     if let Some(entry) = fs::read_dir(device.join("holders"))?.next() {
-        bail!(
-            "block device {} is still held by {}",
-            device.display(),
-            entry?.file_name().to_string_lossy()
-        );
+        return Err(BlockDeviceBusy {
+            device: device.display().to_string(),
+            holder: entry?.file_name().to_string_lossy().into_owned(),
+        }
+        .into());
     }
     Ok(())
 }
@@ -220,10 +259,81 @@ mod tests {
                 disk
             };
             fs::write(held.join("holders/dm-0"), "").unwrap();
+            let start = Instant::now();
             let err = prepare_virtio_block_device(&virtio, dir.path()).unwrap_err();
-            assert!(err.to_string().contains("still held by dm-0"));
+            assert!(start.elapsed() >= DISK_RELEASE_TIMEOUT);
+            assert!(err.to_string().contains("timed out"));
+            assert!(format!("{err:#}").contains("still held by dm-0"));
             assert_eq!(fs::read_to_string(driver.join("unbind")).unwrap(), "");
         }
+    }
+
+    #[test]
+    fn waits_for_deferred_partition_holder_release() {
+        let dir = tempdir().unwrap();
+        let disk = dir.path().join("vda");
+        fs::create_dir_all(disk.join("holders")).unwrap();
+        fs::create_dir_all(disk.join("vda1/holders")).unwrap();
+        fs::write(disk.join("vda1/partition"), "1\n").unwrap();
+        let holder = disk.join("vda1/holders/dm-0");
+        fs::write(&holder, "").unwrap();
+        let mut attempts = 0;
+
+        wait_for_disk_release(DISK_RELEASE_TIMEOUT, || {
+            attempts += 1;
+            let result = ensure_disk_has_no_holders(&disk);
+            if attempts == 1 {
+                fs::remove_file(&holder).unwrap();
+            }
+            result
+        })
+        .unwrap();
+        assert_eq!(attempts, 2);
+    }
+
+    #[test]
+    fn retries_exclusive_claim_busy_but_not_other_io_errors() {
+        let mut attempts = 0;
+        wait_for_disk_release(DISK_RELEASE_TIMEOUT, || {
+            attempts += 1;
+            if attempts == 1 {
+                return Err(std::io::Error::from_raw_os_error(libc::EBUSY).into());
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(attempts, 2);
+
+        attempts = 0;
+        let result: Result<()> = wait_for_disk_release(DISK_RELEASE_TIMEOUT, || {
+            attempts += 1;
+            Err(std::io::Error::from_raw_os_error(libc::ENOTDIR).into())
+        });
+        assert_eq!(attempts, 1);
+        assert_eq!(
+            result
+                .unwrap_err()
+                .downcast_ref::<std::io::Error>()
+                .unwrap()
+                .raw_os_error(),
+            Some(libc::ENOTDIR)
+        );
+    }
+
+    #[test]
+    fn persistent_holders_and_busy_claims_time_out() {
+        let dir = tempdir().unwrap();
+        fs::create_dir(dir.path().join("holders")).unwrap();
+        fs::write(dir.path().join("holders/dm-0"), "").unwrap();
+        let err =
+            wait_for_disk_release(Duration::ZERO, || ensure_no_holders(dir.path())).unwrap_err();
+        assert!(err.to_string().contains("timed out"));
+        assert!(format!("{err:#}").contains("still held by dm-0"));
+
+        let result: Result<()> = wait_for_disk_release(Duration::ZERO, || {
+            Err(std::io::Error::from_raw_os_error(libc::EBUSY).into())
+        });
+        assert!(result.unwrap_err().to_string().contains("timed out"));
     }
 
     #[test]
