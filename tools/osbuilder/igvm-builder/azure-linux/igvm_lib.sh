@@ -70,6 +70,10 @@ build_igvm_files()
 		# Also writes the launch measurement next to the IGVM as <name>-snp.{json,cbor,idblock}
 		"${igvmfilegen}" manifest --manifest "${work_dir}/manifest-${variant}.json" \
 			--resources "${work_dir}/resources.json" --output "${out_dir}/${igvm}"
+		# Match the legacy generator's ephemeral ID-key behavior. This binds the
+		# launch identity/SVN, but is not a trusted publisher endorsement.
+		"${igvmfilegen}" add-snp-id-block --input "${out_dir}/${igvm}" \
+			--output "${out_dir}/${igvm}" --manifest "${work_dir}/manifest-${variant}.json"
 	done
 
 	rm -rf "${work_dir}"
