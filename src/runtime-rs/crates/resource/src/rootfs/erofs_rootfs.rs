@@ -27,7 +27,7 @@ use hypervisor::{
     },
     BlockConfigModern, BlockDeviceAio, BlockDeviceFormat,
 };
-use kata_sys_util::fs::reflink_copy;
+use kata_sys_util::fs::reflink_copy_perms;
 use kata_types::gpt_disk::{
     extract_dmverity_annotation, extract_snapshot_id, generate_dmverity_options,
     generate_gpt_metadata, generate_padding_file, get_erofs_layer_size,
@@ -38,7 +38,7 @@ use oci_spec::runtime as oci;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufWriter, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -162,10 +162,15 @@ impl VmdkDescriptorWriter {
         if temp_path.components().any(|c| c == Component::ParentDir) {
             return Err(anyhow!("Invalid input: {}", temp_path.display()));
         }
-        let file = fs::File::create(&temp_path).context(format!(
-            "failed to create temp VMDK file: {}",
-            temp_path.display()
-        ))?;
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temp_path)
+            .context(format!(
+                "failed to create temp VMDK file: {}",
+                temp_path.display()
+            ))?;
         let mut writer = BufWriter::new(file);
 
         writeln!(writer, "# Disk DescriptorFile")?;
@@ -426,6 +431,11 @@ fn create_gpt_vmdk_descriptor(
             let gap_sectors = part.start_lba - gap_start_lba;
             let pad_path = metadata_dir.join(format!("pad-{}.img", idx));
 
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&pad_path)?;
             generate_padding_file(&pad_path, gap_sectors).context(format!(
                 "failed to generate padding file: {}",
                 pad_path.display()
@@ -1088,16 +1098,13 @@ impl ErofsMultiLayerRootfs {
                 source.display()
             ));
         }
-        reflink_copy(source, destination).with_context(|| {
+        reflink_copy_perms(source, destination, "0600").with_context(|| {
             format!(
                 "copy snapshot file {} to {}",
                 source.display(),
                 destination.display()
             )
         })?;
-        let mut permissions = fs::metadata(destination)?.permissions();
-        permissions.set_mode(0o600);
-        fs::set_permissions(destination, permissions)?;
         Ok(())
     }
 
@@ -1206,10 +1213,6 @@ impl ErofsMultiLayerRootfs {
                 },
             )?;
             Self::relativize_snapshot_descriptor(&descriptor, &directory)?;
-            fs::set_permissions(&descriptor, fs::Permissions::from_mode(0o600))?;
-            for pad_path in &pad_paths {
-                fs::set_permissions(pad_path, fs::Permissions::from_mode(0o600))?;
-            }
             files.extend(pad_paths);
             files.push(descriptor.clone());
             descriptor
@@ -1221,7 +1224,6 @@ impl ErofsMultiLayerRootfs {
                 .collect::<Vec<_>>();
             create_vmdk_descriptor(&descriptor, &paths)?;
             Self::relativize_snapshot_descriptor(&descriptor, &directory)?;
-            fs::set_permissions(&descriptor, fs::Permissions::from_mode(0o600))?;
             files.push(descriptor.clone());
             descriptor
         } else {
@@ -1394,6 +1396,7 @@ mod tests {
     use super::{is_erofs_multi_layer, EROFS_ROOTFS_TYPE, RW_LAYER_ROOTFS_TYPE};
     use kata_types::gpt_disk::PartitionLayout;
     use kata_types::mount::Mount;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
     fn mount(fs_type: &str, options: &[&str]) -> Mount {
@@ -1455,6 +1458,28 @@ mod tests {
             mount("overlay", &[]),
         ];
         assert!(is_erofs_multi_layer(&mounts));
+    }
+
+    #[test]
+    fn vmdk_descriptor_is_private_on_creation_and_replacement() {
+        let directory = tempfile::tempdir().unwrap();
+        let descriptor = directory.path().join("rootfs.vmdk");
+        for _ in 0..2 {
+            let writer = VmdkDescriptorWriter::new(&descriptor).unwrap();
+            assert_eq!(
+                fs::metadata(&writer.temp_path)
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+            writer.finalize(8).unwrap();
+            assert_eq!(
+                fs::metadata(&descriptor).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
     }
 
     #[test]
@@ -1564,6 +1589,10 @@ mod tests {
 
         live.close().unwrap();
         for path in artifacts.files {
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
             assert!(
                 path.is_file(),
                 "missing packaged artifact {}",
@@ -1635,6 +1664,10 @@ mod tests {
 
         live.close().unwrap();
         for path in artifacts.files {
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
             assert!(
                 path.is_file(),
                 "missing packaged artifact {}",
