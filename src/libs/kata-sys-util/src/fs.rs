@@ -7,6 +7,7 @@
 use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{Error, Result};
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::process::Command;
@@ -74,8 +75,42 @@ pub fn is_symlink<P: AsRef<Path>>(path: P) -> std::io::Result<bool> {
 /// The `reflink_copy()` doesn't preserve permission/security context for the copied file,
 /// so caller needs to take care of it.
 pub fn reflink_copy<S: AsRef<Path>, D: AsRef<Path>>(src: S, dst: D) -> Result<()> {
-    let src_path = src.as_ref();
-    let dst_path = dst.as_ref();
+    reflink_copy_impl(src.as_ref(), dst.as_ref(), None)
+}
+
+/// Reflink copy src to dst, and fall back to regular copy if reflink copy fails.
+/// Atomically set the given octal permissions (e.g. "0600") at destination creation,
+/// subject to umask. Owner-write permission is required for the regular-copy fallback.
+pub fn reflink_copy_perms<S: AsRef<Path>, D: AsRef<Path>>(
+    src: S,
+    dst: D,
+    permissions: &str,
+) -> Result<()> {
+    let mode = u32::from_str_radix(permissions, 8)
+        .ok()
+        .filter(|mode| *mode <= 0o7777)
+        .filter(|_| {
+            !permissions.is_empty()
+                && permissions
+                    .bytes()
+                    .all(|digit| matches!(digit, b'0'..=b'7'))
+        })
+        .ok_or_else(|| {
+            Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid octal file permissions",
+            )
+        })?;
+    if mode & 0o200 == 0 {
+        return Err(Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "file permissions must include owner-write permission for cp fallback",
+        ));
+    }
+    reflink_copy_impl(src.as_ref(), dst.as_ref(), Some(mode))
+}
+
+fn reflink_copy_impl(src_path: &Path, dst_path: &Path, mode: Option<u32>) -> Result<()> {
     let src = src_path.to_string_lossy();
     let dst = dst_path.to_string_lossy();
 
@@ -112,7 +147,15 @@ pub fn reflink_copy<S: AsRef<Path>, D: AsRef<Path>>(src: S, dst: D) -> Result<()
 
     // Reflink copy, and fallback to regular copy if reflink fails.
     let src_file = fs::File::open(src_path)?;
-    let dst_file = fs::File::create(dst_path)?;
+    let dst_file = if let Some(mode) = mode {
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(mode)
+            .open(dst_path)?
+    } else {
+        fs::File::create(dst_path)?
+    };
     if let Err(e) = do_reflink_copy(src_file, dst_file) {
         match e.raw_os_error() {
             // Cross dev copy or filesystem doesn't support reflink, do regular copy
@@ -215,6 +258,65 @@ mod tests {
     }
 
     #[test]
+    fn test_reflink_copy_perms() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source");
+        let destination = directory.path().join("destination");
+        fs::write(&source, b"private contents").unwrap();
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o644)).unwrap();
+
+        reflink_copy_perms(&source, &destination, "0600").unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"private contents");
+        assert_eq!(destination.metadata().unwrap().mode() & 0o777, 0o600);
+        let previous = File::open(&destination).unwrap();
+        fs::write(&source, b"replacement contents").unwrap();
+        reflink_copy_perms(&source, &destination, "0200").unwrap();
+        assert_ne!(
+            previous.metadata().unwrap().ino(),
+            destination.metadata().unwrap().ino()
+        );
+        assert_eq!(destination.metadata().unwrap().mode() & 0o777, 0o200);
+        reflink_copy_perms(&source, &destination, "0600").unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"replacement contents");
+        assert!(reflink_copy_perms(&source, directory.path(), "0600").is_err());
+        assert!(reflink_copy_perms(directory.path(), &destination, "0600").is_err());
+        for invalid in ["", "+600", "0680", "10000", "rw-------", "0400", "0000"] {
+            let missing = directory.path().join("not-created/invalid");
+            assert_eq!(
+                reflink_copy_perms(&source, &missing, invalid)
+                    .unwrap_err()
+                    .kind(),
+                std::io::ErrorKind::InvalidInput
+            );
+            assert!(!missing.parent().unwrap().exists());
+        }
+        let nested = directory.path().join("nested/writable");
+        reflink_copy_perms(&source, &nested, "0600").unwrap();
+        assert_eq!(nested.metadata().unwrap().mode() & 0o777, 0o600);
+        assert_eq!(fs::read(nested).unwrap(), b"replacement contents");
+
+        let link = directory.path().join("link");
+        symlink(&destination, &link).unwrap();
+        let target_inode = destination.metadata().unwrap().ino();
+        reflink_copy_perms(&source, &link, "0600").unwrap();
+        assert!(!fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(destination.metadata().unwrap().ino(), target_inode);
+        assert_eq!(fs::read(&link).unwrap(), b"replacement contents");
+        let dangling = directory.path().join("dangling");
+        symlink(directory.path().join("missing"), &dangling).unwrap();
+        assert!(reflink_copy_perms(&source, &dangling, "0600").is_err());
+
+        do_regular_copy(source.to_str().unwrap(), destination.to_str().unwrap()).unwrap();
+        assert_eq!(destination.metadata().unwrap().mode() & 0o777, 0o600);
+        assert_eq!(fs::read(destination).unwrap(), b"replacement contents");
+    }
+
+    #[test]
     fn test_regular_copy_sparsifies_zero_filled_file() {
         let tmpdir = tempfile::tempdir().unwrap();
         let source = tmpdir.path().join("source");
@@ -227,10 +329,17 @@ mod tests {
         source_file.write_all(&data).unwrap();
         source_file.sync_all().unwrap();
 
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&destination)
+            .unwrap();
         do_regular_copy(source.to_str().unwrap(), destination.to_str().unwrap()).unwrap();
 
         assert_eq!(fs::read(&destination).unwrap(), data);
         let metadata = destination.metadata().unwrap();
+        assert_eq!(metadata.mode() & 0o777, 0o600);
         assert!(metadata.blocks() * 512 < metadata.len());
     }
 }
