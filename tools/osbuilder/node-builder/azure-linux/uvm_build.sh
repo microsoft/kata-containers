@@ -32,7 +32,7 @@ rootfs_make_flags=(
 if [[ "${CONF_PODS}" == "yes" ]]; then
 	rootfs_make_flags+=(
 		"AGENT_POLICY=yes"
-		"CONF_GUEST=yes"
+		"CONFIDENTIAL_GUEST=yes"
 		"AGENT_POLICY_FILE=${agent_policy_file_abs}"
 	)
 fi
