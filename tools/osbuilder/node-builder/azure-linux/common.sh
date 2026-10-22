@@ -40,8 +40,16 @@ if [[ "${CONF_PODS}" == "yes" ]]; then
 	IMG_FILE_NAME="kata-containers.img"
 	IGVM_FILE_NAME="kata-openvmm-snp.bin"
 	IGVM_DBG_FILE_NAME="kata-openvmm-snp-debug.bin"
-	UVM_MEASUREMENT_FILE_NAME="igvm-measurement.cose"
-	UVM_DBG_MEASUREMENT_FILE_NAME="igvm-debug-measurement.cose"
+	# igvmfilegen writes the SNP launch measurement of <name>.bin to <name>-snp.{json,cbor,idblock}
+	UVM_MEASUREMENT_FILE_NAMES=(
+		"kata-openvmm-snp-snp.json"
+		"kata-openvmm-snp-snp.cbor"
+		"kata-openvmm-snp-snp.idblock"
+		"kata-openvmm-snp-debug-snp.json"
+		"kata-openvmm-snp-debug-snp.cbor"
+		"kata-openvmm-snp-debug-snp.idblock"
+	)
+	UVM_CHECKSUMS_FILE_NAME="SHA256SUMS"
 	SHIM_CONFIG_PATH="${INSTALL_PATH_PREFIX}/share/defaults/kata-containers"
 	SHIM_CONFIG_FILE_NAME="${SHIM_CONFIG_FILE_NAME_OPENVMM_SNP}"
 	SHIM_CONFIG_INST_FILE_NAME="${SHIM_CONFIG_FILE_NAME}"

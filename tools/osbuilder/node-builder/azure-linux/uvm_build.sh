@@ -56,10 +56,12 @@ if [[ "${CONF_PODS}" == "yes" ]]; then
 	sudo -E PATH="${PATH}" make DISTRO=cbl-mariner MEASURED_ROOTFS=yes DM_VERITY_FORMAT=kernelinit IMAGE_SIZE_ALIGNMENT_MB=2 image
 	popd || exit
 
-	echo "Building IGVM and UVM measurement files"
+	echo "Building OpenVMM SNP IGVMs and launch measurements"
 	pushd tools/osbuilder || exit
-	sudo chmod o+r root_hash.txt
-	sudo make igvm DISTRO=cbl-mariner IGVM_SVN="${IGVM_SVN}"
+	# -E keeps IGVMFILEGEN and SNP_BOOTSHIM for igvm-builder
+	sudo -E PATH="${PATH}" make igvm DISTRO=cbl-mariner IGVM_SVN="${IGVM_SVN}"
+	sha256sum "${IMG_FILE_NAME}" "${IGVM_FILE_NAME}" "${IGVM_DBG_FILE_NAME}" "${UVM_MEASUREMENT_FILE_NAMES[@]}" \
+		| sudo tee "${UVM_CHECKSUMS_FILE_NAME}"
 	popd || exit
 else
 	echo "Building image based on rootfs"
