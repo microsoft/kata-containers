@@ -9,27 +9,15 @@
 # this is where the kernel-uvm package installation places bzImage, see SPEC file
 BZIMAGE_BIN="/usr/share/cloud-hypervisor/bzImage"
 
-IGVM_EXTRACT_FOLDER="${SCRIPT_DIR}/igvm-tooling"
-CLH_ACPI_TABLES_DIR="${IGVM_EXTRACT_FOLDER}/src/igvm/acpi/acpi-clh/"
-IGVM_PY_FILE="${IGVM_EXTRACT_FOLDER}/src/igvm/igvmgen.py"
+# Written by image_builder.sh for MEASURED_ROOTFS=yes and an empty BUILD_VARIANT
+ROOT_HASH_FILE="${SCRIPT_DIR}/../root_hash_.txt"
+IGVM_MANIFEST_PY="${SCRIPT_DIR}/${DISTRO}/igvm_manifest.py"
 
-IGVM_BUILD_VARS=(
-	"-kernel" "${BZIMAGE_BIN}"
-	"-boot_mode" "x64"
-	"-vtl" "0"
-	"-svme" "1"
-	"-encrypted_page" "1"
-	"-pvalidate_opt" "1"
-	"-acpi" "${CLH_ACPI_TABLES_DIR}"
-)
+# igvmfilegen and snp_bootshim must be built together from the same source
+IGVM_TOOLS_REPO="${IGVM_TOOLS_REPO:-https://github.com/microsoft/kata-cc-igvm-tools.git}"
+IGVM_TOOLS_REF="${IGVM_TOOLS_REF:-1bb7c3031d686c8400b29ca59083f85a4a44786e}"
+IGVM_TOOLS_SRC_DIR="${SCRIPT_DIR}/igvm-tools-src"
+IGVM_TOOLS_DIR="${SCRIPT_DIR}/igvm-tools"
 
-IGVM_KERNEL_PARAMS_COMMON="dm-mod.create=\"dm-verity,,,ro,0 ${IMAGE_DATA_SECTORS} verity 1 /dev/vda1 /dev/vda2 ${IMAGE_DATA_BLOCK_SIZE} ${IMAGE_HASH_BLOCK_SIZE} ${IMAGE_DATA_BLOCKS} 0 sha256 ${IMAGE_ROOT_HASH} ${IMAGE_SALT}\" \
-	root=/dev/dm-0 rootflags=data=ordered,errors=remount-ro ro rootfstype=ext4 panic=1 no_timer_check noreplace-smp systemd.unit=kata-containers.target systemd.mask=systemd-networkd.service \
-	systemd.mask=systemd-networkd.socket agent.enable_signature_verification=false"
-IGVM_KERNEL_PROD_PARAMS="${IGVM_KERNEL_PARAMS_COMMON} quiet"
-IGVM_KERNEL_DEBUG_PARAMS="${IGVM_KERNEL_PARAMS_COMMON} console=hvc0 systemd.log_target=console agent.log=debug agent.debug_console agent.debug_console_vport=1026"
-
-IGVM_FILE_NAME="kata-containers-igvm.img"
-IGVM_DBG_FILE_NAME="kata-containers-igvm-debug.img"
-IGVM_MEASUREMENT_FILE_NAME="igvm-measurement.cose"
-IGVM_DBG_MEASUREMENT_FILE_NAME="igvm-debug-measurement.cose"
+IGVM_FILE_NAME="kata-openvmm-snp.bin"
+IGVM_DBG_FILE_NAME="kata-openvmm-snp-debug.bin"
