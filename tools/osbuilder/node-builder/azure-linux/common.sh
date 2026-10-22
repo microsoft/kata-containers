@@ -84,9 +84,3 @@ else
 fi
 
 AGENT_INSTALL_DIR="${script_dir}/agent-install"
-
-set_uvm_kernel_vars() {
-	UVM_KERNEL_VERSION=$(rpm -q --queryformat '%{VERSION}' kernel-uvm-devel)
-	UVM_KERNEL_RELEASE=$(rpm -q --queryformat '%{RELEASE}' kernel-uvm-devel)
-	UVM_KERNEL_HEADER_DIR="/usr/src/linux-headers-${UVM_KERNEL_VERSION}-${UVM_KERNEL_RELEASE}"
-}
