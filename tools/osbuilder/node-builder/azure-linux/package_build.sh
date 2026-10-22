@@ -99,24 +99,6 @@ fi
 
 pushd "${repo_dir}" || exit
 
-if [[ "${CONF_PODS}" == "yes" ]]; then
-
-	echo "Building utarfs binary"
-	pushd src/utarfs/ || exit
-	make all
-	popd || exit
-
-	echo "Building kata-overlay binary"
-	pushd src/overlay/ || exit
-	make all
-	popd || exit
-
-	echo "Building tardev-snapshotter service binary"
-	pushd src/tardev-snapshotter/ || exit
-	make all
-	popd || exit
-fi
-
 echo "Building runtime-go shim binary"
 pushd src/runtime/ || exit
 if [[ "${CONF_PODS}" == "yes" ]] || [[ "${OS_VERSION}" == "3.0" ]]; then
