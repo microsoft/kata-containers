@@ -32,7 +32,7 @@ rootfs_make_flags=(
 if [[ "${CONF_PODS}" == "yes" ]]; then
 	rootfs_make_flags+=(
 		"AGENT_POLICY=yes"
-		"CONF_GUEST=yes"
+		"CONFIDENTIAL_GUEST=yes"
 		"AGENT_POLICY_FILE=${agent_policy_file_abs}"
 	)
 fi
@@ -51,6 +51,11 @@ sudo cp "${AGENT_INSTALL_DIR}"/usr/lib/systemd/system/kata-containers.target "${
 sudo cp "${AGENT_INSTALL_DIR}"/usr/lib/systemd/system/kata-agent.service "${ROOTFS_PATH}"/usr/lib/systemd/system/kata-agent.service
 
 if [[ "${CONF_PODS}" == "yes" ]]; then
+	# The copy above dropped rootfs.sh's CONFIDENTIAL_GUEST dependency that applies the /run size from fstab
+	kata_target="${ROOTFS_PATH}/usr/lib/systemd/system/kata-containers.target"
+	sudo grep -qE '^Requires=.*systemd-remount-fs.service' "${kata_target}" || \
+		echo "Requires=systemd-remount-fs.service" | sudo tee -a "${kata_target}" >/dev/null
+
 	echo "Building dm-verity protected image based on rootfs"
 	pushd tools/osbuilder || exit
 	sudo -E PATH="${PATH}" make DISTRO=cbl-mariner MEASURED_ROOTFS=yes DM_VERITY_FORMAT=kernelinit IMAGE_SIZE_ALIGNMENT_MB=2 image
