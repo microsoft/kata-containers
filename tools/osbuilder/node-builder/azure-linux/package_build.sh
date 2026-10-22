@@ -67,17 +67,19 @@ runtime_rs_make_flags=(
 	"DEFSTATICSANDBOXWORKLOADVCPUS=1"
 )
 
-# - for vanilla Kata we use the kernel binary. For ConfPods we use IGVM, so no need to provide kernel path.
-# - for vanilla Kata we explicitly set DEFSTATICRESOURCEMGMT_CLH. For ConfPods,
-#   the variable DEFSTATICRESOURCEMGMT_TEE is used which defaults to false
-# - for ConfPods we explicitly set the cloud-hypervisor path. The path is independent of the PREFIX variable
-#   as we have a single CLH binary for both vanilla Kata and ConfPods
+# - for vanilla Kata we use the kernel binary and explicitly set DEFSTATICRESOURCEMGMT_CLH.
+# - for ConfPods the OpenVMM SNP config boots an IGVM (kernel and dm-verity cmdline inside)
+#   and already enables static resource management. The openvmm binary comes from its own
+#   package, so its path is independent of the PREFIX variable.
 if [[ "${CONF_PODS}" == "no" ]]; then
 	runtime_go_make_flags+=("DEFSTATICRESOURCEMGMT_CLH=true" "KERNELPATH_CLH=${KERNEL_BINARY_LOCATION}")
 	runtime_rs_make_flags+=("DEFSTATICRESOURCEMGMT_CLH=true" "KERNELPATH_CLH=${KERNEL_BINARY_LOCATION}")
 else
-	runtime_go_make_flags+=("CLHPATH=${CLOUD_HYPERVISOR_LOCATION}")
-	runtime_rs_make_flags+=("CLHPATH=${CLOUD_HYPERVISOR_LOCATION}")
+	runtime_rs_make_flags+=(
+		"OPENVMMPATH=${OPENVMM_LOCATION}"
+		"IGVMPATH_OPENVMM_SNP=${UVM_PATH_DEFAULT}/${IGVM_FILE_NAME}"
+		"IMAGEPATH_OPENVMM_AZURE=${UVM_PATH_DEFAULT}/${IMG_FILE_NAME}"
+	)
 fi
 
 # On Mariner 3.0 we use cgroupsv2 with a single sandbox cgroup
@@ -93,8 +95,9 @@ agent_make_flags=(
 	"BUILD_TYPE=${AGENT_BUILD_TYPE}"
 )
 
+# ConfPods guests enforce the policy and verify EROFS image layers with dm-verity
 if [[ "${CONF_PODS}" == "yes" ]]; then
-	agent_make_flags+=("AGENT_POLICY=yes")
+	agent_make_flags+=("AGENT_POLICY=yes" "USE_DEVMAPPER=yes")
 fi
 
 pushd "${repo_dir}" || exit
@@ -113,7 +116,7 @@ popd || exit
 echo "Building runtime-rs shim binary"
 pushd src/runtime-rs/ || exit
 if [[ "${SHIM_REDEPLOY_CONFIG}" == "yes" ]]; then
-	rm -f "config/${SHIM_CONFIG_FILE_NAME_RUNTIME_RS}" "config/${SHIM_CONFIG_FILE_NAME_RUNTIME_RS_V2}"
+	rm -f "config/${SHIM_CONFIG_FILE_NAME_RUNTIME_RS}" "config/${SHIM_CONFIG_FILE_NAME_RUNTIME_RS_V2}" "config/${SHIM_CONFIG_FILE_NAME_OPENVMM_SNP}"
 fi
 make "${runtime_rs_make_flags[@]}"
 popd || exit
@@ -162,6 +165,10 @@ create_debug_shim_config  "${CONFIG_DIR_RUNTIME_GO}" "${SHIM_CONFIG_FILE_NAME_RU
 create_debug_shim_config "${CONFIG_DIR_RUNTIME_RS}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_RS}" "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS}"
 
 create_debug_shim_config "${CONFIG_DIR_RUNTIME_RS}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_RS_V2}" "${SHIM_DBG_CONFIG_FILE_NAME_RUNTIME_RS_V2}"
+
+if [[ "${CONF_PODS}" == "yes" ]]; then
+	create_debug_shim_config "${CONFIG_DIR_RUNTIME_RS}" "${SHIM_CONFIG_FILE_NAME_OPENVMM_SNP}" "${SHIM_DBG_CONFIG_FILE_NAME_OPENVMM_SNP}"
+fi
 
 # Must run after create_debug_shim_config, the preview debug config derives from it.
 create_preview_shim_config "${CONFIG_DIR_RUNTIME_GO}" "${SHIM_CONFIG_FILE_NAME_RUNTIME_GO}" "${SHIM_PREVIEW_CONFIG_FILE_NAME_RUNTIME_GO}"
