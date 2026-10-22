@@ -39,6 +39,9 @@ rm -rf "${AGENT_INSTALL_DIR}"
 echo "Clean UVM build"
 pushd tools/osbuilder/ || exit
 sudo -E PATH="${PATH}" make DISTRO=cbl-mariner clean
+if [[ "${CONF_PODS}" == "yes" ]]; then
+	sudo rm -f root_hash_.txt "${UVM_CHECKSUMS_FILE_NAME}"
+fi
 popd || exit
 
 popd || exit
