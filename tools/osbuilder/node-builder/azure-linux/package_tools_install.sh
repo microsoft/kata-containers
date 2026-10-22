@@ -60,6 +60,7 @@ if [[ "${CONF_PODS}" == "yes" ]]; then
 	cp -a --backup=numbered tools/osbuilder/igvm-builder/igvm_builder.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/igvm-builder/"
 	cp -a --backup=numbered tools/osbuilder/igvm-builder/azure-linux/config.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/igvm-builder/azure-linux/"
 	cp -a --backup=numbered tools/osbuilder/igvm-builder/azure-linux/igvm_lib.sh "${PREFIX}/${UVM_TOOLS_PATH_OSB}/igvm-builder/azure-linux/"
+	cp -a --backup=numbered tools/osbuilder/igvm-builder/azure-linux/igvm_manifest.py "${PREFIX}/${UVM_TOOLS_PATH_OSB}/igvm-builder/azure-linux/"
 fi
 
 popd || exit
