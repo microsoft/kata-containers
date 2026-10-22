@@ -37,13 +37,6 @@ if [[ "${CONF_PODS}" == "yes" ]]; then
 	)
 fi
 
-if [[ "${CONF_PODS}" == "yes" ]]; then
-	set_uvm_kernel_vars
-	if [[ -z "${UVM_KERNEL_HEADER_DIR}" ]]; then
-		exit 1
-	fi
-fi
-
 pushd "${repo_dir}" || exit
 
 echo "Building rootfs and including pre-built agent binary"
@@ -58,12 +51,6 @@ sudo cp "${AGENT_INSTALL_DIR}"/usr/lib/systemd/system/kata-containers.target "${
 sudo cp "${AGENT_INSTALL_DIR}"/usr/lib/systemd/system/kata-agent.service "${ROOTFS_PATH}"/usr/lib/systemd/system/kata-agent.service
 
 if [[ "${CONF_PODS}" == "yes" ]]; then
-	echo "Building tarfs kernel driver and installing into rootfs"
-	pushd src/tarfs || exit
-	make KDIR="${UVM_KERNEL_HEADER_DIR}"
-	sudo make KDIR="${UVM_KERNEL_HEADER_DIR}" KVER="${UVM_KERNEL_VERSION}" INSTALL_MOD_PATH="${ROOTFS_PATH}" install
-	popd || exit
-
 	echo "Building dm-verity protected image based on rootfs"
 	pushd tools/osbuilder || exit
 	sudo -E PATH="${PATH}" make DISTRO=cbl-mariner MEASURED_ROOTFS=yes DM_VERITY_FORMAT=kernelinit IMAGE_SIZE_ALIGNMENT_MB=2 image
