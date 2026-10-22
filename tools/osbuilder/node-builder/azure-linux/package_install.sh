@@ -14,7 +14,6 @@ CONF_PODS=${CONF_PODS:-no}
 PREFIX=${PREFIX:-}
 SHIM_REDEPLOY_CONFIG=${SHIM_REDEPLOY_CONFIG:-yes}
 SHIM_USE_DEBUG_CONFIG=${SHIM_USE_DEBUG_CONFIG:-no}
-START_SERVICES=${START_SERVICES:-yes}
 
 script_dir="$(dirname "$(readlink -f "$0")")"
 repo_dir="${script_dir}/../../../../"
@@ -36,22 +35,6 @@ RUNTIME_RS_SHIM="${RUNTIME_RS_TARGET}/containerd-shim-kata-v2"
 KATA_CTL_BINARY="${RUNTIME_RS_TARGET}/kata-ctl"
 SHIM_BINARY_RUNTIME_GO="${SHIM_BINARY_NAME}-go"
 SHIM_BINARY_RUNTIME_RS="${SHIM_BINARY_NAME}-rs"
-
-if [[ "${CONF_PODS}" == "yes" ]]; then
-	echo "Installing tardev-snapshotter binaries and service file"
-	mkdir -p "${PREFIX}"/usr/sbin
-	cp -a --backup=numbered src/utarfs/target/release/utarfs "${PREFIX}"/usr/sbin/mount.tar
-	mkdir -p "${PREFIX}"/usr/bin
-	cp -a --backup=numbered src/overlay/target/release/kata-overlay "${PREFIX}"/usr/bin/
-	cp -a --backup=numbered src/tardev-snapshotter/target/release/tardev-snapshotter "${PREFIX}"/usr/bin/
-	mkdir -p "${PREFIX}"/usr/lib/systemd/system/
-	cp -a --backup=numbered src/tardev-snapshotter/tardev-snapshotter.service "${PREFIX}"/usr/lib/systemd/system/
-
-	echo "Enabling and starting snapshotter service"
-	if [[ "${START_SERVICES}" == "yes" ]]; then
-		systemctl enable tardev-snapshotter && systemctl daemon-reload && systemctl restart tardev-snapshotter
-	fi
-fi
 
 echo "Installing diagnosability binaries (monitor, runtime, collect-data script)"
 cp -a --backup=numbered src/runtime/kata-monitor "${PREFIX}/${DEBUGGING_BINARIES_PATH}"
