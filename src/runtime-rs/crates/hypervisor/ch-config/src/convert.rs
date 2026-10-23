@@ -8,7 +8,7 @@ use crate::VmConfig;
 use crate::{
     guest_protection_is_tdx, ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpuTopology,
     CpusConfig, DiskConfig, ImageType, MemoryConfig, MemoryZoneConfig, PayloadConfig,
-    PlatformConfig, PmemConfig, RngConfig, VsockConfig,
+    PlatformConfig, PmemConfig, RngConfig, RtcConfig, VsockConfig,
 };
 use anyhow::Result;
 use kata_sys_util::protection::GuestProtection;
@@ -211,6 +211,7 @@ impl TryFrom<NamedHypervisorConfig> for VmConfig {
             disks,
             vsock: Some(vsock),
             rng,
+            rtc: Some(RtcConfig::default()),
             platform,
             balloon,
 
@@ -1793,6 +1794,37 @@ mod tests {
     }
 
     #[test]
+    fn test_vmconfig_rtc_json() {
+        let config = VmConfig {
+            cpus: CpusConfig {
+                max_phys_bits: 46,
+                ..Default::default()
+            },
+            rtc: Some(RtcConfig::default()),
+            ..Default::default()
+        };
+        let mut json = serde_json::to_value(&config).unwrap();
+        assert_eq!(
+            json["rtc"],
+            serde_json::json!({
+                "iommu": false,
+                "id": null,
+                "pci_segment": 0,
+                "pci_device_id": null,
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<VmConfig>(json.clone()).unwrap(),
+            config
+        );
+
+        json.as_object_mut().unwrap().remove("rtc");
+        let legacy = serde_json::from_value::<VmConfig>(json).unwrap();
+        assert_eq!(legacy.rtc, None);
+        assert!(serde_json::to_value(legacy).unwrap().get("rtc").is_none());
+    }
+
+    #[test]
     fn test_named_hypervisor_config_to_vmconfig() {
         #[derive(Debug)]
         struct TestData {
@@ -1937,6 +1969,7 @@ mod tests {
             cpus: cpus_config.clone(),
             memory: mem_config_std.clone(),
             rng: rng_config.clone(),
+            rtc: Some(RtcConfig::default()),
             vsock: Some(valid_vsock.clone()),
 
             // rootfs image specific
@@ -1956,6 +1989,7 @@ mod tests {
             cpus: cpus_config.clone(),
             memory: mem_config_std,
             rng: rng_config.clone(),
+            rtc: Some(RtcConfig::default()),
             vsock: Some(valid_vsock.clone()),
 
             // initrd/initramfs specific
@@ -1970,6 +2004,7 @@ mod tests {
             cpus: cpus_config_tdx.clone(),
             memory: mem_config_confidential_guest.clone(),
             rng: rng_config.clone(),
+            rtc: Some(RtcConfig::default()),
             vsock: Some(valid_vsock.clone()),
             platform: platform_config_tdx.clone(),
 
