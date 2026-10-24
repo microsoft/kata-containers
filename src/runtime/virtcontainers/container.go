@@ -625,7 +625,7 @@ func (c *Container) createBlockDevices(ctx context.Context) error {
 		// the mount is a block-based emptyDir, to avoid
 		// cases that could regress 20ca4d2.
 		if !c.checkBlockDeviceSupport(ctx) && (!isBlockEmptyDirMode(c.sandbox.config.EmptyDirMode) || !IsDiskEmptyDir(c.mounts[i].Source)) {
-			c.Logger().Warn("Block device not supported")
+			c.Logger().WithField("mount-source", c.mounts[i].Source).Warn("Block device not supported")
 			continue
 		}
 
