@@ -6,7 +6,7 @@
 use crate::device::online_device;
 use crate::linux_abi::*;
 use crate::sandbox::Sandbox;
-use crate::AGENT_CONFIG;
+// use crate::AGENT_CONFIG;
 use slog::Logger;
 
 use anyhow::{anyhow, Result};
@@ -14,6 +14,7 @@ use netlink_sys::{protocols, SocketAddr, TokioSocket};
 use std::fmt::Debug;
 use std::os::unix::io::FromRawFd;
 use std::sync::Arc;
+use std::time;
 use tokio::select;
 use tokio::sync::watch::Receiver;
 use tokio::sync::Mutex;
@@ -139,7 +140,8 @@ pub async fn wait_for_uevent(
 
     error!(sl(), "{}: waiting on channel", logprefix);
 
-    let hotplug_timeout = AGENT_CONFIG.hotplug_timeout;
+    // let hotplug_timeout = AGENT_CONFIG.hotplug_timeout;
+    let hotplug_timeout = time::Duration::from_millis(10);
 
     let uev = match tokio::time::timeout(hotplug_timeout, rx).await {
         Ok(v) => v?,
