@@ -118,11 +118,11 @@ pub async fn wait_for_uevent(
 ) -> Result<Uevent> {
     let logprefix = format!("Waiting for {:?}", &matcher);
 
-    info!(sl(), "{}", logprefix);
+    error!(sl(), "{}", logprefix);
     let mut sb = sandbox.lock().await;
     for uev in sb.uevent_map.values() {
         if matcher.is_match(uev) {
-            info!(sl(), "{}: found {:?} in uevent map", logprefix, &uev);
+            error!(sl(), "{}: found {:?} in uevent map", logprefix, &uev);
             return Ok(uev.clone());
         }
     }
@@ -137,7 +137,7 @@ pub async fn wait_for_uevent(
     sb.uevent_watchers.push(Some((Box::new(matcher), tx)));
     drop(sb); // unlock
 
-    info!(sl(), "{}: waiting on channel", logprefix);
+    error!(sl(), "{}: waiting on channel", logprefix);
 
     let hotplug_timeout = AGENT_CONFIG.hotplug_timeout;
 
@@ -155,7 +155,7 @@ pub async fn wait_for_uevent(
         }
     };
 
-    info!(sl(), "{}: found {:?} on channel", logprefix, &uev);
+    error!(sl(), "{}: found {:?} on channel", logprefix, &uev);
     Ok(uev)
 }
 
