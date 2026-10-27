@@ -17,8 +17,8 @@ The guide provides the steps for two different environments:
 ## Set up AzL3 environment
 
 While build can happen in any Azure Linux 3 based environment, the stack can only be evaluated on environments with proper virtualization support and, for Kata-CC, on top of AMD SEV-SNP. An example of such environment are Azure Linux 3 based Azure VMs using a proper SKU:
-- Deploy an Azure Linux 3 VM via `az vm create` using a [CC vm size SKU](https://learn.microsoft.com/en-us/azure/virtual-machines/dcasccv5-dcadsccv5-series)
-  - Example: `az vm create --resource-group <rg_name> --name <vm_name> --os-disk-size-gb <e.g. 60> --public-ip-sku Standard --size <e.g. Standard_DC4as_cc_v5> --admin-username azureuser --ssh-key-values <ssh_pubkey> --image <MicrosoftCBLMariner:azure-linux-3:azure-linux-3-gen2:latest>`
+- Deploy an Azure Linux 3 VM via `az vm create` using a confidential child capable `_cc_v6` VM size
+  - Example: `az vm create --resource-group <rg_name> --name <vm_name> --os-disk-size-gb <e.g. 60> --public-ip-sku Standard --size <e.g. Standard_DC8as_cc_v6> --admin-username azureuser --ssh-key-values <ssh_pubkey> --image <MicrosoftCBLMariner:azure-linux-3:azure-linux-3-gen2:latest>`
 - SSH onto the VM
 
 Not validated for evaluation: Install [Azure Linux 3](https://github.com/microsoft/azurelinux) on a bare metal machine supporting AMD SEV-SNP.
@@ -27,10 +27,13 @@ To merely build the stack, we refer to the official [Azure Linux GitHub page](ht
 
 ## Deploy required host packages (incl. VMM, SEV-SNP capable kernel and Microsoft Hypervisor) and extend containerd configuration
 
-Install relevant packages, append a configuration snippet to `/etc/containerd/config.toml` to register the Kata(-CC) handlers, then reboot the system:
+Install relevant packages and extend `/etc/containerd/config.toml` to register the Kata(-CC) handlers and to unpack Kata-CC image layers as dm-verity protected EROFS layers, then reboot the system:
 ```
 sudo dnf -y makecache
 sudo dnf -y install kata-packages-host
+
+# containerd's EROFS snapshotter (dmverity_mode) fails to load without dm_verity, taking the CRI plugin with it
+echo dm_verity | sudo tee /etc/modules-load.d/kata-cc.conf
 
 sudo tee -a /etc/containerd/config.toml 2&>1 <<EOF
 
@@ -39,20 +42,41 @@ sudo tee -a /etc/containerd/config.toml 2&>1 <<EOF
   privileged_without_host_devices = true
   [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata.options]
     ConfigPath = "/usr/share/defaults/kata-containers/configuration.toml"
-[proxy_plugins]
-  [proxy_plugins.tardev]
-    type = "snapshot"
-    address = "/run/containerd/tardev-snapshotter.sock"
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-cc]
-  snapshotter = "tardev"
+  snapshotter = "erofs"
   runtime_type = "io.containerd.kata-cc.v2"
   privileged_without_host_devices = true
   [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-cc.options]
-    ConfigPath = "/opt/confidential-containers/share/defaults/kata-containers/configuration-clh-snp.toml"
+    ConfigPath = "/opt/confidential-containers/share/defaults/kata-containers/configuration-openvmm-azure-snp-runtime-rs.toml"
+
+[plugins."io.containerd.service.v1.diff-service"]
+  default = ["erofs", "walking"]
+[plugins."io.containerd.snapshotter.v1.erofs"]
+  dmverity_mode = "on"
+  default_size = "0"
+[plugins."io.containerd.differ.v1.erofs"]
+  enable_dmverity = true
+  mkfs_options = ["-T0", "--mkfs-time", "--sort=none"]
+  enable_tar_index = false
+[[plugins."io.containerd.transfer.v1.local".unpack_config]]
+  platform = "linux/amd64"
+  snapshotter = "erofs"
+  differ = "erofs"
+[[plugins."io.containerd.transfer.v1.local".unpack_config]]
+  platform = "linux/amd64"
+  snapshotter = "overlayfs"
+  differ = "walking"
 EOF
 
 sudo reboot
 ```
+
+Notes on the Kata-CC EROFS settings:
+- Selecting `snapshotter = "erofs"` alone does not protect the layers. The EROFS differ creates the dm-verity metadata (`enable_dmverity`) that the snapshotter passes to the shim (`dmverity_mode`). runtime-rs then gives the guest each layer as a dm-verity protected block device. Without this metadata, single-layer images fail to start on OpenVMM, and multi-layer images run without layer verification.
+- Keep the layers unmerged: do not set `max_unmerged_layers`. OpenVMM does not support fsmerged EROFS layers.
+- `unpack_config` replaces containerd's defaults, so it also lists `overlayfs` for regular (runc) pods.
+- If `/etc/containerd/config.toml` already defines any of these tables, add the keys to the existing tables instead of appending; duplicate tables are a TOML error. Check the result with `sudo containerd config dump | grep -E 'dmverity|unpack_config' -A3`.
+- Configure this before pulling images. Layers pulled before have no dm-verity metadata: remove them (`sudo ctr -n k8s.io snapshots --snapshotter erofs rm <key>`) and pull again.
 
 ## Variant I: Utilize released components to assemble the UVM
 
@@ -68,23 +92,16 @@ sudo make deploy-uvm
 popd
 ```
 
-For Kata-CC:
+For Kata-CC (see *IGVM tooling for ConfPods* for `IGVMFILEGEN` and `SNP_BOOTSHIM`):
 ```
-sudo dnf -y install kata-packages-uvm-build curl jq # curl and jq are only required for installing the IGVM tool
-pushd /opt/confidential-containers/uvm/tools/osbuilder
-pushd igvm-builder
-sudo ./igvm_builder.sh -i
-popd
-pushd node-builder/azure-linux
+sudo dnf -y install kata-packages-uvm-build
+pushd /opt/confidential-containers/uvm/tools/osbuilder/node-builder/azure-linux
 # Note: see explanation on AGENT_POLICY_FILE below. We build with a permissive agent policy
 # as security policy annotations part of the pod metadata field are not passed to the shim.
 # This setup SHOULD NOT BE USED for Confidential Containers in production.
-sudo make AGENT_POLICY_FILE=allow-all.rego uvm-confpods
+sudo IGVMFILEGEN=<path> SNP_BOOTSHIM=<path> make AGENT_POLICY_FILE=allow-all.rego uvm-confpods
 sudo make deploy-confpods-uvm
 popd
-popd
-# Note: currently depends on kubelet, need to manually start at every reboot.
-sudo systemctl start tardev-snapshotter
 ```
 
 You environment is ready. Continue with section *Run Kata (Confidential) Containers*
@@ -113,7 +130,7 @@ As released components are already pre-installed onto AKS nodes, the remainder o
 
 ```
 sudo dnf -y makecache
-sudo dnf -y install git golang rust cargo build-essential protobuf-compiler protobuf-devel expect openssl-devel clang-devel libseccomp-devel btrfs-progs-devel device-mapper-devel cmake fuse-devel kata-packages-uvm-build parted qemu-img kernel-uvm-devel curl jq # curl and jq are only required for installing the IGVM tool
+sudo dnf -y install git golang rust cargo build-essential protobuf-compiler protobuf-devel expect openssl-devel clang-devel libseccomp-devel btrfs-progs-devel device-mapper-devel cmake fuse-devel kata-packages-uvm-build parted qemu-img
 ```
 
 From here on, continue with the following section to build.
@@ -124,17 +141,22 @@ Clone the Microsoft's fork of the kata-containers repository:
 
 ```git clone https://github.com/microsoft/kata-containers.git```
 
-## Install IGVM tooling for ConfPods
+## IGVM tooling for ConfPods
 
-When intending to build the components for Confidential Containers, install the IGVM tool that will be used by the build tooling to create IGVM files with their reference measurements for the ConfPods UVM.
+The ConfPods UVM is booted by OpenVMM from AMD SEV-SNP IGVM files, generated by `make uvm-confpods` (through `tools/osbuilder/igvm-builder`) with `igvmfilegen` and `snp_bootshim` from [kata-cc-igvm-tools](https://github.com/microsoft/kata-cc-igvm-tools), an OpenVMM fork with Kata launch-sizing support. Both must come from the same build. Either:
 
-```
-pushd kata-containers/tools/osbuilder/igvm-builder
-sudo ./igvm_builder.sh -i
-popd
-```
+ * point the build at prebuilt binaries with `IGVMFILEGEN=<path>` and `SNP_BOOTSHIM=<path>`, which take precedence,
+ * or, for local builds, build them once from source (needs the OpenVMM Rust toolchain, the `x86_64-unknown-none` target, `protoc` and `openssl-devel`):
 
-This command installs the latest release of the [IGVM tooling](https://github.com/microsoft/igvm-tooling/) using `pip3 install`. The tool can be uninstalled at any time by calling the script using the -u parameter instead.
+   ```
+   pushd kata-containers/tools/osbuilder/igvm-builder
+   ./igvm_builder.sh -i
+   popd
+   ```
+
+   This builds `IGVM_TOOLS_REF` (a pinned commit, override with a branch, tag or commit) of `IGVM_TOOLS_REPO` into `igvm-builder/igvm-tools`; `./igvm_builder.sh -u` removes them and the checkout.
+
+The measured guest kernel is the `kernel-uvm` package's `bzImage` (`/usr/share/cloud-hypervisor/bzImage`), the same kernel package the vanilla Kata UVM uses.
 
 ## Build and deploy
 
@@ -245,9 +267,11 @@ The following instructions serve as a general reference:
 
 - Run containers with `ctr`, for example a confidential container:
 
-  `sudo ctr -n=k8s.io image pull --snapshotter=tardev docker.io/library/busybox:latest`
+  `sudo ctr -n=k8s.io image pull --snapshotter=erofs docker.io/library/busybox:latest`
 
-  `sudo ctr -n=k8s.io run --cni --runtime io.containerd.run.kata-cc.v2 --runtime-config-path /opt/confidential-containers/share/defaults/kata-containers/configuration-clh-snp.toml --snapshotter tardev -t --rm docker.io/library/busybox:latest hello sh`
+  (Do not add `--local`: only pulls through containerd's transfer service use `unpack_config` and get dm-verity layers.)
+
+  `sudo ctr -n=k8s.io run --cni --runtime io.containerd.run.kata-cc.v2 --runtime-config-path /opt/confidential-containers/share/defaults/kata-containers/configuration-openvmm-azure-snp-runtime-rs.toml --snapshotter erofs -t --rm docker.io/library/busybox:latest hello sh`
 
 For further usage we refer to the upstream `crictl` (or `ctr`) and CNI documentation.
 
@@ -294,7 +318,7 @@ kubectl label node <nodename> katacontainers.io/kata-runtime=true
 ```
 
 # Build attestation scenarios
-The build artifacts for the UVM ConfPods target include an IGVM file and a so-called reference measurement file (unsigned). The IGVM file is being loaded into memory measured by the AMD SEV-SNP PSP (when a Confidential Container is started). With this and with the Kata security policy feature, attestation scenarios can be built: the reference measurement (often referred to as 'endorsement') can, for example, be signed by a trusted party (such as Microsoft in Confidential Containers on AKS) and be compared with the actual measurement part of the attestation report. The latter can be retrieved through respective system calls inside the Kata Confidential Containers Guest VM.
+The build artifacts for the UVM ConfPods target include the release and debug IGVM files (`kata-openvmm-snp[-debug].bin`), their unsigned reference measurements as emitted by `igvmfilegen` (`kata-openvmm-snp[-debug]-snp.{json,cbor,idblock}`), and a `SHA256SUMS` file covering the UVM artifacts. The IGVM file is being loaded into memory measured by the AMD SEV-SNP PSP (when a Confidential Container is started). With this and with the Kata security policy feature, attestation scenarios can be built: the reference measurement (often referred to as 'endorsement') can, for example, be signed by a trusted party (such as Microsoft in Confidential Containers on AKS) and be compared with the actual measurement part of the attestation report. The latter can be retrieved through respective system calls inside the Kata Confidential Containers Guest VM.
 
 An example for an attestation scenario through Microsoft Azure Attestation is presented in [Attestation in Confidential containers on Azure Container Instances](https://learn.microsoft.com/en-us/azure/container-instances/confidential-containers-attestation-concepts).
 Documentation for leveraging the Kata security policy feature can be found in [Security policy for Confidential Containers on Azure Kubernetes Service](https://learn.microsoft.com/en-us/azure/confidential-computing/confidential-containers-aks-security-policy).
