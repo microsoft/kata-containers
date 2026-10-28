@@ -103,9 +103,6 @@ which.workspace = true
 
 test-utils.workspace = true
 
-[profile.release]
-lto = true
-
 [features]
 agent-policy = ["kata-agent-policy"]
 devicemapper = ["kata-types/devicemapper"]
