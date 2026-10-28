@@ -85,7 +85,8 @@ impl Uevent {
                 *logger,
                 "fault injection: delaying vdb add event for 5 seconds"
             );
-            sleep(Duration::from_secs(5)).await;
+            // sleep(Duration::from_secs(5)).await;
+            sleep(Duration::from_mins(5)).await;
             info!(*logger, "fault injection: delivering delayed vdb add event");
         }
 
