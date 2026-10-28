@@ -24,7 +24,7 @@ use oci::Process as OCIProcess;
 use oci_spec::runtime as oci;
 use resource::ResourceManager;
 use runtime_spec as spec;
-use tokio::sync::{OnceCell, RwLock};
+use tokio::sync::{Mutex, OnceCell, RwLock};
 use tracing::instrument;
 
 use kata_sys_util::{hooks::HookStates, netns::NetnsGuard};
@@ -32,12 +32,14 @@ use kata_sys_util::{hooks::HookStates, netns::NetnsGuard};
 use crate::container_manager::is_termination_signal;
 use crate::oom::CrioOomNotifier;
 
+use super::container::PendingContainer;
 use super::{logger_with_process, Container};
 
 pub struct VirtContainerManager {
     sid: String,
     pid: u32,
     containers: Arc<RwLock<HashMap<String, Container>>>,
+    create_lock: Arc<Mutex<()>>,
     resource_manager: Arc<ResourceManager>,
     agent: Arc<dyn Agent>,
     hypervisor: Arc<dyn Hypervisor>,
@@ -74,6 +76,7 @@ impl VirtContainerManager {
             sid: sid.to_string(),
             pid,
             containers: Default::default(),
+            create_lock: Default::default(),
             resource_manager,
             agent,
             hypervisor,
@@ -88,6 +91,24 @@ impl VirtContainerManager {
             .await
             .copied()
     }
+
+    async fn create_and_register(&self, container: Container, spec: oci::Spec) -> Result<()> {
+        let pending = PendingContainer::new(container, self.oom_notifier.clone());
+        let create_lock = self.create_lock.clone();
+        // Let an in-flight attach finish and record its resources even if the
+        // caller is cancelled. An unclaimed result is cleaned up by its owner.
+        let pending = tokio::spawn(async move {
+            let _create_guard = create_lock.lock().await;
+            pending.create(spec).await
+        })
+        .await
+        .context("container create worker")??;
+
+        let mut containers = self.containers.write().await;
+        let container = pending.into_container();
+        containers.insert(container.container_id.to_string(), container);
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -96,7 +117,7 @@ impl ContainerManager for VirtContainerManager {
     async fn create_container(&self, config: ContainerConfig, spec: oci::Spec) -> Result<PID> {
         let vmm_master_tid = self.get_vmm_master_tid().await?;
 
-        let mut container = Container::new(
+        let container = Container::new(
             vmm_master_tid,
             config.clone(),
             spec.clone(),
@@ -132,21 +153,7 @@ impl ContainerManager for VirtContainerManager {
             }
         }
 
-        self.oom_notifier
-            .track(&config.container_id, &config.bundle, &spec)
-            .await;
-
-        let mut containers = self.containers.write().await;
-        if let Err(e) = container.create(spec).await {
-            if let Err(inner_e) = container.cleanup().await {
-                warn!(sl!(), "failed to cleanup container {:?}", inner_e);
-            }
-            self.oom_notifier.forget(&config.container_id).await;
-
-            return Err(e);
-        }
-
-        containers.insert(container.container_id.to_string(), container);
+        self.create_and_register(container, spec).await?;
         Ok(PID {
             pid: vmm_master_tid,
         })
@@ -500,5 +507,74 @@ impl ContainerManager for VirtContainerManager {
     async fn is_sandbox_container(&self, process: &ContainerProcess) -> bool {
         process.process_type == ProcessType::Container
             && process.container_id.container_id == self.sid
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::container::tests::new_test_container;
+    use super::*;
+    use tokio::time::{timeout, Duration};
+
+    #[tokio::test]
+    async fn stats_remains_responsive_while_creation_is_blocked() {
+        let (existing, manager) = new_test_container("existing").await;
+        manager
+            .containers
+            .write()
+            .await
+            .insert("existing".into(), existing);
+        let (creating, creating_manager) = new_test_container("creating").await;
+        let device_manager = creating_manager.resource_manager.get_device_manager().await;
+        let hotplug_guard = device_manager.write().await;
+        let mut spec = oci::Spec::default();
+        spec.set_root(Some(oci::Root::default()));
+        spec.set_mounts(Some(vec![]));
+        spec.set_annotations(Some(HashMap::from([(
+            "io.kubernetes.cri.image-name".into(),
+            "test-image".into(),
+        )])));
+        let mut device = oci::LinuxDevice::default();
+        device.set_typ(oci::LinuxDeviceType::B);
+        device.set_path("/dev/test-block".into());
+        let mut linux = oci::Linux::default();
+        linux.set_devices(Some(vec![device]));
+        spec.set_linux(Some(linux));
+        let mut create = Box::pin(manager.create_and_register(creating, spec));
+        tokio::select! {
+            result = &mut create => panic!("creation was not blocked: {:?}", result),
+            _ = tokio::task::yield_now() => {}
+        }
+        assert!(
+            manager.create_lock.try_lock().is_err(),
+            "create worker did not reach device preparation"
+        );
+
+        let err = timeout(
+            Duration::from_secs(1),
+            manager.stats_container(&ContainerID::new("existing").unwrap()),
+        )
+        .await
+        .expect("stats blocked behind creation")
+        .unwrap_err();
+        // The disconnected agent fails immediately, proving stats reached it.
+        assert!(format!("{err:#}").contains("agent stats container"));
+
+        let err = timeout(
+            Duration::from_secs(1),
+            manager.stats_container(&ContainerID::new("creating").unwrap()),
+        )
+        .await
+        .expect("stats for an unpublished container blocked")
+        .unwrap_err();
+        assert!(matches!(
+            err.downcast_ref::<Error>(),
+            Some(Error::ContainerNotFound(_))
+        ));
+
+        drop(hotplug_guard);
+        let err = create.await.unwrap_err();
+        assert!(format!("{err:#}").contains("do handle device"));
+        assert!(!manager.containers.read().await.contains_key("creating"));
     }
 }

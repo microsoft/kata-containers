@@ -36,6 +36,7 @@ use super::{
     ContainerInner,
 };
 use crate::container_manager::{is_termination_signal, logger_with_process};
+use crate::oom::CrioOomNotifier;
 
 pub struct Exec {
     pub(crate) process: Process,
@@ -52,6 +53,67 @@ pub struct Container {
     resource_manager: Arc<ResourceManager>,
     logger: slog::Logger,
     pub(crate) passfd_listener_addr: Option<(String, u32)>,
+}
+
+// Keep ownership until the manager publishes the container. Dropping a request
+// must not discard the resources acquired by its create worker.
+pub(super) struct PendingContainer {
+    container: Option<Container>,
+    oom_notifier: Arc<CrioOomNotifier>,
+}
+
+impl PendingContainer {
+    pub(super) fn new(container: Container, oom_notifier: Arc<CrioOomNotifier>) -> Self {
+        Self {
+            container: Some(container),
+            oom_notifier,
+        }
+    }
+
+    pub(super) async fn create(mut self, spec: oci::Spec) -> Result<Self> {
+        let container = self.container.as_ref().expect("pending container");
+        self.oom_notifier
+            .track(
+                &container.config.container_id,
+                &container.config.bundle,
+                &spec,
+            )
+            .await;
+        if let Err(err) = container.create(spec).await {
+            self.cleanup().await;
+            return Err(err);
+        }
+        Ok(self)
+    }
+
+    pub(super) fn into_container(mut self) -> Container {
+        self.container.take().expect("pending container")
+    }
+
+    async fn cleanup(&mut self) {
+        if let Some(mut container) = self.container.take() {
+            if let Err(err) = container.cleanup().await {
+                warn!(
+                    container.logger,
+                    "failed to clean up unfinished container: {:?}", err
+                );
+            }
+            self.oom_notifier
+                .forget(&container.config.container_id)
+                .await;
+        }
+    }
+}
+
+impl Drop for PendingContainer {
+    fn drop(&mut self) {
+        if let Some(container) = self.container.take() {
+            let mut pending = Self::new(container, self.oom_notifier.clone());
+            tokio::spawn(async move {
+                pending.cleanup().await;
+            });
+        }
+    }
 }
 
 fn process_uses_passfd_io(inner: &ContainerInner, process: &ContainerProcess) -> Result<bool> {
@@ -943,12 +1005,179 @@ fn filter_vfio_devices(linux: &mut oci::Linux, vfio_mode: &str) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::amend_spec;
     use super::is_pid_namespace_enabled;
     use super::*;
     use oci_spec::runtime::LinuxNamespaceType;
     use oci_spec::runtime::{LinuxBuilder, LinuxNamespaceBuilder};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::{oneshot, Notify};
+    use tokio::time::{timeout, Duration};
+
+    use super::super::VirtContainerManager;
+    use hypervisor::{device::device_manager::DeviceManager, qemu::Qemu, Hypervisor};
+    use persist::sandbox_persist::Persist;
+    use resource::{
+        cgroups::cgroup_persist::CgroupState, manager::ManagerArgs,
+        resource_persist::ResourceState, volume::Volume,
+    };
+
+    pub(crate) async fn new_test_container(id: &str) -> (Container, VirtContainerManager) {
+        let agent: Arc<dyn Agent> = Arc::new(agent::kata::KataAgent::new(Default::default()));
+        let hypervisor: Arc<dyn Hypervisor> = Arc::new(Qemu::new());
+        // Restoring only constructs cgroup handles; it does not move the test
+        // process into a cgroup or require a running VM.
+        let resource_manager = Arc::new(
+            ResourceManager::restore(
+                ManagerArgs {
+                    sid: "test-sandbox".into(),
+                    agent: agent.clone(),
+                    hypervisor: hypervisor.clone(),
+                    config: Default::default(),
+                },
+                ResourceState {
+                    cgroup_state: Some(CgroupState {
+                        path: Some("kata-pending-container-test".into()),
+                        overhead_path: Some("kata-pending-container-test-overhead".into()),
+                        sandbox_cgroup_only: true,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap(),
+        );
+        let container = Container::new(
+            1,
+            ContainerConfig {
+                container_id: id.into(),
+                bundle: String::new(),
+                rootfs_mounts: kata_types::mount::adjust_rootfs_mounts().unwrap(),
+                terminal: false,
+                options: None,
+                stdin: None,
+                stdout: None,
+                stderr: None,
+            },
+            oci::Spec::default(),
+            agent.clone(),
+            resource_manager.clone(),
+            None,
+        )
+        .await
+        .unwrap();
+        let manager = VirtContainerManager::new(
+            "test-sandbox",
+            1,
+            agent,
+            hypervisor,
+            resource_manager,
+            Arc::new(CrioOomNotifier::default()),
+        );
+        (container, manager)
+    }
+
+    #[derive(Default)]
+    struct AttachedVolume {
+        cleanups: AtomicUsize,
+        cleaned: Notify,
+    }
+
+    #[async_trait::async_trait]
+    impl Volume for AttachedVolume {
+        fn get_volume_mount(&self) -> Result<Vec<oci::Mount>> {
+            Ok(vec![])
+        }
+
+        fn get_storage(&self) -> Result<Vec<agent::Storage>> {
+            Ok(vec![])
+        }
+
+        fn get_device_id(&self) -> Result<Option<String>> {
+            Ok(None)
+        }
+
+        async fn cleanup(&self, _: &RwLock<DeviceManager>) -> Result<()> {
+            self.cleanups.fetch_add(1, Ordering::SeqCst);
+            self.cleaned.notify_one();
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn abandoned_create_worker_finishes_before_cleanup() {
+        let (container, _) = new_test_container("creating").await;
+        let first = Arc::new(AttachedVolume::default());
+        let second = Arc::new(AttachedVolume::default());
+        let pending = PendingContainer::new(container, Arc::new(CrioOomNotifier::default()));
+        let (started_tx, started_rx) = oneshot::channel();
+        let (finish_tx, finish_rx) = oneshot::channel();
+        let first_attached = first.clone();
+        let second_attached = second.clone();
+        let worker = tokio::spawn(async move {
+            {
+                let mut inner = pending.container.as_ref().unwrap().inner.write().await;
+                inner.volumes.push(first_attached);
+                started_tx.send(()).unwrap();
+                // Model a second attach sleeping while create owns the inner lock.
+                finish_rx.await.unwrap();
+                inner.volumes.push(second_attached);
+            }
+            pending
+        });
+        started_rx.await.unwrap();
+        drop(worker);
+        assert_eq!(first.cleanups.load(Ordering::SeqCst), 0);
+        finish_tx.send(()).unwrap();
+
+        timeout(Duration::from_secs(1), async {
+            first.cleaned.notified().await;
+            second.cleaned.notified().await;
+        })
+        .await
+        .expect("abandoned creation did not clean up both attachments");
+        assert_eq!(first.cleanups.load(Ordering::SeqCst), 1);
+        assert_eq!(second.cleanups.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn publishing_container_disarms_pending_cleanup() {
+        let (container, _) = new_test_container("created").await;
+        let volume = Arc::new(AttachedVolume::default());
+        container.inner.write().await.volumes.push(volume.clone());
+        let pending = PendingContainer::new(container, Arc::new(CrioOomNotifier::default()));
+
+        let mut container = pending.into_container();
+        tokio::task::yield_now().await;
+        assert_eq!(volume.cleanups.load(Ordering::SeqCst), 0);
+        container.cleanup().await.unwrap();
+        assert_eq!(volume.cleanups.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn failed_create_cleans_attachments_and_forgets_oom_bundle() {
+        let (mut container, _) = new_test_container("failed").await;
+        let bundle = tempfile::tempdir().unwrap();
+        container.config.bundle = bundle.path().display().to_string();
+        let volume = Arc::new(AttachedVolume::default());
+        container.inner.write().await.volumes.push(volume.clone());
+        let notifier = Arc::new(CrioOomNotifier::default());
+        let pending = PendingContainer::new(container, notifier.clone());
+        let mut spec = oci::Spec::default();
+        spec.set_root(None);
+        spec.set_annotations(Some(HashMap::from([(
+            kata_types::annotations::crio::CONTAINER_TYPE_LABEL_KEY.into(),
+            kata_types::annotations::crio::CONTAINER.into(),
+        )])));
+
+        let err = pending.create(spec).await.err().expect("create succeeded");
+        assert!(format!("{err:#}").contains("spec miss root field"));
+        assert_eq!(volume.cleanups.load(Ordering::SeqCst), 1);
+        notifier.notify("failed").await;
+        assert!(!bundle.path().join("oom").exists());
+    }
 
     #[test]
     fn test_amend_spec_disable_guest_seccomp() {
