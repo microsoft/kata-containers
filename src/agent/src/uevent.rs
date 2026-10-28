@@ -6,7 +6,6 @@
 use crate::device::online_device;
 use crate::linux_abi::*;
 use crate::sandbox::Sandbox;
-use crate::AGENT_CONFIG;
 use slog::Logger;
 
 use anyhow::{anyhow, Result};
@@ -151,17 +150,14 @@ pub async fn wait_for_uevent(
 
     info!(sl(), "{}: waiting on channel", logprefix);
 
-    let hotplug_timeout = AGENT_CONFIG.hotplug_timeout;
-
-    let uev = match tokio::time::timeout(hotplug_timeout, rx).await {
-        Ok(v) => v?,
+    let uev = match rx.await {
+        Ok(v) => v,
         Err(_) => {
             let mut sb = sandbox.lock().await;
             let matcher = sb.uevent_watchers[idx].take().unwrap().0;
 
             return Err(anyhow!(
-                "Timeout after {:?} waiting for uevent {:?}",
-                hotplug_timeout,
+                "Waiting for uevent {:?} failed",
                 matcher
             ));
         }
