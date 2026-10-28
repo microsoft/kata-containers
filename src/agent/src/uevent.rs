@@ -17,6 +17,7 @@ use std::sync::Arc;
 use tokio::select;
 use tokio::sync::watch::Receiver;
 use tokio::sync::Mutex;
+use tokio::time::{sleep, Duration};
 use tracing::instrument;
 
 // Convenience function to obtain the scope logger.
@@ -136,6 +137,10 @@ pub async fn wait_for_uevent(
     let idx = sb.uevent_watchers.len();
     sb.uevent_watchers.push(Some((Box::new(matcher), tx)));
     drop(sb); // unlock
+
+    info!(sl(), "{}: sleeping", logprefix);
+    sleep(Duration::from_mins(5)).await;
+    info!(sl(), "{}: sleep finished", logprefix);
 
     info!(sl(), "{}: waiting on channel", logprefix);
 
