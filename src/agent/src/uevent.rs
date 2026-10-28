@@ -79,6 +79,16 @@ impl Uevent {
             return;
         }
 
+        // Test-only fault injection: delay delivery, not the waiting create handler.
+        if self.subsystem == "block" && self.devname == "vdb" {
+            info!(
+                *logger,
+                "fault injection: delaying vdb add event for 5 seconds"
+            );
+            sleep(Duration::from_secs(5)).await;
+            info!(*logger, "fault injection: delivering delayed vdb add event");
+        }
+
         let mut sb = sandbox.lock().await;
 
         // Record the event by sysfs path
@@ -137,10 +147,6 @@ pub async fn wait_for_uevent(
     let idx = sb.uevent_watchers.len();
     sb.uevent_watchers.push(Some((Box::new(matcher), tx)));
     drop(sb); // unlock
-
-    info!(sl(), "{}: sleeping", logprefix);
-    sleep(Duration::from_mins(5)).await;
-    info!(sl(), "{}: sleep finished", logprefix);
 
     info!(sl(), "{}: waiting on channel", logprefix);
 
@@ -262,6 +268,51 @@ mod tests {
         fn is_match(&self, _: &Uevent) -> bool {
             true
         }
+    }
+
+    #[tokio::test]
+    async fn test_delayed_vdb_event() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let sandbox = Arc::new(Mutex::new(Sandbox::new(&logger).unwrap()));
+        let event = Uevent {
+            action: U_EVENT_ACTION_ADD.to_string(),
+            subsystem: "block".to_string(),
+            devpath: "/devices/pci0000:00/0000:00:06.0/virtio5/block/vdb".to_string(),
+            devname: "vdb".to_string(),
+            ..Default::default()
+        };
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        sandbox
+            .lock()
+            .await
+            .uevent_watchers
+            .push(Some((Box::new(AlwaysMatch()), tx)));
+
+        let task_sandbox = sandbox.clone();
+        let task_event = event.clone();
+        let task = tokio::spawn(async move {
+            task_event.process(&logger, &task_sandbox).await;
+        });
+
+        assert!(tokio::time::timeout(Duration::from_secs(3), &mut rx)
+            .await
+            .is_err());
+        {
+            let sb = sandbox
+                .try_lock()
+                .expect("delay must not hold sandbox lock");
+            assert!(!sb.uevent_map.contains_key(&event.devpath));
+            assert!(sb.uevent_watchers[0].is_some());
+        }
+        let received = tokio::time::timeout(Duration::from_secs(7), rx)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(received, event);
+        task.await.unwrap();
+        let sb = sandbox.lock().await;
+        assert_eq!(sb.uevent_map.get(&event.devpath), Some(&event));
+        assert!(sb.uevent_watchers[0].is_none());
     }
 
     #[tokio::test]
