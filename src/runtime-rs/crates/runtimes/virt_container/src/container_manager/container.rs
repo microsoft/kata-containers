@@ -544,9 +544,7 @@ impl Container {
         mut oci_process: OCIProcess,
     ) -> Result<()> {
         let toml_config = self.resource_manager.config().await;
-        if get_disable_guest_selinux(&toml_config) {
-            oci_process.set_selinux_label(None);
-        }
+        amend_process(&mut oci_process, get_disable_guest_selinux(&toml_config));
 
         let process = Process::new(
             container_process,
@@ -833,6 +831,40 @@ impl Container {
     }
 }
 
+fn amend_process(process: &mut OCIProcess, disable_guest_selinux: bool) {
+    if disable_guest_selinux {
+        process.set_selinux_label(None);
+    }
+
+    // Missing exec capabilities inherit the container's already restricted sets.
+    if let Some(mut capabilities) = process.capabilities().clone() {
+        let filter = |set: &Option<oci::Capabilities>| -> Option<oci::Capabilities> {
+            set.as_ref().map(|set| {
+                set.iter()
+                    .copied()
+                    .filter(|capability| {
+                        !matches!(
+                            capability,
+                            oci::Capability::Mknod
+                                | oci::Capability::SysAdmin
+                                | oci::Capability::SysRawio
+                        )
+                    })
+                    .collect()
+            })
+        };
+
+        // Guest devices are shared across the sandbox. Block node creation,
+        // devtmpfs mounts, and raw hardware access even for privileged workloads.
+        capabilities.set_bounding(filter(capabilities.bounding()));
+        capabilities.set_effective(filter(capabilities.effective()));
+        capabilities.set_permitted(filter(capabilities.permitted()));
+        capabilities.set_inheritable(filter(capabilities.inheritable()));
+        capabilities.set_ambient(filter(capabilities.ambient()));
+        process.set_capabilities(Some(capabilities));
+    }
+}
+
 fn amend_spec(
     spec: &mut oci::Spec,
     disable_guest_seccomp: bool,
@@ -875,10 +907,11 @@ fn amend_spec(
         linux.set_namespaces(if ns.is_empty() { None } else { Some(ns) });
     }
 
+    if let Some(process) = spec.process_mut() {
+        amend_process(process, disable_guest_selinux);
+    }
+
     if disable_guest_selinux {
-        if let Some(ref mut process) = spec.process_mut() {
-            process.set_selinux_label(None);
-        }
         if let Some(ref mut linux) = spec.linux_mut() {
             linux.set_mount_label(None);
         }
@@ -949,6 +982,100 @@ mod tests {
     use super::*;
     use oci_spec::runtime::LinuxNamespaceType;
     use oci_spec::runtime::{LinuxBuilder, LinuxNamespaceBuilder};
+
+    #[test]
+    fn test_amend_spec_restricts_guest_device_capabilities() {
+        let requested: oci::Capabilities = [
+            oci::Capability::Mknod,
+            oci::Capability::SysAdmin,
+            oci::Capability::SysRawio,
+            oci::Capability::Chown,
+            oci::Capability::NetAdmin,
+        ]
+        .iter()
+        .copied()
+        .collect();
+        let capabilities = oci::LinuxCapabilitiesBuilder::default()
+            .bounding(requested.clone())
+            .effective(requested.clone())
+            .permitted(requested.clone())
+            .inheritable(requested.clone())
+            .ambient(requested)
+            .build()
+            .unwrap();
+        let process = oci::ProcessBuilder::default()
+            .capabilities(capabilities)
+            .build()
+            .unwrap();
+        let mut spec = oci::Spec::default();
+        spec.set_process(Some(process));
+
+        amend_spec(&mut spec, false, false).unwrap();
+
+        let caps = spec
+            .process()
+            .as_ref()
+            .unwrap()
+            .capabilities()
+            .as_ref()
+            .unwrap();
+        let expected: oci::Capabilities = [oci::Capability::Chown, oci::Capability::NetAdmin]
+            .iter()
+            .copied()
+            .collect();
+        for set in [
+            caps.bounding(),
+            caps.effective(),
+            caps.permitted(),
+            caps.inheritable(),
+            caps.ambient(),
+        ] {
+            assert_eq!(set.as_ref(), Some(&expected));
+        }
+
+        let restricted = spec.clone();
+        amend_spec(&mut spec, false, false).unwrap();
+        assert_eq!(spec, restricted);
+    }
+
+    #[test]
+    fn test_amend_process_restricts_explicit_exec_capabilities() {
+        let mut process = OCIProcess::default();
+        process.set_capabilities(Some(
+            serde_json::from_value(serde_json::json!({
+                "bounding": ["CAP_MKNOD", "CAP_SYS_ADMIN", "CAP_SYS_RAWIO"],
+                "effective": ["CAP_MKNOD"],
+                "permitted": ["CAP_MKNOD", "CAP_CHOWN"],
+                "ambient": []
+            }))
+            .unwrap(),
+        ));
+
+        amend_process(&mut process, false);
+
+        let caps = process.capabilities().as_ref().unwrap();
+        assert!(caps.bounding().as_ref().unwrap().is_empty());
+        assert!(caps.effective().as_ref().unwrap().is_empty());
+        assert_eq!(
+            caps.permitted().as_ref().unwrap(),
+            &[oci::Capability::Chown].iter().copied().collect()
+        );
+        assert!(caps.inheritable().is_none());
+        assert!(caps.ambient().as_ref().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_amend_process_preserves_missing_and_empty_capabilities() {
+        for value in [serde_json::Value::Null, serde_json::json!({})] {
+            let mut process = OCIProcess::default();
+            process.set_capabilities(serde_json::from_value(value).unwrap());
+            let original = process.capabilities().clone();
+
+            amend_process(&mut process, false);
+
+            assert_eq!(process.capabilities(), &original);
+        }
+    }
 
     #[test]
     fn test_amend_spec_disable_guest_seccomp() {

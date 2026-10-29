@@ -1541,7 +1541,7 @@ match_caps(p_caps, i_caps) if {
 
     norm_p_caps := { strip_cap_prefix(c) | c := p_caps[_] }
     norm_i_caps := { strip_cap_prefix(c) | c := i_caps[_] }
-    norm_p_caps == norm_i_caps
+    match_runtime_caps(norm_p_caps, norm_i_caps)
 
     print("match_caps 1: true")
 }
@@ -1559,7 +1559,7 @@ match_caps(p_caps, i_caps) if {
     print("match_caps 2: norm_defaults =", norm_defaults)
     print("match_caps 2: norm_input    =", norm_input)
 
-    norm_defaults == norm_input
+    match_runtime_caps(norm_defaults, norm_input)
 
     print("match_caps 2: true")
 }
@@ -1577,9 +1577,18 @@ match_caps(p_caps, i_caps) if {
     print("match_caps 3: norm_defaults =", norm_defaults)
     print("match_caps 3: norm_input    =", norm_input)
 
-    norm_defaults == norm_input
+    match_runtime_caps(norm_defaults, norm_input)
 
     print("match_caps 3: true")
+}
+
+# runtime-rs removes these capabilities even from privileged workloads.
+# Keep accepting unchanged sets for runtimes that do not apply this restriction.
+match_runtime_caps(p_caps, i_caps) if {
+    p_caps == i_caps
+}
+match_runtime_caps(p_caps, i_caps) if {
+    i_caps == p_caps - {"MKNOD", "SYS_ADMIN", "SYS_RAWIO"}
 }
 
 ######################################################################

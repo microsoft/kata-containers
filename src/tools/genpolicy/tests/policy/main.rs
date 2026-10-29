@@ -266,6 +266,94 @@ mod tests {
         genpolicy::settings::Settings::new(workdir.to_str().unwrap())
     }
 
+    #[tokio::test]
+    async fn test_runtime_device_capability_filtering() {
+        let defaults = vec!["CAP_CHOWN", "CAP_MKNOD"];
+        let privileged = vec![
+            "CAP_CHOWN",
+            "CAP_NET_ADMIN",
+            "CAP_MKNOD",
+            "CAP_SYS_ADMIN",
+            "CAP_SYS_RAWIO",
+        ];
+        let policy_data = serde_json::json!({
+            "common": {
+                "default_caps": defaults,
+                "privileged_caps": privileged
+            }
+        });
+        let rules = format!(
+            "{}\npolicy_data := {}\ndefault CapabilityCheck := false\n\
+             CapabilityCheck := allow_caps(input.policy, input.actual)\n",
+            include_str!("../../rules.rego"),
+            policy_data
+        );
+        let mut policy = AgentPolicy::new();
+        policy.set_policy(&rules).await.unwrap();
+
+        for (requested, policy_caps) in [
+            (defaults.clone(), defaults.clone()),
+            (privileged.clone(), privileged.clone()),
+            (defaults, vec!["$(default_caps)"]),
+            (privileged, vec!["$(privileged_caps)"]),
+            (vec!["CAP_CHOWN"], vec!["CAP_CHOWN"]),
+        ] {
+            let restricted: Vec<_> = requested
+                .iter()
+                .copied()
+                .filter(|cap| !matches!(*cap, "CAP_MKNOD" | "CAP_SYS_ADMIN" | "CAP_SYS_RAWIO"))
+                .collect();
+            let mut missing_unrelated = restricted.clone();
+            missing_unrelated.retain(|cap| *cap != "CAP_CHOWN");
+            let mut added_unrelated = restricted.clone();
+            added_unrelated.push("CAP_SYS_MODULE");
+            let mut added_device_cap = requested.clone();
+            added_device_cap.push("CAP_SYS_RAWIO");
+
+            for (actual, allowed) in [
+                (requested.clone(), true),
+                (restricted, true),
+                (missing_unrelated, false),
+                (added_unrelated, false),
+                (added_device_cap, requested.contains(&"CAP_SYS_RAWIO")),
+            ] {
+                for unprefixed in [false, true] {
+                    let actual: Vec<_> = actual
+                        .iter()
+                        .map(|cap| {
+                            if unprefixed {
+                                cap.strip_prefix("CAP_").unwrap()
+                            } else {
+                                cap
+                            }
+                        })
+                        .collect();
+                    let mut expected_sets = serde_json::Map::new();
+                    let mut actual_sets = serde_json::Map::new();
+                    for set in [
+                        "Bounding",
+                        "Effective",
+                        "Permitted",
+                        "Inheritable",
+                        "Ambient",
+                    ] {
+                        expected_sets.insert(set.into(), serde_json::json!(policy_caps));
+                        actual_sets.insert(set.into(), serde_json::json!(actual));
+                    }
+                    let input = serde_json::json!({
+                        "policy": expected_sets,
+                        "actual": actual_sets
+                    });
+                    let (result, prints) = policy
+                        .allow_request("CapabilityCheck", &input.to_string())
+                        .await
+                        .unwrap();
+                    assert_eq!(result, allowed, "input: {input}\n{prints}");
+                }
+            }
+        }
+    }
+
     fn prepare_workdir(
         test_case_dir: &str,
         files_to_copy: &[&str],

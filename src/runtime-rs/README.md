@@ -176,4 +176,27 @@ For development, use [`shim-ctl`](crates/shim-ctl/README.md) to test shim withou
 
 ## Limitations
 
+### Guest device capabilities
+
+The VM-backed runtime always removes `CAP_MKNOD`, `CAP_SYS_ADMIN`, and
+`CAP_SYS_RAWIO` from all five OCI capability sets (bounding, effective,
+permitted, inheritable, and ambient). This applies to every hypervisor,
+including privileged containers and explicitly requested capabilities.
+Exec processes inherit the restricted container capabilities; explicit exec
+capability sets are also filtered.
+
+These restrictions prevent workloads from creating guest device nodes,
+mounting devtmpfs to expose guest devices, or using raw hardware access.
+Workloads requiring these capabilities, such as nested container engines,
+are not supported by this policy. There is no configuration opt-out.
+
+This is defense in depth, not a device-access allowlist: dropping capabilities
+does not deny ordinary reads or writes through existing device nodes or open
+file descriptors. Guest devices shared with workloads still require appropriate
+access controls and read-only enforcement.
+
+When using generated agent policies, regenerate them with the updated
+`genpolicy` rules to allow the runtime's capability removals. Previously
+generated policies may reject the restricted sets.
+
 See [Limitations](../../docs/Limitations.md) for details.
