@@ -23,6 +23,7 @@ type VmConfig struct {
 	Disks           *[]DiskConfig           `json:"disks,omitempty"`
 	Net             *[]NetConfig            `json:"net,omitempty"`
 	Rng             *RngConfig              `json:"rng,omitempty"`
+	Rtc             *RtcConfig              `json:"rtc,omitempty"`
 	Balloon         *BalloonConfig          `json:"balloon,omitempty"`
 	Fs              *[]FsConfig             `json:"fs,omitempty"`
 	Pmem            *[]PmemConfig           `json:"pmem,omitempty"`
@@ -291,6 +292,38 @@ func (o *VmConfig) HasRng() bool {
 // SetRng gets a reference to the given RngConfig and assigns it to the Rng field.
 func (o *VmConfig) SetRng(v RngConfig) {
 	o.Rng = &v
+}
+
+// GetRtc returns the Rtc field value if set, zero value otherwise.
+func (o *VmConfig) GetRtc() RtcConfig {
+	if o == nil || o.Rtc == nil {
+		var ret RtcConfig
+		return ret
+	}
+	return *o.Rtc
+}
+
+// GetRtcOk returns a tuple with the Rtc field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *VmConfig) GetRtcOk() (*RtcConfig, bool) {
+	if o == nil || o.Rtc == nil {
+		return nil, false
+	}
+	return o.Rtc, true
+}
+
+// HasRtc returns a boolean if a field has been set.
+func (o *VmConfig) HasRtc() bool {
+	if o != nil && o.Rtc != nil {
+		return true
+	}
+
+	return false
+}
+
+// SetRtc gets a reference to the given RtcConfig and assigns it to the Rtc field.
+func (o *VmConfig) SetRtc(v RtcConfig) {
+	o.Rtc = &v
 }
 
 // GetBalloon returns the Balloon field value if set, zero value otherwise.
@@ -891,6 +924,9 @@ func (o VmConfig) MarshalJSON() ([]byte, error) {
 	}
 	if o.Rng != nil {
 		toSerialize["rng"] = o.Rng
+	}
+	if o.Rtc != nil {
+		toSerialize["rtc"] = o.Rtc
 	}
 	if o.Balloon != nil {
 		toSerialize["balloon"] = o.Balloon

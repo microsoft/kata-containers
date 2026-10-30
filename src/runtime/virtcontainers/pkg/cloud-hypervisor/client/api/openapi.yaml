@@ -720,6 +720,11 @@ components:
             id: id
             mask: 255.255.255.0
           pvpanic: false
+          rtc:
+            pci_segment: 6
+            iommu: false
+            id: id
+            pci_device_id: 6
           console:
             mode: "Off"
             file: file
@@ -1165,6 +1170,11 @@ components:
           id: id
           mask: 255.255.255.0
         pvpanic: false
+        rtc:
+          pci_segment: 6
+          iommu: false
+          id: id
+          pci_device_id: 6
         console:
           mode: "Off"
           file: file
@@ -1296,6 +1306,8 @@ components:
           type: array
         rng:
           $ref: '#/components/schemas/RngConfig'
+        rtc:
+          $ref: '#/components/schemas/RtcConfig'
         balloon:
           $ref: '#/components/schemas/BalloonConfig'
         fs:
@@ -1894,6 +1906,26 @@ components:
           type: boolean
       required:
       - src
+      type: object
+    RtcConfig:
+      example:
+        pci_segment: 6
+        iommu: false
+        id: id
+        pci_device_id: 6
+      properties:
+        iommu:
+          default: false
+          type: boolean
+        id:
+          type: string
+        pci_segment:
+          default: 0
+          format: int16
+          type: integer
+        pci_device_id:
+          format: int8
+          type: integer
       type: object
     BalloonConfig:
       example:

@@ -11,6 +11,7 @@ Name | Type | Description | Notes
 **Disks** | Pointer to [**[]DiskConfig**](DiskConfig.md) |  | [optional] 
 **Net** | Pointer to [**[]NetConfig**](NetConfig.md) |  | [optional] 
 **Rng** | Pointer to [**RngConfig**](RngConfig.md) |  | [optional] 
+**Rtc** | Pointer to [**RtcConfig**](RtcConfig.md) |  | [optional]
 **Balloon** | Pointer to [**BalloonConfig**](BalloonConfig.md) |  | [optional] 
 **Fs** | Pointer to [**[]FsConfig**](FsConfig.md) |  | [optional] 
 **Pmem** | Pointer to [**[]PmemConfig**](PmemConfig.md) |  | [optional] 
@@ -218,6 +219,31 @@ SetRng sets Rng field to given value.
 `func (o *VmConfig) HasRng() bool`
 
 HasRng returns a boolean if a field has been set.
+
+### GetRtc
+
+`func (o *VmConfig) GetRtc() RtcConfig`
+
+GetRtc returns the Rtc field if non-nil, zero value otherwise.
+
+### GetRtcOk
+
+`func (o *VmConfig) GetRtcOk() (*RtcConfig, bool)`
+
+GetRtcOk returns a tuple with the Rtc field if it's non-nil, zero value otherwise
+and a boolean to check if the value has been set.
+
+### SetRtc
+
+`func (o *VmConfig) SetRtc(v RtcConfig)`
+
+SetRtc sets Rtc field to given value.
+
+### HasRtc
+
+`func (o *VmConfig) HasRtc() bool`
+
+HasRtc returns a boolean if a field has been set.
 
 ### GetBalloon
 

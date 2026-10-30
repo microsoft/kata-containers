@@ -710,6 +710,9 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	clh.vmconfig.Rng = chclient.NewRngConfig(clh.config.EntropySource)
 	clh.vmconfig.Rng.SetIommu(clh.config.IOMMU)
 
+	clh.vmconfig.Rtc = chclient.NewRtcConfig()
+	clh.vmconfig.Rtc.SetIommu(clh.config.IOMMU)
+
 	// set the initial root/boot disk of hypervisor
 	assetPath, assetType, err := clh.config.ImageOrInitrdAssetPath()
 	if err != nil {
