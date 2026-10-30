@@ -9,6 +9,7 @@ package virtcontainers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -515,6 +516,10 @@ func TestClhCreateVM(t *testing.T) {
 	assert.NoError(err)
 	config5.SharedFS = config.VirtioFSNydus
 
+	config6, err := newClhConfig()
+	assert.NoError(err)
+	config6.IOMMU = true
+
 	type testData struct {
 		config      HypervisorConfig
 		expectError bool
@@ -528,6 +533,7 @@ func TestClhCreateVM(t *testing.T) {
 		{config3, true, false},
 		{config4, false, true},
 		{config5, false, true},
+		{config6, false, true},
 	}
 
 	for i, d := range data {
@@ -544,6 +550,14 @@ func TestClhCreateVM(t *testing.T) {
 
 		if d.configMatch {
 			assert.Exactly(d.config, clh.config, msg)
+		}
+
+		vmConfigJSON, err := json.Marshal(clh.vmconfig)
+		assert.NoError(err, msg)
+		var vmConfig map[string]json.RawMessage
+		assert.NoError(json.Unmarshal(vmConfigJSON, &vmConfig), msg)
+		if assert.Contains(vmConfig, "rtc", msg) {
+			assert.JSONEq(fmt.Sprintf(`{"iommu":%t,"pci_segment":0}`, d.config.IOMMU), string(vmConfig["rtc"]), msg)
 		}
 	}
 }

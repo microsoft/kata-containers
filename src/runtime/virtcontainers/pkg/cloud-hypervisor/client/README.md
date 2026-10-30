@@ -139,6 +139,7 @@ Class | Method | HTTP request | Description
  - [ReceiveMigrationData](docs/ReceiveMigrationData.md)
  - [RestoreConfig](docs/RestoreConfig.md)
  - [RngConfig](docs/RngConfig.md)
+ - [RtcConfig](docs/RtcConfig.md)
  - [SendMigrationData](docs/SendMigrationData.md)
  - [TokenBucket](docs/TokenBucket.md)
  - [TpmConfig](docs/TpmConfig.md)
