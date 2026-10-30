@@ -9,6 +9,7 @@ package virtcontainers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -526,6 +527,10 @@ func TestClhCreateVM(t *testing.T) {
 	assert.NoError(err)
 	config6.DisableNestedVirtualization = true
 
+	config7, err := newClhConfig()
+	assert.NoError(err)
+	config7.IOMMU = true
+
 	type testData struct {
 		config      HypervisorConfig
 		expectError bool
@@ -541,6 +546,7 @@ func TestClhCreateVM(t *testing.T) {
 		{config4, false, true, true},
 		{config5, false, true, true},
 		{config6, false, true, false},
+		{config7, false, true, true},
 	}
 
 	for i, d := range data {
@@ -559,6 +565,14 @@ func TestClhCreateVM(t *testing.T) {
 
 		if d.configMatch {
 			assert.Exactly(d.config, clh.config, msg)
+		}
+
+		vmConfigJSON, err := json.Marshal(clh.vmconfig)
+		assert.NoError(err, msg)
+		var vmConfig map[string]json.RawMessage
+		assert.NoError(json.Unmarshal(vmConfigJSON, &vmConfig), msg)
+		if assert.Contains(vmConfig, "rtc", msg) {
+			assert.JSONEq(fmt.Sprintf(`{"iommu":%q}`, clhIommuType(d.config.IOMMU)), string(vmConfig["rtc"]), msg)
 		}
 	}
 }
