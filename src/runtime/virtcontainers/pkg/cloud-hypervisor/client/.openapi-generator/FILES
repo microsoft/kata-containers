@@ -34,6 +34,7 @@ docs/RateLimiterConfig.md
 docs/ReceiveMigrationData.md
 docs/RestoreConfig.md
 docs/RngConfig.md
+docs/RtcConfig.md
 docs/SendMigrationData.md
 docs/TokenBucket.md
 docs/TpmConfig.md
@@ -80,6 +81,7 @@ model_rate_limiter_config.go
 model_receive_migration_data.go
 model_restore_config.go
 model_rng_config.go
+model_rtc_config.go
 model_send_migration_data.go
 model_token_bucket.go
 model_tpm_config.go
