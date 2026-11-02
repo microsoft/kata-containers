@@ -482,7 +482,19 @@ pub fn create_dir_all_with_inherit_owner<P: AsRef<Path>>(path: P, perm: u32) -> 
                 gid = Gid::from_raw(s.st_gid);
             }
             Err(nix::Error::ENOENT) => {
-                std::fs::create_dir(current)?;
+                if let Err(e) = std::fs::create_dir(current) {
+                    if e.kind() != io::ErrorKind::AlreadyExists {
+                        return Err(e);
+                    } else if !current.is_dir() {
+                        return Err(io::Error::new(
+                            io::ErrorKind::NotADirectory,
+                            format!("{} exists but is not a directory", current.display()),
+                        ));
+                    }
+                }
+
+                // All parallel callers must use the same perm, uid, and gid values - otherwise they
+                // could be running in parallel, with unpredictable set_permissions and/or chown results.
                 set_permissions(current, Permissions::from_mode(perm))?;
                 chown(current, Some(uid), Some(gid))?;
             }
