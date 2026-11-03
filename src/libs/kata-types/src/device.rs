@@ -35,6 +35,8 @@ pub const DRIVER_LOCAL_TYPE: &str = "local";
 pub const DRIVER_OVERLAYFS_TYPE: &str = "overlayfs";
 /// DRIVER_VIRTIOFS_TYPE is the driver for virtio-fs volume.
 pub const DRIVER_VIRTIOFS_TYPE: &str = "virtio-fs";
+/// DRIVER_SMB_TYPE is the driver for SMB/CIFS volumes mounted in the guest.
+pub const DRIVER_SMB_TYPE: &str = "smb";
 /// DRIVER_VIRTIOFS_TYPE is the driver for Bind watch volume.
 pub const DRIVER_WATCHABLE_BIND_TYPE: &str = "watchable-bind";
 
