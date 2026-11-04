@@ -13,10 +13,13 @@ use netlink_sys::{protocols, AsyncSocket, AsyncSocketExt, SocketAddr, TokioSocke
 use std::fmt::Debug;
 use std::os::unix::io::FromRawFd;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::select;
 use tokio::sync::watch::Receiver;
 use tokio::sync::Mutex;
 use tracing::instrument;
+
+const TEST_SDB_HOTPLUG_DELAY: Duration = Duration::from_secs(35);
 
 // Convenience function to obtain the scope logger.
 fn sl() -> slog::Logger {
@@ -63,6 +66,18 @@ impl Uevent {
 
     #[instrument]
     async fn process_add(&self, logger: &Logger, sandbox: &Arc<Mutex<Sandbox>>) {
+        // Temporary fault injection: keep the hotplug waiter pending past the RPC deadline.
+        if self.subsystem == "block" && self.devname == "sdb" {
+            warn!(
+                *logger,
+                "Injecting test hotplug delay";
+                "device" => &self.devname,
+                "delay_seconds" => TEST_SDB_HOTPLUG_DELAY.as_secs(),
+            );
+            tokio::time::sleep(TEST_SDB_HOTPLUG_DELAY).await;
+            info!(*logger, "Test hotplug delay completed"; "device" => &self.devname);
+        }
+
         // Special case for memory hot-adds first
         let online_path = format!("{}/{}/online", SYSFS_DIR, self.devpath);
         if online_path.starts_with(SYSFS_MEMORY_ONLINE_PATH) {
@@ -285,6 +300,43 @@ mod tests {
         let uev2 = wait_for_uevent(&sandbox, matcher).await;
         assert!(uev2.is_ok());
         assert_eq!(uev2.unwrap(), uev);
+    }
+
+    #[tokio::test]
+    async fn test_sdb_hotplug_delay() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let sandbox = Arc::new(Mutex::new(Sandbox::new(&logger).unwrap()));
+        let mut uev = Uevent {
+            action: U_EVENT_ACTION_ADD.to_string(),
+            subsystem: "block".to_string(),
+            devname: "sda".to_string(),
+            devpath: "/test/block/sda".to_string(),
+            ..Default::default()
+        };
+        tokio::time::timeout(Duration::from_secs(1), uev.process(&logger, &sandbox))
+            .await
+            .unwrap();
+        assert_eq!(wait_for_uevent(&sandbox, AlwaysMatch()).await.unwrap(), uev);
+        sandbox.lock().await.uevent_map.clear();
+
+        uev.devname = "sdb".to_string();
+        uev.devpath = "/test/block/sdb".to_string();
+        let mut wait = Box::pin(wait_for_uevent(&sandbox, AlwaysMatch()));
+        assert!(futures::poll!(wait.as_mut()).is_pending());
+        let mut process = Box::pin(uev.process(&logger, &sandbox));
+        let started = tokio::time::Instant::now();
+
+        assert!(tokio::time::timeout(Duration::from_secs(30), &mut process)
+            .await
+            .is_err());
+        assert!(sandbox.lock().await.uevent_map.is_empty());
+        assert!(futures::poll!(wait.as_mut()).is_pending());
+
+        tokio::time::timeout(Duration::from_secs(6), process)
+            .await
+            .unwrap();
+        assert!(started.elapsed() >= TEST_SDB_HOTPLUG_DELAY);
+        assert_eq!(wait.await.unwrap(), uev);
     }
 
     #[tokio::test]
