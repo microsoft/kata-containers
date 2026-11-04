@@ -14,10 +14,13 @@ use netlink_sys::{protocols, AsyncSocket, AsyncSocketExt, SocketAddr, TokioSocke
 use std::fmt::Debug;
 use std::os::unix::io::FromRawFd;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::select;
 use tokio::sync::watch::Receiver;
 use tokio::sync::Mutex;
 use tracing::instrument;
+
+const VDB_HOTPLUG_TEST_DELAY: Duration = Duration::from_secs(5);
 
 // Convenience function to obtain the scope logger.
 fn sl() -> slog::Logger {
@@ -76,6 +79,23 @@ impl Uevent {
                 )
             });
             return;
+        }
+
+        // Temporary fault injection: delay publication, not matching, so the
+        // hotplug timeout can expire without being blocked by the sandbox lock.
+        if self.subsystem == "block"
+            && self.devname == "vdb"
+            && self.devpath.starts_with("/devices/pci")
+            && self.devpath.contains("/virtio")
+            && self.devpath.ends_with("/block/vdb")
+        {
+            warn!(
+                *logger,
+                "Injecting hotplug event delay for /dev/vdb";
+                "delay_seconds" => VDB_HOTPLUG_TEST_DELAY.as_secs(),
+                "devpath" => &self.devpath,
+            );
+            tokio::time::sleep(VDB_HOTPLUG_TEST_DELAY).await;
         }
 
         let mut sb = sandbox.lock().await;
@@ -249,6 +269,72 @@ pub(crate) fn spawn_test_watcher(sandbox: Arc<Mutex<Sandbox>>, uev: Uevent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::device::block_device_handler::VirtioBlkPciMatcher;
+
+    #[tokio::test]
+    async fn test_vdb_hotplug_delay_triggers_timeout() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let sandbox = Arc::new(Mutex::new(Sandbox::new(&logger).unwrap()));
+        let uev = Uevent {
+            action: U_EVENT_ACTION_ADD.to_string(),
+            subsystem: "block".to_string(),
+            devpath: "/devices/pci0000:00/0000:00:06.0/virtio5/block/vdb".to_string(),
+            devname: "vdb".to_string(),
+            ..Default::default()
+        };
+        let matcher = VirtioBlkPciMatcher::new("/0000:00:06.0", "00");
+        assert!(AGENT_CONFIG.hotplug_timeout < VDB_HOTPLUG_TEST_DELAY);
+
+        let start = tokio::time::Instant::now();
+        let (result, ()) = tokio::join!(
+            wait_for_uevent(&sandbox, matcher),
+            uev.process(&logger, &sandbox),
+        );
+        assert!(start.elapsed() >= VDB_HOTPLUG_TEST_DELAY);
+        assert!(result.unwrap_err().to_string().contains("Timeout after"));
+
+        let sb = sandbox.lock().await;
+        assert!(sb.uevent_watchers.iter().all(Option::is_none));
+        assert_eq!(sb.uevent_map.get(&uev.devpath), Some(&uev));
+    }
+
+    #[tokio::test]
+    async fn test_hotplug_delay_leaves_other_events_unchanged() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let sandbox = Arc::new(Mutex::new(Sandbox::new(&logger).unwrap()));
+        for (devname, devpath) in [
+            ("vda", "/devices/pci0000:00/0000:00:06.0/virtio5/block/vda"),
+            ("vdc", "/devices/pci0000:00/0000:00:06.0/virtio5/block/vdc"),
+            ("vdb", "/devices/platform/virtio-mmio/virtio5/block/vdb"),
+            (
+                "vdb1",
+                "/devices/pci0000:00/0000:00:06.0/virtio5/block/vdb/vdb1",
+            ),
+        ] {
+            let uev = Uevent {
+                action: U_EVENT_ACTION_ADD.to_string(),
+                subsystem: "block".to_string(),
+                devpath: devpath.to_string(),
+                devname: devname.to_string(),
+                ..Default::default()
+            };
+            tokio::time::timeout(Duration::from_secs(1), uev.process(&logger, &sandbox))
+                .await
+                .unwrap();
+            assert_eq!(sandbox.lock().await.uevent_map.get(devpath), Some(&uev));
+        }
+
+        let remove = Uevent {
+            action: U_EVENT_ACTION_REMOVE.to_string(),
+            subsystem: "block".to_string(),
+            devpath: "/devices/pci0000:00/0000:00:06.0/virtio5/block/vdb".to_string(),
+            devname: "vdb".to_string(),
+            ..Default::default()
+        };
+        tokio::time::timeout(Duration::from_secs(1), remove.process(&logger, &sandbox))
+            .await
+            .unwrap();
+    }
 
     #[derive(Debug, Clone, Copy)]
     struct AlwaysMatch();
