@@ -10,6 +10,7 @@ default AddSwapRequest := true
 default CloseStdinRequest := true
 default CopyFileRequest := true
 default CreateContainerRequest := true
+default CreateContainerCleanup := {"allowed": true, "ops": []}
 default CreateSandboxRequest := true
 default DestroySandboxRequest := true
 default ExecProcessRequest := true

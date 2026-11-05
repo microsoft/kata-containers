@@ -187,6 +187,14 @@ impl PolicyStateGuard {
     async fn commit(self) -> ttrpc::Result<()> {
         Ok(())
     }
+
+    async fn commit_create_cleanup(
+        self,
+        _req: &protocols::agent::CreateContainerRequest,
+        original_error: ttrpc::Error,
+    ) -> ttrpc::Error {
+        original_error
+    }
 }
 
 #[cfg(not(feature = "agent-policy"))]
@@ -946,10 +954,14 @@ impl agent_ttrpc::AgentService for AgentService {
     ) -> ttrpc::Result<Empty> {
         trace_rpc_call!(ctx, "create_container", req);
         let policy_state = is_allowed_stateful(&req).await?;
-        let result = self.do_create_container(req).await.map_ttrpc_err(same);
-        // Retain authorization for cleanup even if creation only partially completed.
+        if let Err(err) = self
+            .do_create_container(req.clone())
+            .await
+            .map_ttrpc_err(same)
+        {
+            return Err(policy_state.commit_create_cleanup(&req, err).await);
+        }
         policy_state.commit().await?;
-        result?;
         Ok(Empty::new())
     }
 
@@ -2813,28 +2825,24 @@ mod tests {
             let original =
                 std::mem::replace(&mut *policy, kata_agent_policy::policy::AgentPolicy::new());
             policy
-                .set_policy(
+                .set_policy(&format!(
+                    "{}\n{}",
+                    include_str!("../../tools/genpolicy/rules.rego"),
                     r#"
-                    package agent_policy
-
-                    AllowRequestsFailingPolicy := false
-                    default CreateContainerRequest := false
-                    default RemoveContainerRequest := false
+                    policy_data := {"containers": [{}, {}]}
 
                     CreateContainerRequest := {"allowed": true, "ops": [
-                        {"op": "add", "path": "/pstate/p_container_0", "value": input.container_id}
+                        {"op": "add", "path": "/pstate/p_container_0", "value": input.container_id},
+                        {"op": "add", "path": "/pstate/namespace", "value": "must-not-be-committed"}
                     ]} if {
                         input.container_id != "denied"
                         not data.pstate.p_container_0
                     }
 
-                    RemoveContainerRequest := {"allowed": true, "ops": [
-                        {"op": "remove", "path": "/pstate/p_container_0"}
-                    ]} if {
-                        data.pstate.p_container_0 == input.container_id
-                    }
+                    CleanupOnly := data.pstate == {"container_cleanup_0": input.container_id}
+                    EmptyState := data.pstate == {}
                     "#,
-                )
+                ))
                 .await
                 .unwrap();
             original
@@ -2848,22 +2856,7 @@ mod tests {
         };
         let ctx = mk_ttrpc_context();
 
-        let denied = service
-            .create_container(
-                &ctx,
-                protocols::agent::CreateContainerRequest {
-                    container_id: "denied".into(),
-                    ..Default::default()
-                },
-            )
-            .await;
-        assert!(matches!(
-            denied,
-            Err(ttrpc::Error::RpcStatus(status))
-                if status.code() == ttrpc::Code::PERMISSION_DENIED
-        ));
-
-        for cid in ["failed-create", "retry-create"] {
+        for cid in ["denied", "failed-create", "retry-create"] {
             // Missing OCI fails before privileged operations, but after authorization.
             let result = service
                 .create_container(
@@ -2877,8 +2870,19 @@ mod tests {
             assert!(matches!(
                 result,
                 Err(ttrpc::Error::RpcStatus(status))
-                    if status.code() == ttrpc::Code::INTERNAL
+                    if status.code() == if cid == "denied" {
+                        ttrpc::Code::PERMISSION_DENIED
+                    } else {
+                        ttrpc::Code::INTERNAL
+                    }
             ));
+
+            crate::policy::is_allowed_with_entrypoint(
+                "CleanupOnly",
+                &serde_json::json!({"container_id": cid}),
+            )
+            .await
+            .unwrap();
 
             let denied_remove = service
                 .remove_container(
@@ -2917,6 +2921,9 @@ mod tests {
                 .await
                 .container_mounts
                 .contains_key(cid));
+            crate::policy::is_allowed_with_entrypoint("EmptyState", &serde_json::json!({}))
+                .await
+                .unwrap();
         }
 
         let _state_lock = crate::POLICY_STATE_LOCK.lock().await;

@@ -10,7 +10,6 @@ use common::{
     error::{is_no_such_process_error, Error},
     types::{ContainerID, ContainerProcess, ProcessExitStatus, ProcessStatus, ProcessType},
 };
-use containerd_shim_protos::ttrpc;
 use hypervisor::device::device_manager::DeviceManager;
 use nix::sys::signal::Signal;
 use oci::LinuxResources;
@@ -69,17 +68,10 @@ impl ContainerInner {
     ) -> Result<()> {
         // A transport failure can leave a partially created guest container.
         self.guest_cleanup_needed = true;
-        if let Err(err) = self.agent.create_container(request).await {
-            if matches!(
-                err.downcast_ref::<ttrpc::Error>(),
-                Some(ttrpc::Error::RpcStatus(status))
-                    if status.code() == ttrpc::Code::PERMISSION_DENIED
-            ) {
-                // Policy rejection happens before any guest resources are created.
-                self.guest_cleanup_needed = false;
-            }
-            return Err(err).context("agent create container");
-        }
+        self.agent
+            .create_container(request)
+            .await
+            .context("agent create container")?;
         Ok(())
     }
 
@@ -470,6 +462,7 @@ mod tests {
     use super::*;
     use agent::types::SetPolicyRequest;
     use async_trait::async_trait;
+    use containerd_shim_protos::ttrpc;
     use hypervisor::qemu::Qemu;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -782,10 +775,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_result_controls_guest_cleanup() {
+    async fn all_create_outcomes_keep_guest_cleanup_pending() {
         for (create_error, create_transport_failure, expected_removals) in [
             (None, false, 1),
-            (Some(ttrpc::Code::PERMISSION_DENIED), false, 0),
+            (Some(ttrpc::Code::PERMISSION_DENIED), false, 1),
             (Some(ttrpc::Code::INTERNAL), false, 1),
             (Some(ttrpc::Code::DEADLINE_EXCEEDED), false, 1),
             (None, true, 1),

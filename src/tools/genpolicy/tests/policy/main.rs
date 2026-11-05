@@ -21,6 +21,145 @@ mod tests {
 
     use kata_agent_policy::policy::{AgentPolicy, PolicyCopyFileRequest};
 
+    async fn cleanup_test_policy() -> AgentPolicy {
+        let mut policy = AgentPolicy::new();
+        policy
+            .set_policy(&format!(
+                "{}\n{}",
+                include_str!("../../rules.rego"),
+                r#"
+                policy_data := {
+                    "containers": [{}, {}],
+                    "request_defaults": {"ExecProcessRequest": {"allowed_commands": [["sh"]]}}
+                }
+                CleanupState := data.pstate == input
+                default SuccessfulBinding := false
+                SuccessfulBinding if {
+                    get_state_container(input.container_id)
+                }
+                TestSuccessfulCreate := {"allowed": true, "ops": ops} if {
+                    op := state_allows(get_state_container_key(0), input.container_id)
+                    ops := array.concat(
+                        concat_op_if_not_null([], op),
+                        container_cleanup_remove_ops(input.container_id),
+                    )
+                }
+                "#,
+            ))
+            .await
+            .unwrap();
+        policy
+    }
+
+    async fn commit_cleanup_test_request(
+        policy: &mut AgentPolicy,
+        ep: &str,
+        container_id: &str,
+    ) -> bool {
+        let request = serde_json::json!({"container_id": container_id}).to_string();
+        let decision = policy.evaluate_request_strict(ep, &request).await.unwrap();
+        let allowed = decision.allowed();
+        if allowed {
+            decision.commit(policy).await.unwrap();
+        }
+        allowed
+    }
+
+    async fn assert_cleanup_test_state(policy: &mut AgentPolicy, state: serde_json::Value) {
+        assert!(
+            policy
+                .allow_request("CleanupState", &state.to_string())
+                .await
+                .unwrap()
+                .0
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_only_state_lifecycle() {
+        let mut policy = cleanup_test_policy().await;
+        // Host input is stored as a value, never interpolated into a JSON pointer.
+        let id = "unmatched/id~with-escapes";
+        assert!(commit_cleanup_test_request(&mut policy, "CreateContainerCleanup", id).await);
+        assert!(commit_cleanup_test_request(&mut policy, "CreateContainerCleanup", id).await);
+        assert_cleanup_test_state(&mut policy, serde_json::json!({"container_cleanup_0": id}))
+            .await;
+        assert!(
+            !policy
+                .allow_request(
+                    "SuccessfulBinding",
+                    &serde_json::json!({"container_id": id}).to_string(),
+                )
+                .await
+                .unwrap()
+                .0
+        );
+        let exec = ExecProcessRequest {
+            container_id: id.into(),
+            process: protobuf::MessageField::some(protocols::oci::Process {
+                Args: vec!["sh".into()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(!policy
+            .evaluate_request("ExecProcessRequest", &serde_json::to_string(&exec).unwrap())
+            .await
+            .unwrap()
+            .allowed());
+        assert!(
+            !commit_cleanup_test_request(&mut policy, "RemoveContainerRequest", "unknown").await
+        );
+
+        // Discarding a removal decision (failed cleanup) preserves authorization.
+        let removal = policy
+            .evaluate_request(
+                "RemoveContainerRequest",
+                &serde_json::json!({"container_id": id}).to_string(),
+            )
+            .await
+            .unwrap();
+        assert!(removal.allowed());
+        drop(removal);
+        assert_cleanup_test_state(&mut policy, serde_json::json!({"container_cleanup_0": id}))
+            .await;
+        assert!(commit_cleanup_test_request(&mut policy, "RemoveContainerRequest", id).await);
+        assert_cleanup_test_state(&mut policy, serde_json::json!({})).await;
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_slots_are_bounded_and_reusable() {
+        let mut policy = cleanup_test_policy().await;
+        for id in ["one", "two", "one"] {
+            assert!(commit_cleanup_test_request(&mut policy, "CreateContainerCleanup", id).await);
+        }
+        assert!(!commit_cleanup_test_request(&mut policy, "CreateContainerCleanup", "three").await);
+        assert_cleanup_test_state(
+            &mut policy,
+            serde_json::json!({"container_cleanup_0": "one", "container_cleanup_1": "two"}),
+        )
+        .await;
+        assert!(commit_cleanup_test_request(&mut policy, "RemoveContainerRequest", "one").await);
+        assert!(commit_cleanup_test_request(&mut policy, "CreateContainerCleanup", "three").await);
+        assert_cleanup_test_state(
+            &mut policy,
+            serde_json::json!({"container_cleanup_0": "three", "container_cleanup_1": "two"}),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_does_not_downgrade_success_and_success_replaces_cleanup() {
+        let mut policy = cleanup_test_policy().await;
+        assert!(commit_cleanup_test_request(&mut policy, "CreateContainerCleanup", "one").await);
+        assert!(commit_cleanup_test_request(&mut policy, "TestSuccessfulCreate", "one").await);
+        assert_cleanup_test_state(&mut policy, serde_json::json!({"p_container_0": "one"})).await;
+        assert!(commit_cleanup_test_request(&mut policy, "CreateContainerCleanup", "one").await);
+        assert_cleanup_test_state(&mut policy, serde_json::json!({"p_container_0": "one"})).await;
+        assert!(commit_cleanup_test_request(&mut policy, "RemoveContainerRequest", "one").await);
+        assert_cleanup_test_state(&mut policy, serde_json::json!({})).await;
+    }
+
     // Translate each test case in testcases.json
     // to one request type.
     #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -29,6 +168,7 @@ mod tests {
     enum TestRequest {
         CopyFileRequest(PolicyCopyFileRequest),
         CreateContainerRequest(CreateContainerRequest),
+        CreateContainerCleanup(CreateContainerRequest),
         CreateSandboxRequest(CreateSandboxRequest),
         ExecProcessRequest(ExecProcessRequest),
         RemoveContainerRequest(RemoveContainerRequest),
@@ -42,6 +182,7 @@ mod tests {
             match self {
                 TestRequest::CopyFileRequest(_) => write!(f, "CopyFileRequest"),
                 TestRequest::CreateContainerRequest(_) => write!(f, "CreateContainerRequest"),
+                TestRequest::CreateContainerCleanup(_) => write!(f, "CreateContainerCleanup"),
                 TestRequest::CreateSandboxRequest(_) => write!(f, "CreateSandboxRequest"),
                 TestRequest::ExecProcessRequest(_) => write!(f, "ExecProcessRequest"),
                 TestRequest::RemoveContainerRequest(_) => write!(f, "RemoveContainerRequest"),
@@ -57,6 +198,7 @@ mod tests {
             matches!(
                 self,
                 Self::CreateContainerRequest(_)
+                    | Self::CreateContainerCleanup(_)
                     | Self::CreateSandboxRequest(_)
                     | Self::ExecProcessRequest(_)
                     | Self::RemoveContainerRequest(_)

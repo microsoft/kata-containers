@@ -128,9 +128,55 @@ CreateContainerRequest := {"ops": ops, "allowed": true} if {
     value := input.container_id
     print("CreateContainerRequest: adding container state: key = ", key, "value =", value)
     add_p_container_to_state := state_allows(key, value)
-    ops := concat_op_if_not_null(ret.ops, add_p_container_to_state)
+    normal_ops := concat_op_if_not_null(ret.ops, add_p_container_to_state)
+    ops := array.concat(normal_ops, container_cleanup_remove_ops(input.container_id))
 
     print("CreateContainerRequest: true, ops =", ops)
+}
+
+# Internal agent query: a failed create grants removal, but no normal container state.
+default CreateContainerCleanup := false
+
+CreateContainerCleanup := {"allowed": true, "ops": []} if {
+    get_state_container(input.container_id)
+}
+
+CreateContainerCleanup := {"allowed": true, "ops": []} if {
+    not get_state_container(input.container_id)
+    get_container_cleanup_key(input.container_id)
+}
+
+CreateContainerCleanup := {"allowed": true, "ops": [op]} if {
+    not get_state_container(input.container_id)
+    not get_container_cleanup_key(input.container_id)
+
+    # One cleanup slot per policy container bounds storage of host-supplied IDs.
+    state := get_state()
+    free_slots := [idx |
+        some idx, _ in policy_data.containers
+        key := sprintf("container_cleanup_%v", [idx])
+        not state[key]
+    ]
+    print("CreateContainerCleanup: free slots =", free_slots)
+    idx := min(free_slots)
+    key := sprintf("container_cleanup_%v", [idx])
+    op := state_allows(key, input.container_id)
+}
+
+get_container_cleanup_key(container_id) := key if {
+    state := get_state()
+    some idx, _ in policy_data.containers
+    key := sprintf("container_cleanup_%v", [idx])
+    state[key] == container_id
+}
+
+container_cleanup_remove_ops(container_id) := [op] if {
+    key := get_container_cleanup_key(container_id)
+    op := state_del_key(key)
+}
+
+container_cleanup_remove_ops(container_id) := [] if {
+    not get_container_cleanup_key(container_id)
 }
 
 allow_create_container_input if {
@@ -1883,7 +1929,14 @@ RemoveContainerRequest := {"ops": ops, "allowed": true} if {
     key := get_state_container_key(ret.idx)
     del_container := state_del_key(key)
 
-    ops := concat_op_if_not_null(ops_builder1, del_container)
+    normal_ops := concat_op_if_not_null(ops_builder1, del_container)
+    ops := array.concat(normal_ops, container_cleanup_remove_ops(input.container_id))
 
     print("RemoveContainerRequest: true")
+}
+
+RemoveContainerRequest := {"ops": ops, "allowed": true} if {
+    not get_state_container(input.container_id)
+    get_container_cleanup_key(input.container_id)
+    ops := container_cleanup_remove_ops(input.container_id)
 }

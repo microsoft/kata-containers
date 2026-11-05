@@ -204,6 +204,25 @@ impl AgentPolicy {
 
     /// Evaluate whether an API call should be allowed without applying its state changes.
     pub async fn evaluate_request(&mut self, ep: &str, ep_input: &str) -> Result<PolicyDecision> {
+        self.evaluate_request_inner(ep, ep_input, self.allow_failures)
+            .await
+    }
+
+    /// Evaluate an internal state transition without ignoring missing rules or denials.
+    pub async fn evaluate_request_strict(
+        &mut self,
+        ep: &str,
+        ep_input: &str,
+    ) -> Result<PolicyDecision> {
+        self.evaluate_request_inner(ep, ep_input, false).await
+    }
+
+    async fn evaluate_request_inner(
+        &mut self,
+        ep: &str,
+        ep_input: &str,
+        allow_failures: bool,
+    ) -> Result<PolicyDecision> {
         debug!(sl!(), "policy check: {ep}");
 
         // Log policy evaluation input information into POLICY_LOG_FILE.
@@ -223,7 +242,7 @@ impl AgentPolicy {
         if results.result.len() != 1 {
             // Results are empty when AllowRequestsFailingPolicy is used to allow a Request that hasn't
             // been defined in the policy.
-            if self.allow_failures {
+            if allow_failures {
                 warn!(sl!(), "policy check: ignoring missing {ep}");
                 return Ok(PolicyDecision {
                     allowed: true,
@@ -275,7 +294,7 @@ impl AgentPolicy {
         };
 
         if !allow {
-            if self.allow_failures {
+            if allow_failures {
                 warn!(sl!(), "policy check: ignoring error for {ep}");
                 allow = true;
             } else {
@@ -512,6 +531,27 @@ mod tests {
             .unwrap();
         decision.commit(&mut policy).await.unwrap();
         assert!(policy.allow_request("ReadState", "{}").await.unwrap().0);
+    }
+
+    #[tokio::test]
+    async fn test_strict_evaluation_does_not_ignore_missing_or_denied_cleanup() {
+        for rule in ["", "CreateContainerCleanup := false"] {
+            let mut policy = AgentPolicy::new();
+            policy
+                .set_policy(&format!(
+                    "package agent_policy\nAllowRequestsFailingPolicy := true\n{rule}"
+                ))
+                .await
+                .unwrap();
+            let result = policy
+                .evaluate_request_strict("CreateContainerCleanup", "{}")
+                .await;
+            if rule.is_empty() {
+                assert!(result.is_err());
+            } else {
+                assert!(!result.unwrap().allowed());
+            }
+        }
     }
 
     struct TestCase {

@@ -45,10 +45,7 @@ pub struct PolicyStateGuard {
 }
 
 impl PolicyStateGuard {
-    /// commit() applies the patch returned by the rego policy after processing an
-    /// authorized request. CreateContainerRequest also commits on failure so that
-    /// RemoveContainerRequest can authorize cleanup of partially created resources.
-    /// Other stateful requests commit only on success.
+    /// Apply the patch returned by the rego policy after successful processing.
     pub async fn commit(self) -> ttrpc::Result<()> {
         let mut policy = AGENT_POLICY.lock().await;
         self.decision.commit(&mut policy).await.map_err(|e| {
@@ -57,6 +54,52 @@ impl PolicyStateGuard {
                 format!("failed to commit policy state: {e}"),
             )
         })
+    }
+
+    /// Discard the normal create patch and record only cleanup authorization.
+    pub async fn commit_create_cleanup(
+        self,
+        req: &protocols::agent::CreateContainerRequest,
+        original_error: ttrpc::Error,
+    ) -> ttrpc::Error {
+        let request = serde_json::to_string(req).unwrap();
+        let mut policy = AGENT_POLICY.lock().await;
+        create_cleanup_error(&mut policy, &request, original_error).await
+    }
+}
+
+async fn create_cleanup_error(
+    policy: &mut AgentPolicy,
+    request: &str,
+    original_error: ttrpc::Error,
+) -> ttrpc::Error {
+    let result = async {
+        let decision = policy
+            .evaluate_request_strict("CreateContainerCleanup", request)
+            .await?;
+        if !decision.allowed() {
+            anyhow::bail!("CreateContainerCleanup denied: {}", decision.prints());
+        }
+        decision.commit(policy).await
+    }
+    .await;
+
+    match result {
+        Ok(()) => original_error,
+        Err(err) => {
+            slog::error!(
+                slog_scope::logger(),
+                "failed to record container cleanup authorization";
+                "create-error" => %original_error,
+                "cleanup-error" => %err,
+            );
+            ttrpc_error(
+                ttrpc::Code::INTERNAL,
+                format!(
+                    "{original_error}; failed to record container cleanup authorization: {err}"
+                ),
+            )
+        }
     }
 }
 
@@ -74,7 +117,7 @@ impl PolicyStateGuard {
 /// self.do_remove_container(req).await.map_ttrpc_err(same)?;
 /// policy_state.commit().await?;
 ///
-/// CreateContainerRequest must commit even when processing fails; see commit().
+/// Failed CreateContainerRequest calls commit_create_cleanup() instead of commit().
 pub async fn is_allowed_stateful(
     req: &(impl MessageDyn + serde::Serialize),
 ) -> ttrpc::Result<PolicyStateGuard> {
@@ -89,10 +132,15 @@ pub async fn is_allowed_stateful(
         .map_err(|e| ttrpc_error(ttrpc::Code::INTERNAL, format!("{ep}: internal error {e}")))?;
 
     if !decision.allowed() {
-        return Err(ttrpc_error(
+        let error = ttrpc_error(
             ttrpc::Code::PERMISSION_DENIED,
             format!("{ep} is blocked by policy: {}", decision.prints()),
-        ));
+        );
+        return Err(if ep == "CreateContainerRequest" {
+            create_cleanup_error(&mut policy, &request, error).await
+        } else {
+            error
+        });
     }
 
     Ok(PolicyStateGuard {
@@ -127,4 +175,40 @@ pub async fn do_set_policy(req: &protocols::agent::SetPolicyRequest) -> ttrpc::R
         .set_policy(&req.policy)
         .await
         .map_err(|e| ttrpc_error(ttrpc::Code::INVALID_ARGUMENT, e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cleanup_registration_errors_are_explicit() {
+        for rule in [
+            "",
+            "CreateContainerCleanup := false",
+            r#"CreateContainerCleanup := {"allowed": true, "ops": []}"#,
+        ] {
+            let mut policy = AgentPolicy::new();
+            policy
+                .set_policy(&format!(
+                    "package agent_policy\nAllowRequestsFailingPolicy := true\n{rule}"
+                ))
+                .await
+                .unwrap();
+            let original = ttrpc_error(ttrpc::Code::PERMISSION_DENIED, "original create failure");
+            let result = create_cleanup_error(&mut policy, "{}", original).await;
+            let ttrpc::Error::RpcStatus(status) = result else {
+                panic!("expected RPC status");
+            };
+            assert!(status.message().contains("original create failure"));
+            if rule.contains("\"allowed\": true") {
+                assert_eq!(status.code(), ttrpc::Code::PERMISSION_DENIED);
+            } else {
+                assert_eq!(status.code(), ttrpc::Code::INTERNAL);
+                assert!(status
+                    .message()
+                    .contains("failed to record container cleanup"));
+            }
+        }
+    }
 }

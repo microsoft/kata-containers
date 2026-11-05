@@ -1,5 +1,11 @@
 {
   "bases": {
+    "cleanup-container": {
+      "kind": "CreateContainerCleanup",
+      "request": {
+        "container_id": "4bae4a8e74302a8edfe17424aff0b632cae893687f4d9ad2f2115666899f9a12"
+      }
+    },
     "create-container": {
       "kind": "CreateContainerRequest",
       "request": {
@@ -276,6 +282,12 @@
     }
   },
   "cases": [
+    {
+      "description": "record cleanup before a successful create retry",
+      "base": "cleanup-container",
+      "allowed": true,
+      "patch": []
+    },
     {
       "description": "test create container and save container_id in state",
       "base": "create-container",
