@@ -308,6 +308,24 @@ impl Container {
             ..Default::default()
         };
 
+        let mut removal_device_ids = inner.devices.clone();
+        for rootfs in &inner.rootfs {
+            removal_device_ids.extend(rootfs.get_device_ids().await?);
+        }
+        for volume in &inner.volumes {
+            if let Some(id) = volume.get_device_id()? {
+                removal_device_ids.push(id);
+            }
+        }
+        self.resource_manager
+            .get_device_manager()
+            .await
+            .write()
+            .await
+            .require_removal_barrier(&removal_device_ids)
+            .await
+            .context("prepare guest device removal barriers")?;
+
         self.agent
             .create_container(r)
             .await

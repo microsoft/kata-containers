@@ -177,6 +177,11 @@ pub struct RemoveContainerRequest {
     pub container_id: String,
 }
 
+#[derive(PartialEq, Clone, Debug)]
+pub struct WaitForDeviceRemovalRequest {
+    pub device_id: String,
+}
+
 impl RemoveContainerRequest {
     pub fn new(id: &str) -> Self {
         Self {

@@ -133,6 +133,10 @@ func (p *HybridVSockTTRPCMockImp) RemoveContainer(ctx context.Context, req *pb.R
 	return emptyResp, nil
 }
 
+func (p *HybridVSockTTRPCMockImp) WaitForDeviceRemoval(ctx context.Context, req *pb.WaitForDeviceRemovalRequest) (*gpb.Empty, error) {
+	return emptyResp, nil
+}
+
 func (p *HybridVSockTTRPCMockImp) WriteStdin(ctx context.Context, req *pb.WriteStreamRequest) (*pb.WriteStreamResponse, error) {
 	return &pb.WriteStreamResponse{}, nil
 }

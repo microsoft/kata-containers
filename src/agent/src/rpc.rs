@@ -274,6 +274,7 @@ impl AgentService {
         let cid = req.container_id.clone();
 
         kata_sys_util::validate::verify_id(&cid)?;
+        self.sandbox.lock().await.device_removals.register(&req)?;
 
         let use_sandbox_pidns = req.sandbox_pidns();
 
@@ -464,17 +465,19 @@ impl AgentService {
         req: protocols::agent::RemoveContainerRequest,
     ) -> Result<()> {
         let cid = req.container_id;
+        kata_sys_util::validate::verify_id(&cid)?;
 
         // Drop the host guest mapping for this container so we can reuse the
         // PCI slots for the next containers
 
         let mut sandbox = self.sandbox.lock().await;
+        // The host unplugs devices even if teardown fails, so arm removal
+        // tracking first to let WaitForDeviceRemoval observe that unplug.
+        sandbox.device_removals.prepare(&cid);
         sandbox.bind_watcher.remove_container(&cid).await;
-        sandbox
-            .get_container(&cid)
-            .ok_or_else(|| anyhow!("Invalid container id"))?
-            .destroy()
-            .await?;
+        if let Some(container) = sandbox.get_container(&cid) {
+            container.destroy().await?;
+        }
         remove_container_resources(&mut sandbox, &cid).await?;
         Ok(())
     }
@@ -946,6 +949,16 @@ impl agent_ttrpc::AgentService for AgentService {
         req: protocols::agent::CreateContainerRequest,
     ) -> ttrpc::Result<Empty> {
         trace_rpc_call!(ctx, "create_container", req);
+        // The host may need to unplug devices even when policy rejects creation.
+        kata_sys_util::validate::verify_id(&req.container_id)
+            .map_err(|e| anyhow!(e))
+            .map_ttrpc_err(same)?;
+        self.sandbox
+            .lock()
+            .await
+            .device_removals
+            .register(&req)
+            .map_ttrpc_err(same)?;
         let policy_state = is_allowed_stateful(&req).await?;
         self.do_create_container(req).await.map_ttrpc_err(same)?;
         policy_state.commit().await?;
@@ -972,6 +985,19 @@ impl agent_ttrpc::AgentService for AgentService {
         let policy_state = is_allowed_stateful(&req).await?;
         self.do_remove_container(req).await.map_ttrpc_err(same)?;
         policy_state.commit().await?;
+        Ok(Empty::new())
+    }
+
+    async fn wait_for_device_removal(
+        &self,
+        ctx: &TtrpcContext,
+        req: protocols::agent::WaitForDeviceRemovalRequest,
+    ) -> ttrpc::Result<Empty> {
+        trace_rpc_call!(ctx, "wait_for_device_removal", req);
+        is_allowed(&req).await?;
+        crate::uevent::wait_for_device_removal(&self.sandbox, &req.device_id)
+            .await
+            .map_ttrpc_err(same)?;
         Ok(Empty::new())
     }
 
@@ -2789,6 +2815,51 @@ mod tests {
     use which::which;
 
     const CGROUP_PARENT: &str = "kata.agent.test.k8s.io";
+
+    #[tokio::test]
+    async fn test_remove_partial_container_is_idempotent_and_prepares_devices() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let service = AgentService {
+            sandbox: Arc::new(Mutex::new(Sandbox::new(&logger).unwrap())),
+            init_mode: true,
+            oma: None,
+        };
+        let request = protocols::agent::CreateContainerRequest {
+            container_id: "partial".to_string(),
+            devices: vec![protocols::agent::Device {
+                type_: kata_types::device::DRIVER_BLK_PCI_TYPE.to_string(),
+                id: "06".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        // Missing OCI fails before a LinuxContainer exists, but after tracking.
+        assert!(service.do_create_container(request).await.is_err());
+        {
+            let mut sandbox = service.sandbox.lock().await;
+            sandbox.add_sandbox_storage("partial-mount", false).await;
+            sandbox
+                .container_mounts
+                .insert("partial".to_string(), vec!["partial-mount".to_string()]);
+        }
+        for _ in 0..2 {
+            service
+                .do_remove_container(protocols::agent::RemoveContainerRequest {
+                    container_id: "partial".to_string(),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
+        let sandbox = service.sandbox.lock().await;
+        assert!(!sandbox.storages.contains_key("partial-mount"));
+        assert!(!sandbox.container_mounts.contains_key("partial"));
+        drop(sandbox);
+        let error = crate::uevent::wait_for_device_removal(&service.sandbox, "06")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("Timeout"));
+    }
 
     fn check_command(cmd: &str) -> bool {
         which(cmd).is_ok()

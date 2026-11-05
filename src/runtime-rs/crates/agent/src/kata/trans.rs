@@ -298,6 +298,15 @@ impl From<RemoveContainerRequest> for agent::RemoveContainerRequest {
     }
 }
 
+impl From<crate::WaitForDeviceRemovalRequest> for agent::WaitForDeviceRemovalRequest {
+    fn from(from: crate::WaitForDeviceRemovalRequest) -> Self {
+        Self {
+            device_id: from.device_id,
+            ..Default::default()
+        }
+    }
+}
+
 impl From<ContainerID> for agent::StartContainerRequest {
     fn from(from: ContainerID) -> Self {
         Self {
@@ -920,5 +929,18 @@ impl From<AddSwapPathRequest> for agent::AddSwapPathRequest {
             path: from.path,
             ..Default::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod removal_tests {
+    #[test]
+    fn test_wait_for_device_removal_translation() {
+        let request: protocols::agent::WaitForDeviceRemovalRequest =
+            crate::WaitForDeviceRemovalRequest {
+                device_id: "06".to_string(),
+            }
+            .into();
+        assert_eq!(request.device_id, "06");
     }
 }

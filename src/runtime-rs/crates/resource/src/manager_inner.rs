@@ -13,6 +13,7 @@ use hypervisor::{
     device::{
         device_manager::{
             do_handle_device, find_cold_plugged_vfio_ap, get_block_device_info, DeviceManager,
+            DeviceRemovalWaiter,
         },
         util::{get_host_path, DEVICE_TYPE_BLOCK, DEVICE_TYPE_CHAR},
         DeviceConfig, DeviceType,
@@ -82,6 +83,29 @@ struct ResourceCleanupSteps {
     ephemeral_disks: bool,
 }
 
+struct AgentDeviceRemovalWaiter {
+    agent: Arc<dyn Agent>,
+}
+
+impl std::fmt::Debug for AgentDeviceRemovalWaiter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentDeviceRemovalWaiter").finish()
+    }
+}
+
+#[async_trait]
+impl DeviceRemovalWaiter for AgentDeviceRemovalWaiter {
+    async fn wait_for_removal(&self, pci_path: &str) -> Result<()> {
+        self.agent
+            .wait_for_device_removal(agent::WaitForDeviceRemovalRequest {
+                device_id: pci_path.to_string(),
+            })
+            .await
+            .context("wait for guest device removal")?;
+        Ok(())
+    }
+}
+
 impl ResourceManagerInner {
     pub(crate) async fn new(
         sid: &str,
@@ -92,9 +116,12 @@ impl ResourceManagerInner {
     ) -> Result<Self> {
         let topo_config = TopologyConfigInfo::new(&toml_config);
         // create device manager
-        let dev_manager = DeviceManager::new(hypervisor.clone(), topo_config.as_ref())
+        let mut dev_manager = DeviceManager::new(hypervisor.clone(), topo_config.as_ref())
             .await
             .context("failed to create device manager")?;
+        dev_manager.set_removal_waiter(Arc::new(AgentDeviceRemovalWaiter {
+            agent: agent.clone(),
+        }));
         let device_manager = Arc::new(RwLock::new(dev_manager));
 
         let cgroups_resource = CgroupsResource::new(sid, &toml_config)?;

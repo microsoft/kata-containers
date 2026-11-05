@@ -85,6 +85,39 @@ While creating the Pod sandbox, the Kata Shim will notice the `io.katacontainers
 
 The Kata Agent is responsible for enforcing the Policy, working together with [`OPA`](https://www.openpolicyagent.org/). The Agent checks the Policy for each [ttRPC API](../../src/libs/protocols/protos/agent.proto) request. Before carrying out the actions corresponding to the request, the Agent uses the [`OPA REST API`](https://www.openpolicyagent.org/docs/latest/rest-api/) to check if the Policy allows or blocks the request. The Agent rejects requests that are not allowed by the Policy.
 
+# Block device removal requests
+
+`runtime-rs` uses two agent requests to make sure the guest has finished
+removing a hot-plugged PCI block device before the device slot is reused:
+
+`RemoveContainerRequest`
+:   Cleans up the container, including the resources left by a container
+    creation that failed part way through, and starts tracking removal of the
+    container's PCI block devices. The request format is unchanged.
+
+`WaitForDeviceRemovalRequest`
+:   Sent after the host unplugs the last reference to a tracked device. The
+    `device_id` is the PCI path from `Device.id`, for example `06`. The agent
+    waits, bounded by its `hotplug_timeout`, until it has processed the
+    removal of that PCI function, so a late event from the old device cannot
+    be mistaken for the new device.
+
+While any removal is pending, `runtime-rs` does not attach new devices to the
+sandbox. If `WaitForDeviceRemovalRequest` fails or times out, creating the next
+container fails, rather than reusing a slot the guest may still associate with
+the old device.
+
+Generated policies allow `WaitForDeviceRemovalRequest`, which does not change
+policy state. They also allow `RemoveContainerRequest` for a container ID that
+has no committed policy state, because a failed `CreateContainerRequest` never
+commits any. Custom policies must allow both cases for `runtime-rs` to recover
+from a failed container creation.
+
+!!! warning
+    `runtime-rs` requires a Kata Agent that implements
+    `WaitForDeviceRemovalRequest`. The Go runtime never sends it, and works
+    with either agent version.
+
 # Creating the Policy document
 
 ## Creating the Policy document manually

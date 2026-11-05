@@ -13,6 +13,7 @@ type AgentServiceService interface {
 	CreateContainer(context.Context, *CreateContainerRequest) (*emptypb.Empty, error)
 	StartContainer(context.Context, *StartContainerRequest) (*emptypb.Empty, error)
 	RemoveContainer(context.Context, *RemoveContainerRequest) (*emptypb.Empty, error)
+	WaitForDeviceRemoval(context.Context, *WaitForDeviceRemovalRequest) (*emptypb.Empty, error)
 	ExecProcess(context.Context, *ExecProcessRequest) (*emptypb.Empty, error)
 	SignalProcess(context.Context, *SignalProcessRequest) (*emptypb.Empty, error)
 	WaitProcess(context.Context, *WaitProcessRequest) (*WaitProcessResponse, error)
@@ -77,6 +78,13 @@ func RegisterAgentServiceService(srv *ttrpc.Server, svc AgentServiceService) {
 					return nil, err
 				}
 				return svc.RemoveContainer(ctx, &req)
+			},
+			"WaitForDeviceRemoval": func(ctx context.Context, unmarshal func(interface{}) error) (interface{}, error) {
+				var req WaitForDeviceRemovalRequest
+				if err := unmarshal(&req); err != nil {
+					return nil, err
+				}
+				return svc.WaitForDeviceRemoval(ctx, &req)
 			},
 			"ExecProcess": func(ctx context.Context, unmarshal func(interface{}) error) (interface{}, error) {
 				var req ExecProcessRequest
@@ -384,6 +392,14 @@ func (c *agentserviceClient) StartContainer(ctx context.Context, req *StartConta
 func (c *agentserviceClient) RemoveContainer(ctx context.Context, req *RemoveContainerRequest) (*emptypb.Empty, error) {
 	var resp emptypb.Empty
 	if err := c.client.Call(ctx, "grpc.AgentService", "RemoveContainer", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *agentserviceClient) WaitForDeviceRemoval(ctx context.Context, req *WaitForDeviceRemovalRequest) (*emptypb.Empty, error) {
+	var resp emptypb.Empty
+	if err := c.client.Call(ctx, "grpc.AgentService", "WaitForDeviceRemoval", req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

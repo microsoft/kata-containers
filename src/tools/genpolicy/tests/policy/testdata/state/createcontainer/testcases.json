@@ -267,6 +267,12 @@
         "string_user": null
       }
     },
+    "wait-for-device-removal": {
+      "kind": "WaitForDeviceRemovalRequest",
+      "request": {
+        "device_id": "06"
+      }
+    },
     "remove-container": {
       "kind": "RemoveContainerRequest",
       "request": {
@@ -306,9 +312,9 @@
       ]
     },
     {
-      "description": "reject remove container with unknown container_id",
+      "description": "allow cleanup of a partial container without committed policy state",
       "base": "remove-container",
-      "allowed": false,
+      "allowed": true,
       "patch": [
         {
           "op": "replace",
@@ -320,6 +326,18 @@
     {
       "description": "test remove container and remove container_id from state",
       "base": "remove-container",
+      "allowed": true,
+      "patch": []
+    },
+    {
+      "description": "allow repeated container cleanup",
+      "base": "remove-container",
+      "allowed": true,
+      "patch": []
+    },
+    {
+      "description": "allow waiting for device removal after container cleanup",
+      "base": "wait-for-device-removal",
       "allowed": true,
       "patch": []
     }

@@ -5,7 +5,7 @@
 //
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -34,6 +34,18 @@ use super::{
 };
 
 pub type ArcMutexDevice = Arc<Mutex<dyn Device>>;
+
+#[async_trait::async_trait]
+pub trait DeviceRemovalWaiter: Send + Sync + std::fmt::Debug {
+    async fn wait_for_removal(&self, pci_path: &str) -> Result<()>;
+}
+
+#[derive(Debug)]
+struct PendingRemoval {
+    index: Option<u64>,
+    is_pmem: bool,
+    pci_path: String,
+}
 
 macro_rules! declare_index {
     ($self:ident, $index:ident, $released_index:ident) => {{
@@ -105,6 +117,9 @@ pub struct DeviceManager {
     hypervisor: Arc<dyn Hypervisor>,
     shared_info: SharedInfo,
     pcie_topology: Option<PCIeTopology>,
+    removal_waiter: Option<Arc<dyn DeviceRemovalWaiter>>,
+    removal_barriers: HashSet<String>,
+    pending_removals: HashMap<String, PendingRemoval>,
 }
 
 impl DeviceManager {
@@ -118,7 +133,55 @@ impl DeviceManager {
             hypervisor,
             shared_info: SharedInfo::new().await,
             pcie_topology: PCIeTopology::new(topo_config),
+            removal_waiter: None,
+            removal_barriers: HashSet::new(),
+            pending_removals: HashMap::new(),
         })
+    }
+
+    pub fn set_removal_waiter(&mut self, waiter: Arc<dyn DeviceRemovalWaiter>) {
+        self.removal_waiter = Some(waiter);
+    }
+
+    pub async fn require_removal_barrier(&mut self, device_ids: &[String]) -> Result<()> {
+        for id in device_ids {
+            if let DeviceType::BlockModern(device) = self.get_device_info(id).await? {
+                let config = &device.lock().await.config;
+                if config.driver_option == KATA_BLK_DEV_TYPE && config.pci_path.is_some() {
+                    self.removal_barriers.insert(id.clone());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn complete_pending_removal(&mut self, device_id: &str) -> Result<()> {
+        let pending = self
+            .pending_removals
+            .get(device_id)
+            .context("missing pending device removal")?;
+        self.removal_waiter
+            .as_ref()
+            .context("missing guest device removal waiter")?
+            .wait_for_removal(&pending.pci_path)
+            .await
+            .with_context(|| format!("guest removal still pending for device {device_id}"))?;
+        if let Some(index) = pending.index {
+            self.shared_info
+                .release_device_index(index, pending.is_pmem);
+        }
+        self.pending_removals.remove(device_id);
+        self.removal_barriers.remove(device_id);
+        self.devices.remove(device_id);
+        Ok(())
+    }
+
+    async fn complete_pending_removals(&mut self) -> Result<()> {
+        let ids: Vec<_> = self.pending_removals.keys().cloned().collect();
+        for id in ids {
+            self.complete_pending_removal(&id).await?;
+        }
+        Ok(())
     }
 
     pub fn get_pcie_topology(&self) -> Option<PCIeTopology> {
@@ -146,6 +209,7 @@ impl DeviceManager {
     }
 
     async fn try_add_device(&mut self, device_id: &str) -> Result<()> {
+        self.complete_pending_removals().await?;
         // find the device
         let device = self
             .devices
@@ -195,12 +259,32 @@ impl DeviceManager {
     }
 
     pub async fn try_remove_device(&mut self, device_id: &str) -> Result<()> {
+        if self.pending_removals.contains_key(device_id) {
+            return self.complete_pending_removal(device_id).await;
+        }
         if let Some(dev) = self.devices.get(device_id) {
             let mut device_guard = dev.lock().await;
 
             // Snapshot all state needed after detach before changing the reference count.
             let device_info = device_guard.get_device_info().await;
             let (still_in_use, is_pmem) = detach_metadata(&device_info).await;
+            let pci_path = if self.removal_barriers.contains(device_id) && !still_in_use {
+                match &device_info {
+                    DeviceType::BlockModern(device) => Some(
+                        device
+                            .lock()
+                            .await
+                            .config
+                            .pci_path
+                            .as_ref()
+                            .context("missing PCI path for removal barrier")?
+                            .to_string(),
+                    ),
+                    _ => None,
+                }
+            } else {
+                None
+            };
             let index = device_guard
                 .detach(&mut self.pcie_topology.as_mut(), self.hypervisor.as_ref())
                 .await?;
@@ -208,6 +292,19 @@ impl DeviceManager {
             // If it's still in use, it should be just skipped.
             if still_in_use {
                 return Ok(());
+            }
+
+            if let Some(pci_path) = pci_path {
+                self.pending_removals.insert(
+                    device_id.to_string(),
+                    PendingRemoval {
+                        index,
+                        is_pmem,
+                        pci_path,
+                    },
+                );
+                drop(device_guard);
+                return self.complete_pending_removal(device_id).await;
             }
 
             if let Some(i) = index {
@@ -310,6 +407,9 @@ impl DeviceManager {
     }
 
     async fn new_device(&mut self, device_config: &DeviceConfig) -> Result<String> {
+        // A detached PCI address can already be reused by the hypervisor, even
+        // while its old add event is still queued in the guest.
+        self.complete_pending_removals().await?;
         // device ID must be generated by manager instead of device itself
         // in case of ID collision
         let device_id = self.new_device_id()?;
@@ -720,6 +820,153 @@ mod tests {
     use std::sync::Arc;
     use tests_utils::load_test_config;
     use tokio::sync::RwLock;
+
+    #[derive(Debug, Default)]
+    struct TestRemovalWaiter {
+        ready: std::sync::atomic::AtomicBool,
+        blocking: std::sync::atomic::AtomicBool,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl super::DeviceRemovalWaiter for TestRemovalWaiter {
+        async fn wait_for_removal(&self, pci_path: &str) -> Result<()> {
+            use std::sync::atomic::Ordering;
+            assert_eq!(pci_path, "06");
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if self.blocking.load(Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
+            if !self.ready.load(Ordering::SeqCst) {
+                return Err(anyhow!("guest removal timed out"));
+            }
+            Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestBlockDevice {
+        handle: crate::BlockDeviceModernHandle,
+        unplugs: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl super::Device for TestBlockDevice {
+        async fn attach(
+            &mut self,
+            _: &mut Option<&mut super::PCIeTopology>,
+            _: &dyn crate::Hypervisor,
+        ) -> Result<()> {
+            self.handle.increase_attach_count().await?;
+            Ok(())
+        }
+
+        async fn detach(
+            &mut self,
+            _: &mut Option<&mut super::PCIeTopology>,
+            _: &dyn crate::Hypervisor,
+        ) -> Result<Option<u64>> {
+            if self.handle.decrease_attach_count().await? {
+                return Ok(None);
+            }
+            self.unplugs
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Some(self.handle.snapshot_config().await.index))
+        }
+
+        async fn update(&mut self, _: &dyn crate::Hypervisor) -> Result<()> {
+            Ok(())
+        }
+
+        async fn get_device_info(&self) -> DeviceType {
+            DeviceType::BlockModern(self.handle.arc())
+        }
+
+        async fn increase_attach_count(&mut self) -> Result<bool> {
+            self.handle.increase_attach_count().await
+        }
+
+        async fn decrease_attach_count(&mut self) -> Result<bool> {
+            self.handle.decrease_attach_count().await
+        }
+    }
+
+    #[tokio::test]
+    async fn test_removal_barrier_retains_index_and_blocks_retry() {
+        use crate::device::{pci_path::PciPath, Device};
+        use std::{
+            convert::TryFrom,
+            sync::atomic::{AtomicUsize, Ordering},
+        };
+        use tokio::sync::Mutex;
+
+        let mut dm = DeviceManager::new(Arc::new(Qemu::new()), None)
+            .await
+            .unwrap();
+        let waiter = Arc::new(TestRemovalWaiter::default());
+        dm.set_removal_waiter(waiter.clone());
+        dm.shared_info.block_index = 2;
+        let unplugs = Arc::new(AtomicUsize::new(0));
+        let mut device = TestBlockDevice {
+            handle: crate::BlockDeviceModernHandle::new(
+                "old".to_string(),
+                BlockConfigModern {
+                    index: 1,
+                    driver_option: KATA_BLK_DEV_TYPE.to_string(),
+                    pci_path: Some(PciPath::try_from("06").unwrap()),
+                    ..Default::default()
+                },
+            ),
+            unplugs: unplugs.clone(),
+        };
+        device.increase_attach_count().await.unwrap();
+        device.increase_attach_count().await.unwrap();
+        dm.devices
+            .insert("old".to_string(), Arc::new(Mutex::new(device)));
+        dm.require_removal_barrier(&["old".to_string()])
+            .await
+            .unwrap();
+
+        // A shared reference is released without waiting for a physical unplug.
+        dm.try_remove_device("old").await.unwrap();
+        assert_eq!(waiter.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(unplugs.load(Ordering::SeqCst), 0);
+
+        assert!(dm.try_remove_device("old").await.is_err());
+        assert_eq!(unplugs.load(Ordering::SeqCst), 1);
+        assert!(dm.shared_info.released_block_index.is_empty());
+        assert!(dm.devices.contains_key("old"));
+
+        let replacement = DeviceConfig::BlockCfgModern(BlockConfigModern {
+            path_on_host: "/dev/replacement".to_string(),
+            driver_option: super::VIRTIO_BLOCK_PCI.to_string(),
+            ..Default::default()
+        });
+        assert!(dm.new_device(&replacement).await.is_err());
+        assert_eq!(dm.shared_info.block_index, 2);
+        assert_eq!(unplugs.load(Ordering::SeqCst), 1);
+
+        waiter.blocking.store(true, Ordering::SeqCst);
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_millis(1),
+            dm.try_remove_device("old"),
+        )
+        .await
+        .is_err());
+        assert!(dm.pending_removals.contains_key("old"));
+        assert!(dm.shared_info.released_block_index.is_empty());
+        waiter.blocking.store(false, Ordering::SeqCst);
+
+        waiter.ready.store(true, Ordering::SeqCst);
+        let id = dm.new_device(&replacement).await.unwrap();
+        assert!(!dm.devices.contains_key("old"));
+        assert!(dm.pending_removals.is_empty());
+        assert_eq!(unplugs.load(Ordering::SeqCst), 1);
+        let DeviceType::BlockModern(device) = dm.get_device_info(&id).await.unwrap() else {
+            panic!("expected block device");
+        };
+        assert_eq!(device.lock().await.config.index, 1);
+    }
 
     #[cfg(all(
         feature = "cloud-hypervisor",

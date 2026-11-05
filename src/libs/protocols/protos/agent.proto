@@ -29,6 +29,9 @@ service AgentService {
 	// RemoveContainer will wait for all processes termination before returning.
 	// If any process cannot be killed, RemoveContainer will return an error.
 	rpc RemoveContainer(RemoveContainerRequest) returns (google.protobuf.Empty);
+	// Wait until the guest has processed removal of a PCI virtio-blk device
+	// prepared by RemoveContainer. Call only after the last reference is unplugged.
+	rpc WaitForDeviceRemoval(WaitForDeviceRemovalRequest) returns (google.protobuf.Empty);
 	rpc ExecProcess(ExecProcessRequest) returns (google.protobuf.Empty);
 	rpc SignalProcess(SignalProcessRequest) returns (google.protobuf.Empty);
 	rpc WaitProcess(WaitProcessRequest) returns (WaitProcessResponse); // wait & reap like waitpid(2)
@@ -78,6 +81,11 @@ service AgentService {
 	rpc GetVolumeStats(VolumeStatsRequest) returns (VolumeStatsResponse);
 	rpc ResizeVolume(ResizeVolumeRequest) returns (google.protobuf.Empty);
 	rpc SetPolicy(SetPolicyRequest) returns (google.protobuf.Empty);
+}
+
+message WaitForDeviceRemovalRequest {
+	// PCI path in the same format as Device.id (for example "06").
+	string device_id = 1;
 }
 
 message CreateContainerRequest {

@@ -16,6 +16,7 @@ mod tests {
     use protocols::agent::{
         AddARPNeighborsRequest, CreateContainerRequest, CreateSandboxRequest, ExecProcessRequest,
         RemoveContainerRequest, UpdateInterfaceRequest, UpdateRoutesRequest,
+        WaitForDeviceRemovalRequest,
     };
     use serde::{Deserialize, Serialize};
 
@@ -32,6 +33,7 @@ mod tests {
         CreateSandboxRequest(CreateSandboxRequest),
         ExecProcessRequest(ExecProcessRequest),
         RemoveContainerRequest(RemoveContainerRequest),
+        WaitForDeviceRemovalRequest(WaitForDeviceRemovalRequest),
         UpdateInterfaceRequest(UpdateInterfaceRequest),
         UpdateRoutesRequest(UpdateRoutesRequest),
         AddARPNeighborsRequest(AddARPNeighborsRequest),
@@ -45,6 +47,9 @@ mod tests {
                 TestRequest::CreateSandboxRequest(_) => write!(f, "CreateSandboxRequest"),
                 TestRequest::ExecProcessRequest(_) => write!(f, "ExecProcessRequest"),
                 TestRequest::RemoveContainerRequest(_) => write!(f, "RemoveContainerRequest"),
+                TestRequest::WaitForDeviceRemovalRequest(_) => {
+                    write!(f, "WaitForDeviceRemovalRequest")
+                }
                 TestRequest::UpdateInterfaceRequest(_) => write!(f, "UpdateInterfaceRequest"),
                 TestRequest::UpdateRoutesRequest(_) => write!(f, "UpdateRoutesRequest"),
                 TestRequest::AddARPNeighborsRequest(_) => write!(f, "AddARPNeighborsRequest"),

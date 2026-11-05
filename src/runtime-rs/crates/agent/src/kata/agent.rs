@@ -100,6 +100,7 @@ impl_agent!(
     create_container | crate::CreateContainerRequest | crate::Empty | None,
     start_container | crate::ContainerID | crate::Empty | None,
     remove_container | crate::RemoveContainerRequest | crate::Empty | None,
+    wait_for_device_removal | crate::WaitForDeviceRemovalRequest | crate::Empty | None,
     exec_process | crate::ExecProcessRequest | crate::Empty | None,
     signal_process | crate::SignalProcessRequest | crate::Empty | None,
     wait_process | crate::WaitProcessRequest | crate::WaitProcessResponse | Some(0),

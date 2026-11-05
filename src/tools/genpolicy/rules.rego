@@ -54,6 +54,7 @@ default UpdateInterfaceRequest := false
 default UpdateRoutesRequest := false
 default VolumeStatsRequest := false
 default WaitProcessRequest := true
+default WaitForDeviceRemovalRequest := true
 default WriteStreamRequest := false
 
 # AllowRequestsFailingPolicy := true configures the Agent to *allow any
@@ -1885,4 +1886,11 @@ RemoveContainerRequest := {"ops": ops, "allowed": true} if {
     ops := concat_op_if_not_null(ops_builder1, del_container)
 
     print("RemoveContainerRequest: true")
+}
+
+# A failed CreateContainer never commits policy state. Removing its partial
+# resources, or retrying a completed removal, must still be permitted.
+RemoveContainerRequest := {"ops": [], "allowed": true} if {
+    input.container_id != ""
+    not get_state_container(input.container_id)
 }

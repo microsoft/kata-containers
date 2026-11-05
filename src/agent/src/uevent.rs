@@ -10,7 +10,10 @@ use crate::AGENT_CONFIG;
 use slog::Logger;
 
 use anyhow::{anyhow, Result};
-use netlink_sys::{protocols, AsyncSocket, AsyncSocketExt, SocketAddr, TokioSocket};
+use netlink_sys::{
+    protocols as netlink_protocols, AsyncSocket, AsyncSocketExt, SocketAddr, TokioSocket,
+};
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::os::unix::io::FromRawFd;
 use std::sync::Arc;
@@ -21,6 +24,128 @@ use tokio::sync::Mutex;
 use tracing::instrument;
 
 const VDB_HOTPLUG_TEST_DELAY: Duration = Duration::from_secs(5);
+
+#[derive(Debug)]
+struct DeviceRemoval {
+    root: String,
+    slots: Vec<String>,
+    prepared: bool,
+    completed: tokio::sync::watch::Sender<bool>,
+}
+
+#[derive(Debug, Default)]
+pub struct DeviceRemovalTracker {
+    containers: HashMap<String, HashSet<String>>,
+    devices: HashMap<String, DeviceRemoval>,
+}
+
+fn removal_identity(id: &str) -> Result<(String, String, Vec<String>)> {
+    let (root, path) = crate::linux_abi::pcipath_from_dev_tree_path(id)?;
+    let slots = path.iter().map(ToString::to_string).collect();
+    Ok((
+        format!("{root}/{path}"),
+        create_pci_root_bus_path(root),
+        slots,
+    ))
+}
+
+impl DeviceRemovalTracker {
+    // Register the original PCI identities before any device or storage resolution
+    // can fail. Shared users must not reset an already prepared barrier.
+    pub fn register(&mut self, req: &protocols::agent::CreateContainerRequest) -> Result<()> {
+        let ids = req
+            .devices
+            .iter()
+            .filter(|d| d.type_ == kata_types::device::DRIVER_BLK_PCI_TYPE)
+            .map(|d| d.id.as_str())
+            .chain(
+                req.storages
+                    .iter()
+                    .filter(|s| {
+                        s.driver == kata_types::device::DRIVER_BLK_PCI_TYPE
+                            && !s.source.starts_with("/dev")
+                    })
+                    .map(|s| s.source.as_str()),
+            );
+        for id in ids {
+            let (key, root, slots) = removal_identity(id)?;
+            self.containers
+                .entry(req.container_id.clone())
+                .or_default()
+                .insert(key.clone());
+            let replace = self.devices.get(&key).is_none_or(|d| *d.completed.borrow());
+            if replace {
+                let (completed, _) = tokio::sync::watch::channel(false);
+                self.devices.insert(
+                    key,
+                    DeviceRemoval {
+                        root,
+                        slots,
+                        prepared: false,
+                        completed,
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
+
+    pub fn prepare(&mut self, cid: &str) {
+        if let Some(ids) = self.containers.remove(cid) {
+            for id in ids {
+                if let Some(device) = self.devices.get_mut(&id) {
+                    device.prepared = true;
+                }
+            }
+        }
+    }
+
+    fn process_remove(&mut self, event: &Uevent) {
+        if event.subsystem != "pci" {
+            return;
+        }
+        for device in self.devices.values_mut().filter(|d| d.prepared) {
+            let Some(relative) = event.devpath.strip_prefix(&format!("{}/", device.root)) else {
+                continue;
+            };
+            let parts: Vec<_> = relative.split('/').collect();
+            if parts.len() == device.slots.len()
+                && parts.iter().zip(&device.slots).all(|(part, slot)| {
+                    part.rsplit_once(':').is_some_and(|(_, sf)| sf == slot)
+                        && part.parse::<crate::pci::Address>().is_ok()
+                })
+            {
+                device.completed.send_replace(true);
+            }
+        }
+    }
+
+    fn subscribe(&self, id: &str) -> Result<tokio::sync::watch::Receiver<bool>> {
+        let (key, _, _) = removal_identity(id)?;
+        let device = self
+            .devices
+            .get(&key)
+            .ok_or_else(|| anyhow!("No device removal registered for {id}"))?;
+        if !device.prepared {
+            return Err(anyhow!("Device removal not prepared for {id}"));
+        }
+        Ok(device.completed.subscribe())
+    }
+}
+
+pub async fn wait_for_device_removal(sandbox: &Arc<Mutex<Sandbox>>, id: &str) -> Result<()> {
+    let mut completed = sandbox.lock().await.device_removals.subscribe(id)?;
+    tokio::time::timeout(AGENT_CONFIG.hotplug_timeout, async {
+        loop {
+            if *completed.borrow_and_update() {
+                return Ok(());
+            }
+            completed.changed().await.map_err(|e| anyhow!(e))?;
+        }
+    })
+    .await
+    .map_err(|_| anyhow!("Timeout waiting for PCI device removal {id}"))?
+}
 
 // Convenience function to obtain the scope logger.
 fn sl() -> slog::Logger {
@@ -118,6 +243,11 @@ impl Uevent {
     async fn process_remove(&self, logger: &Logger, sandbox: &Arc<Mutex<Sandbox>>) {
         let mut sb = sandbox.lock().await;
         sb.uevent_map.remove(&self.devpath);
+        if self.subsystem == "pci" {
+            let prefix = format!("{}/", self.devpath);
+            sb.uevent_map.retain(|path, _| !path.starts_with(&prefix));
+        }
+        sb.device_removals.process_remove(self);
     }
 
     #[instrument]
@@ -199,7 +329,7 @@ pub async fn watch_uevents(
         let fd = libc::socket(
             libc::AF_NETLINK,
             libc::SOCK_DGRAM | libc::SOCK_CLOEXEC,
-            protocols::NETLINK_KOBJECT_UEVENT as libc::c_int,
+            netlink_protocols::NETLINK_KOBJECT_UEVENT as libc::c_int,
         );
         socket = TokioSocket::from_raw_fd(fd);
     }
@@ -270,6 +400,138 @@ pub(crate) fn spawn_test_watcher(sandbox: Arc<Mutex<Sandbox>>, uev: Uevent) {
 mod tests {
     use super::*;
     use crate::device::block_device_handler::VirtioBlkPciMatcher;
+
+    fn block_request(cid: &str) -> protocols::agent::CreateContainerRequest {
+        protocols::agent::CreateContainerRequest {
+            container_id: cid.to_string(),
+            devices: vec![protocols::agent::Device {
+                id: "06".to_string(),
+                type_: kata_types::device::DRIVER_BLK_PCI_TYPE.to_string(),
+                ..Default::default()
+            }],
+            storages: vec![protocols::agent::Storage {
+                driver: kata_types::device::DRIVER_BLK_PCI_TYPE.to_string(),
+                source: "07".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn pci_remove() -> Uevent {
+        Uevent {
+            action: U_EVENT_ACTION_REMOVE.to_string(),
+            subsystem: "pci".to_string(),
+            devpath: format!("{}/0000:00:06.0", create_pci_root_bus_path("00")),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_device_removal_preprocessed_and_shared_cleanup() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let sandbox = Arc::new(Mutex::new(Sandbox::new(&logger).unwrap()));
+        {
+            let mut sb = sandbox.lock().await;
+            let mut request = block_request("first");
+            request.storages.push(protocols::agent::Storage {
+                driver: kata_types::device::DRIVER_BLK_PCI_TYPE.to_string(),
+                source: "/dev/vda".to_string(),
+                ..Default::default()
+            });
+            sb.device_removals.register(&request).unwrap();
+            assert!(sb.device_removals.subscribe("06").is_err());
+            assert!(sb.device_removals.subscribe("08").is_err());
+            sb.device_removals
+                .register(&block_request("shared"))
+                .unwrap();
+            sb.device_removals.prepare("first");
+            assert!(sb.device_removals.subscribe("07").is_ok());
+        }
+        pci_remove().process(&logger, &sandbox).await;
+        sandbox.lock().await.device_removals.prepare("shared");
+        sandbox.lock().await.device_removals.prepare("shared");
+        wait_for_device_removal(&sandbox, "06").await.unwrap();
+        wait_for_device_removal(&sandbox, "06.0").await.unwrap();
+        {
+            let mut sb = sandbox.lock().await;
+            sb.device_removals.register(&block_request("new")).unwrap();
+            assert!(sb.device_removals.subscribe("06").is_err());
+            assert_eq!(sb.device_removals.devices.len(), 2);
+            sb.device_removals.prepare("new");
+        }
+        assert!(wait_for_device_removal(&sandbox, "06").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_device_removal_requires_pci_function_and_retries_timeout() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let sandbox = Arc::new(Mutex::new(Sandbox::new(&logger).unwrap()));
+        {
+            let mut sb = sandbox.lock().await;
+            sb.device_removals
+                .register(&block_request("failed"))
+                .unwrap();
+            sb.device_removals.prepare("failed");
+        }
+        let mut child = pci_remove();
+        child.subsystem = "block".to_string();
+        child.devpath.push_str("/virtio5/block/vdb");
+        child.process(&logger, &sandbox).await;
+        assert!(wait_for_device_removal(&sandbox, "06").await.is_err());
+        let (result, ()) = tokio::join!(wait_for_device_removal(&sandbox, "06"), async {
+            tokio::task::yield_now().await;
+            pci_remove().process(&logger, &sandbox).await;
+        });
+        result.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_delayed_old_add_remove_new_add_barrier() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let sandbox = Arc::new(Mutex::new(Sandbox::new(&logger).unwrap()));
+        sandbox
+            .lock()
+            .await
+            .device_removals
+            .register(&block_request("old"))
+            .unwrap();
+        let old = Uevent {
+            action: U_EVENT_ACTION_ADD.to_string(),
+            subsystem: "block".to_string(),
+            devpath: "/devices/pci0000:00/0000:00:06.0/virtio5/block/vdb".to_string(),
+            devname: "vdb".to_string(),
+            ..Default::default()
+        };
+        let (old_result, ()) = tokio::join!(
+            wait_for_uevent(&sandbox, VirtioBlkPciMatcher::new("/0000:00:06.0", "00")),
+            old.process(&logger, &sandbox),
+        );
+        assert!(old_result.is_err());
+        sandbox.lock().await.device_removals.prepare("old");
+        assert!(wait_for_device_removal(&sandbox, "06").await.is_err());
+        let mut child_remove = old.clone();
+        child_remove.action = U_EVENT_ACTION_REMOVE.to_string();
+        child_remove.process(&logger, &sandbox).await;
+        pci_remove().process(&logger, &sandbox).await;
+        wait_for_device_removal(&sandbox, "06").await.unwrap();
+        sandbox
+            .lock()
+            .await
+            .device_removals
+            .register(&block_request("new"))
+            .unwrap();
+        let new = Uevent {
+            devname: "vdc".to_string(),
+            devpath: "/devices/pci0000:00/0000:00:06.0/virtio6/block/vdc".to_string(),
+            ..old
+        };
+        new.process(&logger, &sandbox).await;
+        let result = wait_for_uevent(&sandbox, VirtioBlkPciMatcher::new("/0000:00:06.0", "00"))
+            .await
+            .unwrap();
+        assert_eq!(result.devname, "vdc");
+    }
 
     #[tokio::test]
     async fn test_vdb_hotplug_delay_triggers_timeout() {

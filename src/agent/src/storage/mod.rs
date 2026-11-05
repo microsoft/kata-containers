@@ -299,6 +299,15 @@ pub async fn add_storages(
                     .find(|s| s.mount_point == *mp)
                     .map_or(storage.shared, |s| s.shared);
                 let state = sandbox.lock().await.add_sandbox_storage(mp, shared).await;
+                if let Some(cid) = &cid {
+                    sandbox
+                        .lock()
+                        .await
+                        .container_mounts
+                        .entry(cid.clone())
+                        .or_default()
+                        .push(mp.clone());
+                }
 
                 // Only update device for the first occurrence
                 if state.ref_count().await == 1 {
@@ -345,6 +354,15 @@ pub async fn add_storages(
             .await
             .add_sandbox_storage(&path, storage.shared)
             .await;
+        if let Some(cid) = &cid {
+            sandbox
+                .lock()
+                .await
+                .container_mounts
+                .entry(cid.clone())
+                .or_default()
+                .push(path.clone());
+        }
         if state.ref_count().await > 1 {
             if let Some(p) = state.path() {
                 if !p.is_empty() {
