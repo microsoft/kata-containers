@@ -438,7 +438,8 @@ impl AgentService {
         s.add_container(ctr);
         info!(sl(), "created container!");
 
-        Ok(())
+        // Ok(())
+        Err(anyhow!(nix::Error::EINVAL))
     }
 
     #[instrument]
