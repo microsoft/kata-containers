@@ -40,6 +40,7 @@ default UpdateContainerRequest := true
 default UpdateEphemeralMountsRequest := true
 default UpdateInterfaceRequest := true
 default UpdateRoutesRequest := true
+default WaitForDeviceRemoval := true
 default WaitProcessRequest := true
 default WriteStreamRequest := true
 
