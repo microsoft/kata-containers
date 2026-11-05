@@ -10,6 +10,7 @@ use common::{
     error::{is_no_such_process_error, Error},
     types::{ContainerID, ContainerProcess, ProcessExitStatus, ProcessStatus, ProcessType},
 };
+use containerd_shim_protos::ttrpc;
 use hypervisor::device::device_manager::DeviceManager;
 use nix::sys::signal::Signal;
 use oci::LinuxResources;
@@ -35,7 +36,7 @@ pub struct ContainerInner {
     pub(crate) volumes: Vec<Arc<dyn Volume>>,
     pub(crate) devices: Vec<String>, // device ids of devices hotplugged to the container
     pub(crate) linux_resources: Option<LinuxResources>,
-    removed_from_agent: bool,
+    guest_cleanup_needed: bool,
 }
 
 impl ContainerInner {
@@ -54,12 +55,32 @@ impl ContainerInner {
             volumes: vec![],
             devices: vec![],
             linux_resources,
-            removed_from_agent: false,
+            guest_cleanup_needed: false,
         }
     }
 
     pub(crate) fn has_pending_cleanup(&self) -> bool {
         !self.devices.is_empty() || !self.volumes.is_empty() || !self.rootfs.is_empty()
+    }
+
+    pub(crate) async fn create_container(
+        &mut self,
+        request: agent::CreateContainerRequest,
+    ) -> Result<()> {
+        // A transport failure can leave a partially created guest container.
+        self.guest_cleanup_needed = true;
+        if let Err(err) = self.agent.create_container(request).await {
+            if matches!(
+                err.downcast_ref::<ttrpc::Error>(),
+                Some(ttrpc::Error::RpcStatus(status))
+                    if status.code() == ttrpc::Code::PERMISSION_DENIED
+            ) {
+                // Policy rejection happens before any guest resources are created.
+                self.guest_cleanup_needed = false;
+            }
+            return Err(err).context("agent create container");
+        }
+        Ok(())
     }
 
     fn container_id(&self) -> &str {
@@ -197,12 +218,12 @@ impl ContainerInner {
         let exit_status = self.get_exit_status().await;
         let _locked_exit_status = exit_status.read().await;
         info!(self.logger, "container terminated");
-        if !self.removed_from_agent {
+        if self.guest_cleanup_needed {
             let remove_request = agent::RemoveContainerRequest {
                 container_id: cid.to_string(),
             };
             match self.agent.remove_container(remove_request).await {
-                Ok(_) => self.removed_from_agent = true,
+                Ok(_) => self.guest_cleanup_needed = false,
                 // Still pending, so a retry for pending host resources removes it again.
                 Err(e) if force => warn!(
                     self.logger,
@@ -456,6 +477,8 @@ mod tests {
     struct FakeAgent {
         removed: AtomicUsize,
         remove_failures: usize,
+        create_error: Option<ttrpc::Code>,
+        create_transport_failure: bool,
     }
 
     #[async_trait]
@@ -539,7 +562,17 @@ mod tests {
             unimplemented!()
         }
         async fn create_container(&self, _: agent::CreateContainerRequest) -> Result<agent::Empty> {
-            unimplemented!()
+            if self.create_transport_failure {
+                return Err(ttrpc::Error::RemoteClosed.into());
+            }
+            if let Some(code) = self.create_error {
+                return Err(ttrpc::Error::RpcStatus(ttrpc::get_status(
+                    code,
+                    "injected create container failure",
+                ))
+                .into());
+            }
+            Ok(agent::Empty::new())
         }
         async fn pause_container(&self, _: agent::ContainerID) -> Result<agent::Empty> {
             unimplemented!()
@@ -720,7 +753,7 @@ mod tests {
 
     const CID: &str = "container";
 
-    async fn new_container(agent: Arc<FakeAgent>) -> (ContainerInner, ContainerProcess) {
+    async fn new_uncreated_container(agent: Arc<FakeAgent>) -> (ContainerInner, ContainerProcess) {
         let process = ContainerProcess::new(CID, "").unwrap();
         let init_process = Process::new(&process, 0, "", None, None, None, false);
         init_process.set_status(ProcessStatus::Running).await;
@@ -731,12 +764,83 @@ mod tests {
         )
     }
 
+    async fn new_container(agent: Arc<FakeAgent>) -> (ContainerInner, ContainerProcess) {
+        let (mut inner, process) = new_uncreated_container(agent).await;
+        inner
+            .create_container(agent::CreateContainerRequest::default())
+            .await
+            .unwrap();
+        (inner, process)
+    }
+
     async fn new_device_manager() -> RwLock<DeviceManager> {
         RwLock::new(
             DeviceManager::new(Arc::new(Qemu::new()), None)
                 .await
                 .unwrap(),
         )
+    }
+
+    #[tokio::test]
+    async fn create_result_controls_guest_cleanup() {
+        for (create_error, create_transport_failure, expected_removals) in [
+            (None, false, 1),
+            (Some(ttrpc::Code::PERMISSION_DENIED), false, 0),
+            (Some(ttrpc::Code::INTERNAL), false, 1),
+            (Some(ttrpc::Code::DEADLINE_EXCEEDED), false, 1),
+            (None, true, 1),
+        ] {
+            let agent = Arc::new(FakeAgent {
+                create_error,
+                create_transport_failure,
+                ..Default::default()
+            });
+            let (mut inner, _) = new_uncreated_container(agent.clone()).await;
+            let result = inner
+                .create_container(agent::CreateContainerRequest::default())
+                .await;
+            assert_eq!(
+                result.is_err(),
+                create_error.is_some() || create_transport_failure
+            );
+            if let Some(code) = create_error {
+                assert!(matches!(
+                    result.unwrap_err().downcast_ref::<ttrpc::Error>(),
+                    Some(ttrpc::Error::RpcStatus(status)) if status.code() == code
+                ));
+            }
+            let device_manager = new_device_manager().await;
+            let volume = FakeResource::failing(0);
+            let rootfs = FakeResource::failing(0);
+            inner.volumes = vec![volume.clone()];
+            inner.rootfs = vec![rootfs.clone()];
+
+            inner
+                .cleanup_container(CID, true, &device_manager)
+                .await
+                .unwrap();
+
+            assert_eq!(agent.removed.load(Ordering::SeqCst), expected_removals);
+            assert_eq!(volume.cleanups(), 1);
+            assert_eq!(rootfs.cleanups(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn cleanup_before_guest_create_only_removes_host_resources() {
+        let agent = Arc::new(FakeAgent::default());
+        let (mut inner, _) = new_uncreated_container(agent.clone()).await;
+        let device_manager = new_device_manager().await;
+        let volume = FakeResource::failing(0);
+        inner.volumes = vec![volume.clone()];
+
+        inner
+            .cleanup_container(CID, true, &device_manager)
+            .await
+            .unwrap();
+
+        assert_eq!(agent.removed.load(Ordering::SeqCst), 0);
+        assert_eq!(volume.cleanups(), 1);
     }
 
     #[tokio::test]

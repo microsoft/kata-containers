@@ -45,9 +45,10 @@ pub struct PolicyStateGuard {
 }
 
 impl PolicyStateGuard {
-    /// commit() is used after is_allowed_stateful() and after successfully processing
-    /// a ttrpc request. It applies to the policy state data the patch returned by the
-    /// rego policy, if there was such a patch.
+    /// commit() applies the patch returned by the rego policy after processing an
+    /// authorized request. CreateContainerRequest also commits on failure so that
+    /// RemoveContainerRequest can authorize cleanup of partially created resources.
+    /// Other stateful requests commit only on success.
     pub async fn commit(self) -> ttrpc::Result<()> {
         let mut policy = AGENT_POLICY.lock().await;
         self.decision.commit(&mut policy).await.map_err(|e| {
@@ -67,11 +68,13 @@ impl PolicyStateGuard {
 /// - ExecProcessRequest
 /// - RemoveContainerRequest
 ///
-/// E.g., a typical caller's code flow is:
+/// E.g., a caller that commits only on success uses:
 ///
 /// let policy_state = is_allowed_stateful(&req).await?;
-/// self.do_create_container(req).await.map_ttrpc_err(same)?;
+/// self.do_remove_container(req).await.map_ttrpc_err(same)?;
 /// policy_state.commit().await?;
+///
+/// CreateContainerRequest must commit even when processing fails; see commit().
 pub async fn is_allowed_stateful(
     req: &(impl MessageDyn + serde::Serialize),
 ) -> ttrpc::Result<PolicyStateGuard> {

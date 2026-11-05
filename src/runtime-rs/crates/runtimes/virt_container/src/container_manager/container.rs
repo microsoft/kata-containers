@@ -308,10 +308,7 @@ impl Container {
             ..Default::default()
         };
 
-        self.agent
-            .create_container(r)
-            .await
-            .context("agent create container")?;
+        inner.create_container(r).await?;
         self.resource_manager.dump().await;
         Ok(())
     }

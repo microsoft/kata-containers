@@ -470,11 +470,10 @@ impl AgentService {
 
         let mut sandbox = self.sandbox.lock().await;
         sandbox.bind_watcher.remove_container(&cid).await;
-        sandbox
-            .get_container(&cid)
-            .ok_or_else(|| anyhow!("Invalid container id"))?
-            .destroy()
-            .await?;
+        // A failed create can leave resources without a registered container.
+        if let Some(container) = sandbox.get_container(&cid) {
+            container.destroy().await?;
+        }
         remove_container_resources(&mut sandbox, &cid).await?;
         Ok(())
     }
@@ -947,8 +946,10 @@ impl agent_ttrpc::AgentService for AgentService {
     ) -> ttrpc::Result<Empty> {
         trace_rpc_call!(ctx, "create_container", req);
         let policy_state = is_allowed_stateful(&req).await?;
-        self.do_create_container(req).await.map_ttrpc_err(same)?;
+        let result = self.do_create_container(req).await.map_ttrpc_err(same);
+        // Retain authorization for cleanup even if creation only partially completed.
         policy_state.commit().await?;
+        result?;
         Ok(Empty::new())
     }
 
@@ -2800,6 +2801,126 @@ mod tests {
             metadata: std::collections::HashMap::new(),
             timeout_nano: 0,
         }
+    }
+
+    #[tokio::test]
+    #[serial]
+    #[cfg(feature = "agent-policy")]
+    async fn failed_create_preserves_cleanup_authorization() {
+        let original_policy = {
+            let _state_lock = crate::POLICY_STATE_LOCK.lock().await;
+            let mut policy = crate::AGENT_POLICY.lock().await;
+            let original =
+                std::mem::replace(&mut *policy, kata_agent_policy::policy::AgentPolicy::new());
+            policy
+                .set_policy(
+                    r#"
+                    package agent_policy
+
+                    AllowRequestsFailingPolicy := false
+                    default CreateContainerRequest := false
+                    default RemoveContainerRequest := false
+
+                    CreateContainerRequest := {"allowed": true, "ops": [
+                        {"op": "add", "path": "/pstate/p_container_0", "value": input.container_id}
+                    ]} if {
+                        input.container_id != "denied"
+                        not data.pstate.p_container_0
+                    }
+
+                    RemoveContainerRequest := {"allowed": true, "ops": [
+                        {"op": "remove", "path": "/pstate/p_container_0"}
+                    ]} if {
+                        data.pstate.p_container_0 == input.container_id
+                    }
+                    "#,
+                )
+                .await
+                .unwrap();
+            original
+        };
+
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let service = AgentService {
+            sandbox: Arc::new(Mutex::new(Sandbox::new(&logger).unwrap())),
+            init_mode: true,
+            oma: None,
+        };
+        let ctx = mk_ttrpc_context();
+
+        let denied = service
+            .create_container(
+                &ctx,
+                protocols::agent::CreateContainerRequest {
+                    container_id: "denied".into(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        assert!(matches!(
+            denied,
+            Err(ttrpc::Error::RpcStatus(status))
+                if status.code() == ttrpc::Code::PERMISSION_DENIED
+        ));
+
+        for cid in ["failed-create", "retry-create"] {
+            // Missing OCI fails before privileged operations, but after authorization.
+            let result = service
+                .create_container(
+                    &ctx,
+                    protocols::agent::CreateContainerRequest {
+                        container_id: cid.into(),
+                        ..Default::default()
+                    },
+                )
+                .await;
+            assert!(matches!(
+                result,
+                Err(ttrpc::Error::RpcStatus(status))
+                    if status.code() == ttrpc::Code::INTERNAL
+            ));
+
+            let denied_remove = service
+                .remove_container(
+                    &ctx,
+                    protocols::agent::RemoveContainerRequest {
+                        container_id: "unrelated".into(),
+                        ..Default::default()
+                    },
+                )
+                .await;
+            assert!(matches!(
+                denied_remove,
+                Err(ttrpc::Error::RpcStatus(status))
+                    if status.code() == ttrpc::Code::PERMISSION_DENIED
+            ));
+
+            service
+                .sandbox
+                .lock()
+                .await
+                .container_mounts
+                .insert(cid.into(), vec![]);
+            service
+                .remove_container(
+                    &ctx,
+                    protocols::agent::RemoveContainerRequest {
+                        container_id: cid.into(),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+            assert!(!service
+                .sandbox
+                .lock()
+                .await
+                .container_mounts
+                .contains_key(cid));
+        }
+
+        let _state_lock = crate::POLICY_STATE_LOCK.lock().await;
+        *crate::AGENT_POLICY.lock().await = original_policy;
     }
 
     fn create_dummy_opts() -> CreateOpts {
