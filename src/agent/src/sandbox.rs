@@ -138,6 +138,8 @@ pub struct Sandbox {
     pub bind_watcher: BindWatcher,
     pub pcimap: HashMap<String, PciHostGuestMapping>,
     pub devcg_info: Arc<RwLock<DevicesCgroupInfo>>,
+
+    pub inject_hotplug_timeut: bool,
 }
 
 impl Sandbox {
@@ -173,6 +175,7 @@ impl Sandbox {
             bind_watcher: BindWatcher::new(),
             pcimap: HashMap::new(),
             devcg_info: Arc::new(RwLock::new(DevicesCgroupInfo::default())),
+            inject_hotplug_timeut: true,
         })
     }
 

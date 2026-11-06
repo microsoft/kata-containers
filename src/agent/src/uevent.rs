@@ -135,11 +135,20 @@ pub async fn wait_for_uevent(
     let (tx, rx) = tokio::sync::oneshot::channel::<Uevent>();
     let idx = sb.uevent_watchers.len();
     sb.uevent_watchers.push(Some((Box::new(matcher), tx)));
+
+    let hotplug_timeout = if sb.inject_hotplug_timeut {
+        sb.inject_hotplug_timeut = false;
+        std::time::Duration::from_millis(100)
+    } else {
+        AGENT_CONFIG.hotplug_timeout
+    };
+
     drop(sb); // unlock
 
-    info!(sl(), "{}: waiting on channel", logprefix);
-
-    let hotplug_timeout = AGENT_CONFIG.hotplug_timeout;
+    info!(
+        sl(),
+        "{}: waiting {:?} on channel", logprefix, hotplug_timeout
+    );
 
     let uev = match tokio::time::timeout(hotplug_timeout, rx).await {
         Ok(v) => v?,
