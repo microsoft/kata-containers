@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::device::online_device;
+use crate::device::{online_device, BLOCK};
 use crate::linux_abi::*;
 use crate::sandbox::Sandbox;
 use crate::AGENT_CONFIG;
@@ -14,10 +14,14 @@ use netlink_sys::{protocols, AsyncSocket, AsyncSocketExt, SocketAddr, TokioSocke
 use std::fmt::Debug;
 use std::os::unix::io::FromRawFd;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::select;
 use tokio::sync::watch::Receiver;
 use tokio::sync::Mutex;
 use tracing::instrument;
+
+// Temporary fault injection: delay discovery of the first hotplugged block device.
+const FIRST_BLOCK_ADD_DELAY: Duration = Duration::from_secs(5);
 
 // Convenience function to obtain the scope logger.
 fn sl() -> slog::Logger {
@@ -101,8 +105,35 @@ impl Uevent {
     }
 
     #[instrument]
-    async fn process(&self, logger: &Logger, sandbox: &Arc<Mutex<Sandbox>>) {
+    async fn process(
+        &self,
+        logger: &Logger,
+        sandbox: &Arc<Mutex<Sandbox>>,
+        delay_first_block_add: &mut bool,
+    ) {
         if self.action == U_EVENT_ACTION_ADD {
+            if self.subsystem == BLOCK && *delay_first_block_add {
+                *delay_first_block_add = false;
+                let event = self.clone();
+                let logger = logger.clone();
+                let sandbox = Arc::clone(sandbox);
+                warn!(
+                    logger,
+                    "injecting one-shot block hotplug delay";
+                    "device" => &self.devpath,
+                    "delay_ms" => FIRST_BLOCK_ADD_DELAY.as_millis(),
+                );
+                tokio::spawn(async move {
+                    tokio::time::sleep(FIRST_BLOCK_ADD_DELAY).await;
+                    info!(
+                        logger,
+                        "processing delayed block hotplug";
+                        "device" => &event.devpath,
+                    );
+                    event.process_add(&logger, &sandbox).await;
+                });
+                return;
+            }
             return self.process_add(logger, sandbox).await;
         } else if self.action == U_EVENT_ACTION_REMOVE {
             return self.process_remove(logger, sandbox).await;
@@ -186,6 +217,7 @@ pub async fn watch_uevents(
 
     socket.socket_mut().bind(&SocketAddr::new(0, 1))?;
 
+    let mut delay_first_block_add = true;
     loop {
         select! {
             _ = shutdown.changed() => {
@@ -213,7 +245,7 @@ pub async fn watch_uevents(
                             Ok(text) => {
                                 let event = Uevent::new(&text);
                                 info!(logger, "got uevent message"; "event" => format!("{:?}", event));
-                                event.process(&logger, &sandbox).await;
+                                event.process(&logger, &sandbox, &mut delay_first_block_add).await;
                             }
                         }
                     }
@@ -257,6 +289,90 @@ mod tests {
         fn is_match(&self, _: &Uevent) -> bool {
             true
         }
+    }
+
+    #[derive(Debug)]
+    struct MatchDevpath(String);
+
+    impl UeventMatcher for MatchDevpath {
+        fn is_match(&self, uev: &Uevent) -> bool {
+            uev.devpath == self.0
+        }
+    }
+
+    #[tokio::test]
+    async fn test_first_block_add_delay_and_retry() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let sandbox = Arc::new(Mutex::new(Sandbox::new(&logger).unwrap()));
+        let mut delay_first_block_add = true;
+        let pci = Uevent {
+            action: U_EVENT_ACTION_ADD.to_string(),
+            subsystem: "pci".to_string(),
+            devpath: "/devices/test/pci".to_string(),
+            ..Default::default()
+        };
+        pci.process(&logger, &sandbox, &mut delay_first_block_add)
+            .await;
+        assert!(delay_first_block_add);
+        assert_eq!(sandbox.lock().await.uevent_map[&pci.devpath], pci);
+
+        let block = Uevent {
+            action: U_EVENT_ACTION_ADD.to_string(),
+            subsystem: BLOCK.to_string(),
+            devpath: "/devices/test/block/vda".to_string(),
+            devname: "vda".to_string(),
+            ..Default::default()
+        };
+        let started = tokio::time::Instant::now();
+        block
+            .process(&logger, &sandbox, &mut delay_first_block_add)
+            .await;
+        assert!(!delay_first_block_add);
+        assert!(!sandbox.lock().await.uevent_map.contains_key(&block.devpath));
+
+        let second_block = Uevent {
+            devpath: "/devices/test/block/vdb".to_string(),
+            devname: "vdb".to_string(),
+            ..block.clone()
+        };
+        second_block
+            .process(&logger, &sandbox, &mut delay_first_block_add)
+            .await;
+        assert_eq!(
+            sandbox.lock().await.uevent_map[&second_block.devpath],
+            second_block
+        );
+
+        assert_eq!(AGENT_CONFIG.hotplug_timeout, Duration::from_secs(3));
+        let err = wait_for_uevent(&sandbox, MatchDevpath(block.devpath.clone()))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Timeout after"));
+        assert!(started.elapsed() >= AGENT_CONFIG.hotplug_timeout);
+        assert!(!sandbox.lock().await.uevent_map.contains_key(&block.devpath));
+
+        let retry_started = tokio::time::Instant::now();
+        let received = wait_for_uevent(&sandbox, MatchDevpath(block.devpath.clone()))
+            .await
+            .unwrap();
+        assert_eq!(received, block);
+        assert!(started.elapsed() >= FIRST_BLOCK_ADD_DELAY);
+        assert!(retry_started.elapsed() < AGENT_CONFIG.hotplug_timeout);
+        assert_eq!(sandbox.lock().await.uevent_map[&block.devpath], block);
+
+        let cached = wait_for_uevent(&sandbox, MatchDevpath(block.devpath.clone()))
+            .await
+            .unwrap();
+        assert_eq!(cached, block);
+
+        let remove = Uevent {
+            action: U_EVENT_ACTION_REMOVE.to_string(),
+            ..block.clone()
+        };
+        remove
+            .process(&logger, &sandbox, &mut delay_first_block_add)
+            .await;
+        assert!(!sandbox.lock().await.uevent_map.contains_key(&block.devpath));
     }
 
     #[tokio::test]
