@@ -138,7 +138,8 @@ pub async fn wait_for_uevent(
 
     let hotplug_timeout = if sb.inject_hotplug_timeut {
         sb.inject_hotplug_timeut = false;
-        std::time::Duration::from_millis(100)
+        // std::time::Duration::from_millis(100)
+        std::time::Duration::from_millis(10)
     } else {
         AGENT_CONFIG.hotplug_timeout
     };
