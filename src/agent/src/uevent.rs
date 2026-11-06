@@ -136,7 +136,8 @@ pub async fn wait_for_uevent(
     let idx = sb.uevent_watchers.len();
     sb.uevent_watchers.push(Some((Box::new(matcher), tx)));
 
-    let hotplug_timeout = if sb.inject_hotplug_timeut {
+    let inject_hotplug_timeout = sb.inject_hotplug_timeut;
+    let hotplug_timeout = if inject_hotplug_timeout {
         sb.inject_hotplug_timeut = false;
         // std::time::Duration::from_millis(100)
         std::time::Duration::from_millis(10)
@@ -154,6 +155,15 @@ pub async fn wait_for_uevent(
     let uev = match tokio::time::timeout(hotplug_timeout, rx).await {
         Ok(v) => v?,
         Err(_) => {
+            if inject_hotplug_timeout {
+                warn!(
+                    sl(),
+                    "TEST: delaying timeout cleanup for one second to allow event delivery";
+                    "watcher_index" => idx,
+                );
+                // Leave the sandbox unlocked so the listener can consume this watcher.
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
             let mut sb = sandbox.lock().await;
             let matcher = sb.uevent_watchers[idx].take().unwrap().0;
 
@@ -267,6 +277,46 @@ mod tests {
         fn is_match(&self, _: &Uevent) -> bool {
             true
         }
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "called `Option::unwrap()` on a `None` value")]
+    async fn test_injected_timeout_cleanup_panics_after_late_add() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let sandbox = Arc::new(Mutex::new(Sandbox::new(&logger).unwrap()));
+        let event = Uevent {
+            action: U_EVENT_ACTION_ADD.to_string(),
+            devpath: "/test/injected-timeout".to_string(),
+            ..Default::default()
+        };
+
+        let deliver_after_timeout = async {
+            tokio::time::timeout(std::time::Duration::from_millis(500), async {
+                loop {
+                    let receiver_closed = sandbox
+                        .lock()
+                        .await
+                        .uevent_watchers
+                        .iter()
+                        .flatten()
+                        .any(|(_, sender)| sender.is_closed());
+                    if receiver_closed {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .expect("injected timeout did not close the receiver");
+
+            event.process_add(&logger, &sandbox).await;
+        };
+
+        let (_, result) = tokio::join!(
+            deliver_after_timeout,
+            wait_for_uevent(&sandbox, AlwaysMatch())
+        );
+        result.expect("timeout cleanup returned instead of panicking");
     }
 
     #[tokio::test]
