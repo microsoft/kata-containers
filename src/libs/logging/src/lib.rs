@@ -48,6 +48,16 @@ const LOG_LEVELS: &[(&str, slog::Level)] = &[
 ];
 
 const DEFAULT_SUBSYSTEM: &str = "root";
+const DEFAULT_LOG_CHANNEL_SIZE: usize = 128;
+
+fn log_channel_size(level: slog::Level) -> usize {
+    if level.as_usize() >= slog::Level::Debug.as_usize() {
+        1024
+    } else {
+        // Preserve slog-async's default capacity outside debug logging.
+        DEFAULT_LOG_CHANNEL_SIZE
+    }
+}
 
 // Creates a logger which prints output as human readable text to the terminal
 pub fn create_term_logger(level: slog::Level) -> (slog::Logger, slog_async::AsyncGuard) {
@@ -72,6 +82,7 @@ pub fn create_term_logger(level: slog::Level) -> (slog::Logger, slog_async::Asyn
 
     // Ensure the logger is thread-safe
     let (async_drain, guard) = slog_async::Async::new(filter_drain)
+        .chan_size(log_channel_size(level))
         .thread_name("slog-async-logger".into())
         .build_with_guard();
 
@@ -100,12 +111,46 @@ where
     create_logger_with_destination(name, source, level, LogDestination::File(Box::new(writer)))
 }
 
+/// Create an early-boot debug logger without enlarging the queue before configuration is known.
+pub fn create_bootstrap_logger<W>(
+    name: &str,
+    source: &str,
+    writer: W,
+) -> (slog::Logger, slog_async::AsyncGuard)
+where
+    W: Write + Send + Sync + 'static,
+{
+    create_logger_with_destination_and_channel_size(
+        name,
+        source,
+        slog::Level::Debug,
+        LogDestination::File(Box::new(writer)),
+        DEFAULT_LOG_CHANNEL_SIZE,
+    )
+}
+
 // Creates a logger which prints output as JSON or to systemd journal
 pub fn create_logger_with_destination(
     name: &str,
     source: &str,
     level: slog::Level,
     destination: LogDestination,
+) -> (slog::Logger, slog_async::AsyncGuard) {
+    create_logger_with_destination_and_channel_size(
+        name,
+        source,
+        level,
+        destination,
+        log_channel_size(level),
+    )
+}
+
+fn create_logger_with_destination_and_channel_size(
+    name: &str,
+    source: &str,
+    level: slog::Level,
+    destination: LogDestination,
+    channel_size: usize,
 ) -> (slog::Logger, slog_async::AsyncGuard) {
     // Check the destination type before consuming it.
     // The `matches` macro performs a non-consuming check (it borrows).
@@ -151,6 +196,7 @@ pub fn create_logger_with_destination(
 
     // Ensure the logger is thread-safe
     let (async_drain, guard) = slog_async::Async::new(filter_drain)
+        .chan_size(channel_size)
         .thread_name("slog-async-logger".into())
         .build_with_guard();
 
@@ -390,6 +436,86 @@ mod tests {
     use slog::{crit, debug, error, info, warn, Logger};
     use std::io::prelude::*;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_logger_burst_capacity() {
+        use std::sync::{mpsc, Mutex};
+        use std::time::Duration;
+
+        struct PausedWriter {
+            file: NamedTempFile,
+            started: Option<mpsc::SyncSender<()>>,
+            resume: Mutex<mpsc::Receiver<()>>,
+        }
+
+        impl Write for PausedWriter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                if let Some(started) = self.started.take() {
+                    started.send(()).map_err(io::Error::other)?;
+                    self.resume
+                        .get_mut()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(10))
+                        .map_err(io::Error::other)?;
+                }
+                self.file.write(buf)
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                self.file.flush()
+            }
+        }
+
+        for (level, expected, bootstrap) in [
+            (slog::Level::Critical, 128, false),
+            (slog::Level::Error, 128, false),
+            (slog::Level::Warning, 128, false),
+            (slog::Level::Info, 128, false),
+            (slog::Level::Debug, 1024, false),
+            (slog::Level::Trace, 1024, false),
+            (slog::Level::Debug, 128, true),
+        ] {
+            let file = NamedTempFile::new().unwrap();
+            let mut reader = file.reopen().unwrap();
+            let (started_tx, started_rx) = mpsc::sync_channel(1);
+            let (resume_tx, resume_rx) = mpsc::sync_channel(1);
+            let writer = PausedWriter {
+                file,
+                started: Some(started_tx),
+                resume: Mutex::new(resume_rx),
+            };
+            let (logger, guard) = if bootstrap {
+                create_bootstrap_logger("test", "test", writer)
+            } else {
+                create_logger("test", "test", level, writer)
+            };
+
+            crit!(logger, "pause writer");
+            let started = started_rx.recv_timeout(Duration::from_secs(10));
+            if started.is_ok() {
+                // Pause the worker so the number of queued records is deterministic.
+                for index in 0..1024 {
+                    crit!(logger, "burst"; "index" => index);
+                }
+            }
+            resume_tx.send(()).unwrap();
+            started.unwrap();
+            drop(guard);
+            drop(logger);
+
+            let mut contents = String::new();
+            reader.read_to_string(&mut contents).unwrap();
+            let records: Vec<Value> = contents
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .filter(|record: &Value| record["msg"] == "burst")
+                .collect();
+            assert_eq!(records.len(), expected, "{level}, bootstrap={bootstrap}");
+            for (index, record) in records.iter().enumerate() {
+                assert_eq!(record["index"], json!(index.to_string()), "{level}");
+            }
+        }
+    }
 
     #[test]
     fn test_get_log_levels() {

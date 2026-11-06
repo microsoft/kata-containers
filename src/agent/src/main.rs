@@ -208,8 +208,7 @@ async fn real_main(init_mode: bool) -> std::result::Result<(), Box<dyn std::erro
         // Init a temporary logger used by init agent as init process
         // since before do the base mount, it wouldn't access "/proc/cmdline"
         // to get the customzied debug level.
-        let (logger, logger_async_guard) =
-            logging::create_logger(NAME, "agent", slog::Level::Debug, writer);
+        let (logger, logger_async_guard) = logging::create_bootstrap_logger(NAME, "agent", writer);
 
         // Must mount proc fs before parsing kernel command line
         general_mount(&logger).map_err(|e| {
