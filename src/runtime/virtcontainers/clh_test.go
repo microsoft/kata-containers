@@ -9,6 +9,7 @@ package virtcontainers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -149,6 +150,48 @@ func (c *clhClientMock) VmRestorePut(ctx context.Context, restoreConfig chclient
 func (c *clhClientMock) ResumeVM(ctx context.Context) (*http.Response, error) {
 	c.vmInfo.State = clhStateRunning
 	return nil, nil
+}
+
+func TestClhRtcConfig(t *testing.T) {
+	mshvDevice := filepath.Join(t.TempDir(), "mshv")
+	if err := os.WriteFile(mshvDevice, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name       string
+		devicePath string
+		iommu      bool
+		wantRTC    bool
+	}{
+		{"mshv", mshvDevice, false, true},
+		{"mshv with iommu", mshvDevice, true, true},
+		{"kvm", mshvDevice + ".missing", false, false},
+		{"kvm with iommu", mshvDevice + ".missing", true, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert := assert.New(t)
+			vmConfig := chclient.NewVmConfig(*chclient.NewPayloadConfig())
+			vmConfig.Rtc = clhRtcConfig(test.devicePath, test.iommu)
+			assert.Equal(test.wantRTC, vmConfig.HasRtc())
+
+			data, err := json.Marshal(vmConfig)
+			if !assert.NoError(err) {
+				return
+			}
+			var serialized map[string]json.RawMessage
+			if !assert.NoError(json.Unmarshal(data, &serialized)) {
+				return
+			}
+			rtcJSON, hasRTC := serialized["rtc"]
+			assert.Equal(test.wantRTC, hasRTC)
+			if test.wantRTC && assert.NotNil(vmConfig.Rtc) {
+				assert.Equal(test.iommu, vmConfig.Rtc.GetIommu())
+				assert.JSONEq(fmt.Sprintf(`{"iommu":%t,"pci_segment":0}`, test.iommu), string(rtcJSON))
+			}
+		})
+	}
 }
 
 func TestCloudHypervisorAddVSock(t *testing.T) {
@@ -515,6 +558,10 @@ func TestClhCreateVM(t *testing.T) {
 	assert.NoError(err)
 	config5.SharedFS = config.VirtioFSNydus
 
+	config6, err := newClhConfig()
+	assert.NoError(err)
+	config6.IOMMU = true
+
 	type testData struct {
 		config      HypervisorConfig
 		expectError bool
@@ -528,6 +575,7 @@ func TestClhCreateVM(t *testing.T) {
 		{config3, true, false},
 		{config4, false, true},
 		{config5, false, true},
+		{config6, false, true},
 	}
 
 	for i, d := range data {
@@ -544,6 +592,16 @@ func TestClhCreateVM(t *testing.T) {
 
 		if d.configMatch {
 			assert.Exactly(d.config, clh.config, msg)
+		}
+
+		vmConfigJSON, err := json.Marshal(clh.vmconfig)
+		assert.NoError(err, msg)
+		var vmConfig map[string]json.RawMessage
+		assert.NoError(json.Unmarshal(vmConfigJSON, &vmConfig), msg)
+		rtcJSON, hasRTC := vmConfig["rtc"]
+		assert.Equal(pathExists("/dev/mshv"), hasRTC, msg)
+		if hasRTC {
+			assert.JSONEq(fmt.Sprintf(`{"iommu":%t,"pci_segment":0}`, d.config.IOMMU), string(rtcJSON), msg)
 		}
 	}
 }

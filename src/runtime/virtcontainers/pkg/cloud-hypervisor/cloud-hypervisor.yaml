@@ -597,6 +597,8 @@ components:
             $ref: "#/components/schemas/NetConfig"
         rng:
           $ref: "#/components/schemas/RngConfig"
+        rtc:
+          $ref: "#/components/schemas/RtcConfig"
         balloon:
           $ref: "#/components/schemas/BalloonConfig"
         fs:
@@ -1015,6 +1017,22 @@ components:
         iommu:
           type: boolean
           default: false
+
+    RtcConfig:
+      type: object
+      properties:
+        iommu:
+          type: boolean
+          default: false
+        id:
+          type: string
+        pci_segment:
+          type: integer
+          format: int16
+          default: 0
+        pci_device_id:
+          type: integer
+          format: int8
 
     BalloonConfig:
       required:
