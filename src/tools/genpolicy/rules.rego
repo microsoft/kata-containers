@@ -392,8 +392,7 @@ allow_by_container_type(role, p_oci, i_oci, s_name, s_namespace) if {
     allow_net_namespace(p_oci, i_oci)
     allow_log_directory(p_oci, i_oci)
 
-    #print("allow_by_container_type 2: true")
-    false
+    print("allow_by_container_type 2: true")
 }
 
 # "io.kubernetes.cri.container-name" annotation
