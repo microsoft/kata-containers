@@ -136,8 +136,7 @@ pub async fn wait_for_uevent(
     let idx = sb.uevent_watchers.len();
     sb.uevent_watchers.push(Some((Box::new(matcher), tx)));
 
-    let inject_hotplug_timeout = sb.inject_hotplug_timeut;
-    let hotplug_timeout = if inject_hotplug_timeout {
+    let hotplug_timeout = if sb.inject_hotplug_timeut {
         sb.inject_hotplug_timeut = false;
         // std::time::Duration::from_millis(100)
         std::time::Duration::from_millis(10)
@@ -155,15 +154,6 @@ pub async fn wait_for_uevent(
     let uev = match tokio::time::timeout(hotplug_timeout, &mut rx).await {
         Ok(v) => v?,
         Err(_) => {
-            if inject_hotplug_timeout {
-                warn!(
-                    sl(),
-                    "TEST: delaying timeout cleanup for one second to allow event delivery";
-                    "watcher_index" => idx,
-                );
-                // Leave the sandbox unlocked so the listener can consume this watcher.
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
             let mut sb = sandbox.lock().await;
             if let Some((matcher, _)) = sb.uevent_watchers[idx].take() {
                 return Err(anyhow!(
