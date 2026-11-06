@@ -159,6 +159,48 @@ func TestClhIommuType(t *testing.T) {
 	assert.Equal(t, chclient.IOMMUTYPE_VIRTIO, clhIommuType(true))
 }
 
+func TestClhRtcConfig(t *testing.T) {
+	mshvDevice := filepath.Join(t.TempDir(), "mshv")
+	if err := os.WriteFile(mshvDevice, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name       string
+		devicePath string
+		iommu      bool
+		wantRTC    bool
+	}{
+		{"mshv", mshvDevice, false, true},
+		{"mshv with iommu", mshvDevice, true, true},
+		{"kvm", mshvDevice + ".missing", false, false},
+		{"kvm with iommu", mshvDevice + ".missing", true, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert := assert.New(t)
+			vmConfig := chclient.NewVmConfig(*chclient.NewPayloadConfig())
+			vmConfig.Rtc = clhRtcConfig(test.devicePath, test.iommu)
+			assert.Equal(test.wantRTC, vmConfig.HasRtc())
+
+			data, err := json.Marshal(vmConfig)
+			if !assert.NoError(err) {
+				return
+			}
+			var serialized map[string]json.RawMessage
+			if !assert.NoError(json.Unmarshal(data, &serialized)) {
+				return
+			}
+			rtcJSON, hasRTC := serialized["rtc"]
+			assert.Equal(test.wantRTC, hasRTC)
+			if test.wantRTC && assert.NotNil(vmConfig.Rtc) {
+				assert.Equal(clhIommuType(test.iommu), vmConfig.Rtc.GetIommu())
+				assert.JSONEq(fmt.Sprintf(`{"iommu":%q}`, clhIommuType(test.iommu)), string(rtcJSON))
+			}
+		})
+	}
+}
+
 func TestCloudHypervisorAddVSock(t *testing.T) {
 	assert := assert.New(t)
 	clh := cloudHypervisor{}
@@ -571,8 +613,10 @@ func TestClhCreateVM(t *testing.T) {
 		assert.NoError(err, msg)
 		var vmConfig map[string]json.RawMessage
 		assert.NoError(json.Unmarshal(vmConfigJSON, &vmConfig), msg)
-		if assert.Contains(vmConfig, "rtc", msg) {
-			assert.JSONEq(fmt.Sprintf(`{"iommu":%q}`, clhIommuType(d.config.IOMMU)), string(vmConfig["rtc"]), msg)
+		rtcJSON, hasRTC := vmConfig["rtc"]
+		assert.Equal(pathExists("/dev/mshv"), hasRTC, msg)
+		if hasRTC {
+			assert.JSONEq(fmt.Sprintf(`{"iommu":%q}`, clhIommuType(d.config.IOMMU)), string(rtcJSON), msg)
 		}
 	}
 }
