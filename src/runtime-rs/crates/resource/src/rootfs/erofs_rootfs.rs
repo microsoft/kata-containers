@@ -1101,6 +1101,26 @@ impl ErofsMultiLayerRootfs {
         Ok(())
     }
 
+    /// Rewrite extent paths in a Kata-generated snapshot VMDK relative to `directory`,
+    /// which contains the descriptor and its packaged extents. This keeps references
+    /// valid when staging is renamed to the final snapshot directory or the bundle moves.
+    ///
+    /// For a snapshot published to `/var/lib/kata/snapshots/my-snapshot`, staging
+    /// is its sibling `.my-snapshot.partial-<uuid>`. With `directory` set to
+    /// `/var/lib/kata/snapshots/.my-snapshot.partial-<uuid>/containers/id`, these lines:
+    ///
+    /// ```text
+    /// RW 2048 FLAT "/var/lib/kata/snapshots/.my-snapshot.partial-<uuid>/containers/id/gpt-head.img" 0
+    /// RW 8 FLAT "/var/lib/kata/snapshots/.my-snapshot.partial-<uuid>/containers/id/lower-0000.erofs" 16
+    /// ```
+    ///
+    /// become:
+    ///
+    /// ```text
+    /// RW 2048 FLAT "gpt-head.img" 0
+    /// RW 8 FLAT "lower-0000.erofs" 16
+    /// ```
+    /// With the VMDK file itself residing in the same `directory`.
     fn relativize_snapshot_descriptor(descriptor: &Path, directory: &Path) -> Result<()> {
         let contents = fs::read_to_string(descriptor)?;
         let mut extent_count = 0;
@@ -1110,14 +1130,13 @@ impl ErofsMultiLayerRootfs {
                 relative_descriptor.push(line.to_string());
                 continue;
             }
-            let start = line
-                .find('"')
-                .ok_or_else(|| anyhow!("VMDK extent has no opening quote: {line}"))?;
-            let end = line[start + 1..]
-                .find('"')
-                .map(|offset| start + 1 + offset)
-                .ok_or_else(|| anyhow!("VMDK extent has no closing quote: {line}"))?;
-            let source = Path::new(&line[start + 1..end]);
+            let parts = line.split('"').collect::<Vec<_>>();
+            if parts.len() != 3 {
+                return Err(anyhow!(
+                    "VMDK extent must contain exactly one quoted path: {line}"
+                ));
+            }
+            let source = Path::new(parts[1]);
             let relative = source.strip_prefix(directory).with_context(|| {
                 format!(
                     "snapshot VMDK extent {} is outside descriptor directory {}",
@@ -1135,10 +1154,10 @@ impl ErofsMultiLayerRootfs {
                 ));
             }
             relative_descriptor.push(format!(
-                "{}{}{}",
-                &line[..start + 1],
+                "{}\"{}\"{}",
+                parts[0],
                 relative.display(),
-                &line[end..]
+                parts[2]
             ));
             extent_count += 1;
         }
@@ -1455,6 +1474,89 @@ mod tests {
             mount("overlay", &[]),
         ];
         assert!(is_erofs_multi_layer(&mounts));
+    }
+
+    #[test]
+    fn relativize_snapshot_descriptor_preserves_extent_fields_and_metadata() {
+        let snapshot = tempfile::tempdir().unwrap();
+        let descriptor = snapshot.path().join("rootfs.vmdk");
+        let layer = snapshot.path().join("lower layer.erofs");
+        fs::write(
+            &descriptor,
+            format!(
+                "# Extent description\nRW 8 FLAT \"{}\" 16\nRW 4 FLAT \"{}\" 24\n\nddb.adapterType = \"ide\"\n",
+                layer.display(),
+                layer.display()
+            ),
+        )
+        .unwrap();
+
+        ErofsMultiLayerRootfs::relativize_snapshot_descriptor(&descriptor, snapshot.path())
+            .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(descriptor).unwrap(),
+            "# Extent description\nRW 8 FLAT \"lower layer.erofs\" 16\nRW 4 FLAT \"lower layer.erofs\" 24\n\nddb.adapterType = \"ide\"\n"
+        );
+    }
+
+    #[test]
+    fn relativize_snapshot_descriptor_rejects_invalid_input_without_rewriting() {
+        let snapshot = tempfile::tempdir().unwrap();
+        let descriptor = snapshot.path().join("rootfs.vmdk");
+        let layer = snapshot.path().join("lower.erofs");
+        let valid_extent = format!("RW 8 FLAT \"{}\" 0\n", layer.display());
+        let cases = [
+            (
+                "RW 8 FLAT lower.erofs 0\n".to_string(),
+                "must contain exactly one quoted path",
+            ),
+            (
+                "RW 8 FLAT \"lower.erofs 0\n".to_string(),
+                "must contain exactly one quoted path",
+            ),
+            (
+                format!("RW 8 FLAT \"{}\" 0 \"extra\"\n", layer.display()),
+                "must contain exactly one quoted path",
+            ),
+            (
+                format!(
+                    "RW 8 FLAT \"{}/../lower.erofs\" 0\n",
+                    snapshot.path().display()
+                ),
+                "not a clean relative path",
+            ),
+            (
+                format!(
+                    "RW 8 FLAT \"{}-outside/lower.erofs\" 0\n",
+                    snapshot.path().display()
+                ),
+                "outside descriptor directory",
+            ),
+        ];
+
+        for (invalid_extent, expected_error) in cases {
+            let contents = format!("{valid_extent}{invalid_extent}");
+            fs::write(&descriptor, &contents).unwrap();
+            let error =
+                ErofsMultiLayerRootfs::relativize_snapshot_descriptor(&descriptor, snapshot.path())
+                    .unwrap_err();
+            assert!(
+                error.to_string().contains(expected_error),
+                "unexpected error for {:?}: {:#}",
+                invalid_extent,
+                error
+            );
+            assert_eq!(fs::read_to_string(&descriptor).unwrap(), contents);
+        }
+
+        let contents = "# Disk DescriptorFile\nddb.adapterType = \"ide\"\n";
+        fs::write(&descriptor, contents).unwrap();
+        let error =
+            ErofsMultiLayerRootfs::relativize_snapshot_descriptor(&descriptor, snapshot.path())
+                .unwrap_err();
+        assert!(error.to_string().contains("contains no extents"));
+        assert_eq!(fs::read_to_string(descriptor).unwrap(), contents);
     }
 
     #[test]
