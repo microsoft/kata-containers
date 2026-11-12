@@ -4,7 +4,8 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
@@ -142,9 +143,13 @@ pub fn finalize_snapshot_config(
     }
 
     let temporary = config_path.with_extension("json.tmp");
-    fs::write(&temporary, serde_json::to_vec(&config)?)
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&temporary)?
+        .write_all(&serde_json::to_vec(&config)?)
         .with_context(|| format!("write temporary snapshot config {}", temporary.display()))?;
-    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
     fs::rename(&temporary, &config_path).with_context(|| {
         format!(
             "replace snapshot config {} with {}",
@@ -197,6 +202,15 @@ mod tests {
 
         finalize_snapshot_config(snapshot.path(), snapshot.path(), &artifacts).unwrap();
 
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(snapshot.path().join("config.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
         let config: Value =
             serde_json::from_slice(&fs::read(snapshot.path().join("config.json")).unwrap())
                 .unwrap();

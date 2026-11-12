@@ -27,7 +27,7 @@ use hypervisor::{
     },
     BlockConfigModern, BlockDeviceAio, BlockDeviceFormat,
 };
-use kata_sys_util::fs::reflink_copy;
+use kata_sys_util::fs::reflink_copy_0600;
 use kata_types::gpt_disk::{
     extract_dmverity_annotation, extract_snapshot_id, generate_dmverity_options,
     generate_gpt_metadata, generate_padding_file, get_erofs_layer_size,
@@ -38,9 +38,9 @@ use oci_spec::runtime as oci;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufWriter, Write};
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use tempfile::NamedTempFile;
 use tokio::sync::RwLock;
 
 /// EROFS rootfs type identifier
@@ -151,20 +151,22 @@ async fn generate_merged_erofs_vmdk(
 /// DDB footer, and atomic write (temp file + rename). Used by both fsmerge mode
 /// (`create_vmdk_descriptor`) and GPT mode (`create_gpt_vmdk_descriptor`).
 struct VmdkDescriptorWriter {
-    writer: BufWriter<fs::File>,
-    temp_path: PathBuf,
+    writer: BufWriter<NamedTempFile>,
     final_path: PathBuf,
 }
 
 impl VmdkDescriptorWriter {
     fn new(vmdk_path: &Path) -> Result<Self> {
-        let temp_path = vmdk_path.with_extension("vmdk.tmp");
-        if temp_path.components().any(|c| c == Component::ParentDir) {
-            return Err(anyhow!("Invalid input: {}", temp_path.display()));
+        if vmdk_path.components().any(|c| c == Component::ParentDir) {
+            return Err(anyhow!("Invalid input: {}", vmdk_path.display()));
         }
-        let file = fs::File::create(&temp_path).context(format!(
+        let parent = vmdk_path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let file = NamedTempFile::new_in(parent).context(format!(
             "failed to create temp VMDK file: {}",
-            temp_path.display()
+            vmdk_path.display()
         ))?;
         let mut writer = BufWriter::new(file);
 
@@ -178,7 +180,6 @@ impl VmdkDescriptorWriter {
 
         Ok(Self {
             writer,
-            temp_path,
             final_path: vmdk_path.to_path_buf(),
         })
     }
@@ -232,13 +233,11 @@ impl VmdkDescriptorWriter {
         self.writer
             .flush()
             .context("failed to flush VMDK descriptor")?;
-        drop(self.writer);
-
-        fs::rename(&self.temp_path, &self.final_path).context(format!(
-            "failed to rename temp VMDK {} -> {}",
-            self.temp_path.display(),
-            self.final_path.display()
-        ))?;
+        let final_path = self.final_path;
+        self.writer
+            .into_inner()?
+            .persist(&final_path)
+            .with_context(|| format!("failed to publish VMDK {}", final_path.display()))?;
 
         Ok(())
     }
@@ -426,10 +425,14 @@ fn create_gpt_vmdk_descriptor(
             let gap_sectors = part.start_lba - gap_start_lba;
             let pad_path = metadata_dir.join(format!("pad-{}.img", idx));
 
-            generate_padding_file(&pad_path, gap_sectors).context(format!(
+            let padding = NamedTempFile::new_in(metadata_dir)?;
+            generate_padding_file(padding.path(), gap_sectors).context(format!(
                 "failed to generate padding file: {}",
                 pad_path.display()
             ))?;
+            padding.persist(&pad_path).with_context(|| {
+                format!("failed to publish padding file: {}", pad_path.display())
+            })?;
 
             vmdk.write_extent(&pad_path.display().to_string(), gap_sectors, 0)?;
             pad_paths.push(pad_path);
@@ -1088,16 +1091,13 @@ impl ErofsMultiLayerRootfs {
                 source.display()
             ));
         }
-        reflink_copy(source, destination).with_context(|| {
+        reflink_copy_0600(source, destination).with_context(|| {
             format!(
                 "copy snapshot file {} to {}",
                 source.display(),
                 destination.display()
             )
         })?;
-        let mut permissions = fs::metadata(destination)?.permissions();
-        permissions.set_mode(0o600);
-        fs::set_permissions(destination, permissions)?;
         Ok(())
     }
 
@@ -1206,10 +1206,6 @@ impl ErofsMultiLayerRootfs {
                 },
             )?;
             Self::relativize_snapshot_descriptor(&descriptor, &directory)?;
-            fs::set_permissions(&descriptor, fs::Permissions::from_mode(0o600))?;
-            for pad_path in &pad_paths {
-                fs::set_permissions(pad_path, fs::Permissions::from_mode(0o600))?;
-            }
             files.extend(pad_paths);
             files.push(descriptor.clone());
             descriptor
@@ -1221,7 +1217,6 @@ impl ErofsMultiLayerRootfs {
                 .collect::<Vec<_>>();
             create_vmdk_descriptor(&descriptor, &paths)?;
             Self::relativize_snapshot_descriptor(&descriptor, &directory)?;
-            fs::set_permissions(&descriptor, fs::Permissions::from_mode(0o600))?;
             files.push(descriptor.clone());
             descriptor
         } else {
@@ -1394,6 +1389,7 @@ mod tests {
     use super::{is_erofs_multi_layer, EROFS_ROOTFS_TYPE, RW_LAYER_ROOTFS_TYPE};
     use kata_types::gpt_disk::PartitionLayout;
     use kata_types::mount::Mount;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
     fn mount(fs_type: &str, options: &[&str]) -> Mount {
@@ -1455,6 +1451,91 @@ mod tests {
             mount("overlay", &[]),
         ];
         assert!(is_erofs_multi_layer(&mounts));
+    }
+
+    #[test]
+    fn vmdk_descriptor_is_private_on_creation_and_replacement() {
+        let directory = tempfile::tempdir().unwrap();
+        let descriptor = directory.path().join("rootfs.vmdk");
+        for _ in 0..2 {
+            let writer = VmdkDescriptorWriter::new(&descriptor).unwrap();
+            assert_eq!(
+                fs::metadata(writer.writer.get_ref().path())
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+            writer.finalize(8).unwrap();
+            assert_eq!(
+                fs::metadata(&descriptor).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
+    fn vmdk_descriptor_retry_after_aborted_write() {
+        let directory = tempfile::tempdir().unwrap();
+        let descriptor = directory.path().join("rootfs.vmdk");
+        fs::write(descriptor.with_extension("vmdk.tmp"), b"stale descriptor").unwrap();
+        let writer = VmdkDescriptorWriter::new(&descriptor).unwrap();
+        let temp_path = writer.writer.get_ref().path().to_path_buf();
+        drop(writer);
+        assert!(!temp_path.exists());
+        VmdkDescriptorWriter::new(&descriptor)
+            .unwrap()
+            .finalize(8)
+            .unwrap();
+        assert!(fs::read_to_string(&descriptor)
+            .unwrap()
+            .starts_with("# Disk DescriptorFile\n"));
+    }
+
+    #[test]
+    fn gpt_vmdk_retry_after_failed_publication() {
+        let directory = tempfile::tempdir().unwrap();
+        let descriptor = directory.path().join("rootfs.vmdk");
+        let padding = directory.path().join("pad-0.img");
+        fs::write(&padding, b"stale padding").unwrap();
+        fs::create_dir(&descriptor).unwrap();
+        let layout = GptDiskLayout {
+            partitions: vec![PartitionLayout {
+                layer: ErofsLayer {
+                    path: "layer.erofs".to_string(),
+                    size_sectors: 8,
+                    snapshot_id: "0".to_string(),
+                },
+                partition_number: 1,
+                start_lba: 4096,
+                end_lba: 4103,
+                name: "layer-0".to_string(),
+            }],
+            total_sectors: 6144,
+            lb_size: 512,
+        };
+        let gpt_files = GptMetadataFiles {
+            head_path: directory.path().join("gpt_meta_head.img"),
+            head_sectors: 2048,
+            pad_paths: Vec::new(),
+        };
+        assert!(create_gpt_vmdk_descriptor(&descriptor, &layout, &gpt_files).is_err());
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
+        fs::remove_dir(&descriptor).unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                create_gpt_vmdk_descriptor(&descriptor, &layout, &gpt_files).unwrap(),
+                vec![padding.clone()]
+            );
+            assert_eq!(fs::read(&padding).unwrap(), vec![0; 2048 * 512]);
+            for path in [&descriptor, &padding] {
+                assert_eq!(
+                    fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                    0o600
+                );
+            }
+        }
     }
 
     #[test]
@@ -1564,6 +1645,10 @@ mod tests {
 
         live.close().unwrap();
         for path in artifacts.files {
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
             assert!(
                 path.is_file(),
                 "missing packaged artifact {}",
@@ -1635,6 +1720,10 @@ mod tests {
 
         live.close().unwrap();
         for path in artifacts.files {
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
             assert!(
                 path.is_file(),
                 "missing packaged artifact {}",

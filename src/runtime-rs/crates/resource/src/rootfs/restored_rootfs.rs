@@ -10,7 +10,7 @@ use agent::Storage;
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use hypervisor::device::device_manager::DeviceManager;
-use kata_sys_util::fs::reflink_copy;
+use kata_sys_util::fs::reflink_copy_0600;
 use oci_spec::runtime as oci;
 use tokio::sync::{Mutex, RwLock};
 
@@ -215,7 +215,7 @@ impl Rootfs for RestoredRootfs {
                 continue;
             }
             let destination = directory.join(Self::file_name(source)?);
-            reflink_copy(source, &destination)
+            reflink_copy_0600(source, &destination)
                 .with_context(|| format!("copy restored rootfs artifact {}", source.display()))?;
             copied.push(destination);
         }
@@ -231,7 +231,7 @@ impl Rootfs for RestoredRootfs {
             .map(|source| -> Result<SnapshotDiskPath> {
                 let name = Self::file_name(source)?;
                 let destination = directory.join(name);
-                reflink_copy(source, &destination)
+                reflink_copy_0600(source, &destination)
                     .with_context(|| format!("copy restored writable disk {}", source.display()))?;
                 copied.push(destination);
                 Ok(SnapshotDiskPath {
@@ -350,6 +350,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(artifacts.source_host_id, "target-host");
+        for path in &artifacts.files {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
         assert_eq!(artifacts.snapshot_guest_id, "stable-guest");
         assert_eq!(artifacts.readonly_disk.live_path, descriptor);
         assert_eq!(

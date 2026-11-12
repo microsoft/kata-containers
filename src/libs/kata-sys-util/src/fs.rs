@@ -7,6 +7,7 @@
 use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{Error, Result};
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::process::Command;
@@ -74,8 +75,16 @@ pub fn is_symlink<P: AsRef<Path>>(path: P) -> std::io::Result<bool> {
 /// The `reflink_copy()` doesn't preserve permission/security context for the copied file,
 /// so caller needs to take care of it.
 pub fn reflink_copy<S: AsRef<Path>, D: AsRef<Path>>(src: S, dst: D) -> Result<()> {
-    let src_path = src.as_ref();
-    let dst_path = dst.as_ref();
+    reflink_copy_impl(src.as_ref(), dst.as_ref(), None)
+}
+
+/// Reflink copy src to dst, and fall back to regular copy if reflink copy fails.
+/// Atomically set permissions to 0600 at destination creation, subject to umask.
+pub fn reflink_copy_0600<S: AsRef<Path>, D: AsRef<Path>>(src: S, dst: D) -> Result<()> {
+    reflink_copy_impl(src.as_ref(), dst.as_ref(), Some(0o600))
+}
+
+fn reflink_copy_impl(src_path: &Path, dst_path: &Path, mode: Option<u32>) -> Result<()> {
     let src = src_path.to_string_lossy();
     let dst = dst_path.to_string_lossy();
 
@@ -112,7 +121,15 @@ pub fn reflink_copy<S: AsRef<Path>, D: AsRef<Path>>(src: S, dst: D) -> Result<()
 
     // Reflink copy, and fallback to regular copy if reflink fails.
     let src_file = fs::File::open(src_path)?;
-    let dst_file = fs::File::create(dst_path)?;
+    let dst_file = if let Some(mode) = mode {
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(mode)
+            .open(dst_path)?
+    } else {
+        fs::File::create(dst_path)?
+    };
     if let Err(e) = do_reflink_copy(src_file, dst_file) {
         match e.raw_os_error() {
             // Cross dev copy or filesystem doesn't support reflink, do regular copy
@@ -215,6 +232,54 @@ mod tests {
     }
 
     #[test]
+    fn test_reflink_copy_0600() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source");
+        let destination = directory.path().join("destination");
+        fs::write(&source, b"private contents").unwrap();
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o644)).unwrap();
+
+        reflink_copy_0600(&source, &destination).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"private contents");
+        assert_eq!(destination.metadata().unwrap().mode() & 0o777, 0o600);
+        let previous = File::open(&destination).unwrap();
+        fs::write(&source, b"replacement contents").unwrap();
+        reflink_copy_0600(&source, &destination).unwrap();
+        assert_ne!(
+            previous.metadata().unwrap().ino(),
+            destination.metadata().unwrap().ino()
+        );
+        assert_eq!(destination.metadata().unwrap().mode() & 0o777, 0o600);
+        assert_eq!(fs::read(&destination).unwrap(), b"replacement contents");
+        assert!(reflink_copy_0600(&source, directory.path()).is_err());
+        assert!(reflink_copy_0600(directory.path(), &destination).is_err());
+        let nested = directory.path().join("nested/writable");
+        reflink_copy_0600(&source, &nested).unwrap();
+        assert_eq!(nested.metadata().unwrap().mode() & 0o777, 0o600);
+        assert_eq!(fs::read(nested).unwrap(), b"replacement contents");
+
+        let link = directory.path().join("link");
+        symlink(&destination, &link).unwrap();
+        let target_inode = destination.metadata().unwrap().ino();
+        reflink_copy_0600(&source, &link).unwrap();
+        assert!(!fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(destination.metadata().unwrap().ino(), target_inode);
+        assert_eq!(fs::read(&link).unwrap(), b"replacement contents");
+        let dangling = directory.path().join("dangling");
+        symlink(directory.path().join("missing"), &dangling).unwrap();
+        assert!(reflink_copy_0600(&source, &dangling).is_err());
+
+        do_regular_copy(source.to_str().unwrap(), destination.to_str().unwrap()).unwrap();
+        assert_eq!(destination.metadata().unwrap().mode() & 0o777, 0o600);
+        assert_eq!(fs::read(destination).unwrap(), b"replacement contents");
+    }
+
+    #[test]
     fn test_regular_copy_sparsifies_zero_filled_file() {
         let tmpdir = tempfile::tempdir().unwrap();
         let source = tmpdir.path().join("source");
@@ -227,10 +292,17 @@ mod tests {
         source_file.write_all(&data).unwrap();
         source_file.sync_all().unwrap();
 
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&destination)
+            .unwrap();
         do_regular_copy(source.to_str().unwrap(), destination.to_str().unwrap()).unwrap();
 
         assert_eq!(fs::read(&destination).unwrap(), data);
         let metadata = destination.metadata().unwrap();
+        assert_eq!(metadata.mode() & 0o777, 0o600);
         assert!(metadata.blocks() * 512 < metadata.len());
     }
 }
