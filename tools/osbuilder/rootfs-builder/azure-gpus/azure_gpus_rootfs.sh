@@ -623,6 +623,14 @@ setup_azure_gpus_rootfs_stage_two() {
 		# NVRC is PID1 for the UVM (initrd + image cases).
 		setup_nvrc_init_symlinks
 
+		# The image is read-only at runtime, so daemons that log or cache
+		# under /var (nv-fabricmanager defaults to
+		# LOG_FILE_NAME=/var/log/fabricmanager.log) would fail to start.
+		# Point those paths at the /run tmpfs, as chisseled_init does.
+		rm -rf var/log var/cache
+		ln -sf ../run var/log
+		ln -sf ../run var/cache
+
 		# Relax the nvidia device-node mode so nvidia-modprobe can create
 		# /dev/nvidia* accessible to the workload (mirrors chisseled_init).
 		mkdir -p etc/modprobe.d
