@@ -23,9 +23,14 @@ common_file="${script_dir}/common.sh"
 # shellcheck source=tools/osbuilder/node-builder/azure-linux/common.sh
 source "${common_file}"
 
-# This ensures that a pre-built agent binary is being injected into the rootfs
+# Pass the agent units through rootfs.sh, so its rootfs tweaks (e.g. CONFIDENTIAL_GUEST) apply to them
+agent_tarball_dir="$(mktemp -d)"
+agent_tarball="${agent_tarball_dir}/kata-agent.tar.zst"
+# go-w: the archive's usr/ directories replace the rootfs's on extraction
+tar --zstd --owner=0 --group=0 --mode=go-w -cf "${agent_tarball}" -C "${AGENT_INSTALL_DIR}" usr
+
 rootfs_make_flags=(
-	"AGENT_SOURCE_BIN=${AGENT_INSTALL_DIR}/usr/bin/kata-agent"
+	"AGENT_TARBALL=${agent_tarball}"
 	"OS_VERSION=${OS_VERSION}"
 )
 
@@ -43,19 +48,10 @@ echo "Building rootfs and including pre-built agent binary"
 pushd tools/osbuilder || exit
 # This command requires sudo because of dnf-installing packages into rootfs. As a suite, following commands require sudo as well as make clean
 sudo -E PATH="${PATH}" make "${rootfs_make_flags[@]}" -B DISTRO=cbl-mariner rootfs
-ROOTFS_PATH="$(readlink -f ./cbl-mariner_rootfs)"
 popd || exit
-
-echo "Installing agent service files into rootfs"
-sudo cp "${AGENT_INSTALL_DIR}"/usr/lib/systemd/system/kata-containers.target "${ROOTFS_PATH}"/usr/lib/systemd/system/kata-containers.target
-sudo cp "${AGENT_INSTALL_DIR}"/usr/lib/systemd/system/kata-agent.service "${ROOTFS_PATH}"/usr/lib/systemd/system/kata-agent.service
+rm -rf "${agent_tarball_dir}"
 
 if [[ "${CONF_PODS}" == "yes" ]]; then
-	# The copy above dropped rootfs.sh's CONFIDENTIAL_GUEST dependency that applies the /run size from fstab
-	kata_target="${ROOTFS_PATH}/usr/lib/systemd/system/kata-containers.target"
-	sudo grep -qE '^Requires=.*systemd-remount-fs.service' "${kata_target}" || \
-		echo "Requires=systemd-remount-fs.service" | sudo tee -a "${kata_target}" >/dev/null
-
 	echo "Building dm-verity protected image based on rootfs"
 	pushd tools/osbuilder || exit
 	sudo -E PATH="${PATH}" make DISTRO=cbl-mariner MEASURED_ROOTFS=yes DM_VERITY_FORMAT=kernelinit IMAGE_SIZE_ALIGNMENT_MB=2 image
