@@ -63,7 +63,7 @@ impl Uevent {
     }
 
     #[instrument]
-    async fn process_add(&self, logger: &Logger, sandbox: &Arc<Mutex<Sandbox>>) {
+    async fn process_add(&self, logger: &Logger, _sandbox: &Arc<Mutex<Sandbox>>) {
         // Special case for memory hot-adds first
         let online_path = format!("{}/{}/online", SYSFS_DIR, self.devpath);
         if online_path.starts_with(SYSFS_MEMORY_ONLINE_PATH) {
@@ -78,6 +78,8 @@ impl Uevent {
             return;
         }
 
+        warn!(*logger, "process_add: ignoring hotplug for {:?}", self);
+        /*
         let mut sb = sandbox.lock().await;
 
         // Record the event by sysfs path
@@ -92,6 +94,7 @@ impl Uevent {
                 }
             }
         })
+        */
     }
 
     #[instrument]
