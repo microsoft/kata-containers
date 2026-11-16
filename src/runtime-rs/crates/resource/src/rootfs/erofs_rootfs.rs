@@ -214,6 +214,20 @@ pub(crate) fn ensure_container_dir(sid: &str, cid: &str) -> Result<PathBuf> {
     Ok(dir)
 }
 
+fn ensure_pmem_images_dir(base: &str, sid: &str, cid: &str) -> Result<PathBuf> {
+    if base.is_empty() {
+        return ensure_container_dir(sid, cid);
+    }
+    let dir = Path::new(base).join(sid).join(cid);
+    fs::create_dir_all(&dir).with_context(|| {
+        format!(
+            "failed to create EROFS PMEM image directory: {}",
+            dir.display()
+        )
+    })?;
+    Ok(dir)
+}
+
 /// Generate a merged VMDK layout from multiple EROFS devices.
 ///
 /// For a single device, the EROFS image is used directly without a VMDK
@@ -524,9 +538,30 @@ pub(crate) struct ErofsMultiLayerRootfs {
     cleanup_paths: Vec<PathBuf>,
     // Container-scoped runtime directory that may only contain generated helper artifacts.
     generated_artifacts_dir: PathBuf,
+    // The PMEM image may live outside the runtime directory.
+    pmem_image_path: Option<PathBuf>,
 }
 
 impl ErofsMultiLayerRootfs {
+    fn cleanup_generated_files(&self) -> Result<()> {
+        for path in &self.cleanup_paths {
+            if !path.starts_with(&self.generated_artifacts_dir)
+                && self.pmem_image_path.as_ref() != Some(path)
+            {
+                continue;
+            }
+            match fs::remove_file(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(error)
+                        .with_context(|| format!("failed to remove file: {}", path.display()));
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn new(
         device_manager: &RwLock<DeviceManager>,
         sid: &str,
@@ -544,6 +579,7 @@ impl ErofsMultiLayerRootfs {
         let mut rwlayer_storage: Option<Storage> = None;
         let mut erofs_storages: Vec<Storage> = Vec::new();
         let mut cleanup_paths: Vec<PathBuf> = Vec::new();
+        let mut pmem_image_path = None;
         // Track whether GPT+VMDK erofs layers have already been processed in bulk.
         let mut gpt_erofs_processed = false;
 
@@ -765,7 +801,11 @@ impl ErofsMultiLayerRootfs {
                         );
 
                         let (erofs_path, source, driver, layout) = if pmem {
-                            let directory = ensure_container_dir(sid, cid)?;
+                            let directory = ensure_pmem_images_dir(
+                                &blkdev_info.experimental_erofs_pmem_images_path,
+                                sid,
+                                cid,
+                            )?;
                             let (layout, path) = tokio::task::spawn_blocking(move || {
                                 materialize_pmem_image(&layout, &directory)
                                     .map(|path| (layout, path))
@@ -774,6 +814,7 @@ impl ErofsMultiLayerRootfs {
                             .context("join EROFS PMEM materialization")?
                             .context("materialize EROFS PMEM GPT image")?;
                             cleanup_paths.push(path.clone());
+                            pmem_image_path = Some(path.clone());
                             (
                                 path.display().to_string(),
                                 BlockSourceFormat::Raw,
@@ -1062,6 +1103,7 @@ impl ErofsMultiLayerRootfs {
             ))
             .join(sid)
             .join(cid),
+            pmem_image_path,
         })
     }
 }
@@ -1103,26 +1145,12 @@ impl Rootfs for ErofsMultiLayerRootfs {
     }
 
     async fn cleanup(&self, device_manager: &RwLock<DeviceManager>) -> Result<()> {
-        // Helper function to safely remove a file if it exists and is within the specified directory.
-        let safely_remove_file = |path: &Path, dir: &Path| -> Result<()> {
-            if path.starts_with(dir) && path.exists() {
-                fs::remove_file(path)
-                    .context(format!("failed to remove file: {}", path.display()))?;
-            }
-            Ok(())
-        };
-
         let mut dm = device_manager.write().await;
         for device_id in &self.device_ids {
             dm.try_remove_device(device_id).await?;
         }
 
-        // Remove temporary VMDK files (GPT leading metadata, padding, descriptor).
-        for file_path in &self.cleanup_paths {
-            safely_remove_file(file_path, &self.generated_artifacts_dir)?;
-        }
-
-        Ok(())
+        self.cleanup_generated_files()
     }
 }
 
@@ -1225,6 +1253,56 @@ mod tests {
         // A second creation must not overwrite an image potentially still mapped by QEMU.
         assert!(materialize_pmem_image(&layout, dir.path()).is_err());
         assert_eq!(fs::read(path).unwrap(), disk);
+    }
+
+    #[test]
+    fn pmem_images_use_configured_directory_and_cleanup_only_owned_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("images");
+        let image_dir =
+            ensure_pmem_images_dir(base.to_str().unwrap(), "sandbox", "container").unwrap();
+        let other_dir = ensure_pmem_images_dir(base.to_str().unwrap(), "sandbox", "other").unwrap();
+        let layer = dir.path().join("layer.erofs");
+        fs::write(&layer, vec![1; 4096]).unwrap();
+        let layout = calculate_gpt_layout(&[ErofsLayer {
+            path: layer.display().to_string(),
+            size_sectors: 8,
+            snapshot_id: "1".to_string(),
+        }])
+        .unwrap();
+        let image = materialize_pmem_image(&layout, &image_dir).unwrap();
+        let other_image = materialize_pmem_image(&layout, &other_dir).unwrap();
+        assert_eq!(image, base.join("sandbox/container/erofs-pmem.raw"));
+        let runtime_dir = dir.path().join("runtime");
+        fs::create_dir(&runtime_dir).unwrap();
+        let metadata = runtime_dir.join("gpt_meta_head.img");
+        fs::write(&metadata, b"metadata").unwrap();
+        let rootfs = ErofsMultiLayerRootfs {
+            guest_path: String::new(),
+            device_ids: Vec::new(),
+            rwlayer_storage: None,
+            erofs_storages: Vec::new(),
+            cleanup_paths: vec![image.clone(), metadata.clone(), other_image.clone()],
+            generated_artifacts_dir: runtime_dir,
+            pmem_image_path: Some(image.clone()),
+        };
+        rootfs.cleanup_generated_files().unwrap();
+        rootfs.cleanup_generated_files().unwrap();
+        assert!(!image.exists());
+        assert!(!metadata.exists());
+        assert!(other_image.exists());
+        assert!(layer.exists());
+    }
+
+    #[test]
+    fn pmem_images_directory_errors_do_not_fall_back_to_runtime_directory() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        assert!(
+            ensure_pmem_images_dir(file.path().to_str().unwrap(), "sandbox", "container")
+                .unwrap_err()
+                .to_string()
+                .contains("failed to create EROFS PMEM image directory")
+        );
     }
 
     #[test]

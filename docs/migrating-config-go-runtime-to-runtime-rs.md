@@ -134,6 +134,7 @@ configuration-file option** in the Go runtime.
 | `prefetch_list_path` | Host path to a `prefetch_files.list` for image lazy-loading. |
 | `hugepage_type` | Huge page backend type (`hugetlbfs` or `thp`). |
 | `experimental_erofs_pmem` | Experimental non-confidential x86_64 QEMU q35 EROFS lower layers on read-only NVDIMM, without guest dm-verity. See the [EROFS prototype guide](how-to/how-to-use-erofs-snapshotter-with-kata.md#experimental-read-only-nvdimm-images). |
+| `experimental_erofs_pmem_images_path` | Optional absolute base directory for experimental EROFS PMEM backing images. Empty keeps the runtime-directory location; choose disk-backed storage to avoid tmpfs charges. |
 | `virtio_fs_is_dax` | Explicit toggle for the `virtio-fs` DAX window. The Go runtime infers DAX usage from `virtio_fs_cache_size`. |
 | `guest_swap_path` | Path of the guest swap device file. |
 | `guest_swap_size_percent` | Swap size as a percentage of total guest memory. |

@@ -244,6 +244,11 @@ block_device_driver = "@DEFBLOCKSTORAGEDRIVER_QEMU@"
 # NVDIMMs remain attached until sandbox shutdown.
 experimental_erofs_pmem = false
 
+# Optional absolute base directory for PMEM images, scoped by sandbox/container ID.
+# Empty keeps images under /run/kata-containers (often tmpfs).
+# Use a disk-backed path such as /opt/kata/container-images to avoid tmpfs charges.
+experimental_erofs_pmem_images_path = ""
+
 # aio is the I/O mechanism used by qemu
 # Options:
 #

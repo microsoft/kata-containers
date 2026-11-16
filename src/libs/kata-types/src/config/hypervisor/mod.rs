@@ -232,6 +232,11 @@ pub struct BlockDeviceInfo {
     #[serde(default)]
     pub experimental_erofs_pmem: bool,
 
+    /// Optional absolute directory for materialized EROFS PMEM images.
+    /// Empty keeps images in the container's runtime directory.
+    #[serde(default)]
+    pub experimental_erofs_pmem_images_path: String,
+
     /// Block storage driver to be used for the hypervisor in case the container rootfs is backed
     /// by a block device. Options include:
     /// - `virtio-scsi`
@@ -1820,6 +1825,12 @@ impl Hypervisor {
     pub fn validate_erofs_pmem(&self, hypervisor: &str) -> Result<()> {
         if !self.blockdev_info.experimental_erofs_pmem {
             return Ok(());
+        }
+        let images_path = &self.blockdev_info.experimental_erofs_pmem_images_path;
+        if !images_path.is_empty() && !Path::new(images_path).is_absolute() {
+            return Err(std::io::Error::other(
+                "experimental_erofs_pmem_images_path must be empty or an absolute path",
+            ));
         }
         if hypervisor != "qemu"
             || !cfg!(target_arch = "x86_64")

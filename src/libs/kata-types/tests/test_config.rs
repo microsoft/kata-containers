@@ -34,11 +34,23 @@ mod tests {
              default_memory = 512\ndefault_maxmemory = 4096\nmemory_slots = 16",
         )
         .unwrap();
+        assert!(hv
+            .blockdev_info
+            .experimental_erofs_pmem_images_path
+            .is_empty());
         assert_eq!(
             hv.validate_erofs_pmem("qemu").is_ok(),
             cfg!(target_arch = "x86_64")
         );
         assert!(hv.validate_erofs_pmem("clh").is_err());
+        hv.blockdev_info.experimental_erofs_pmem_images_path = "relative/images".to_string();
+        assert!(hv
+            .validate_erofs_pmem("qemu")
+            .unwrap_err()
+            .to_string()
+            .contains("experimental_erofs_pmem_images_path"));
+        hv.blockdev_info.experimental_erofs_pmem_images_path =
+            "/opt/kata/container-images".to_string();
         hv.security_info.confidential_guest = true;
         assert!(hv.validate_erofs_pmem("qemu").is_err());
         hv.security_info.confidential_guest = false;
@@ -49,6 +61,19 @@ mod tests {
         assert!(hv.validate_erofs_pmem("qemu").is_err());
         hv.blockdev_info.experimental_erofs_pmem = false;
         hv.validate_erofs_pmem("clh").unwrap();
+    }
+
+    #[test]
+    fn test_experimental_erofs_pmem_images_path_parsing() {
+        let hv: kata_types::config::hypervisor::Hypervisor = toml::from_str(
+            "experimental_erofs_pmem = true\n\
+             experimental_erofs_pmem_images_path = '/opt/kata/container-images'",
+        )
+        .unwrap();
+        assert_eq!(
+            hv.blockdev_info.experimental_erofs_pmem_images_path,
+            "/opt/kata/container-images"
+        );
     }
 
     #[test]

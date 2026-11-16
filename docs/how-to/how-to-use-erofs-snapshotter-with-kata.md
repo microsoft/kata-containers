@@ -53,9 +53,28 @@ Enable the prototype in that runtime's configuration:
 [hypervisor.qemu]
 machine_type = "q35"
 experimental_erofs_pmem = true
+experimental_erofs_pmem_images_path = "/opt/kata/container-images"
 memory_slots = 32
 default_maxmemory = 16384
 ```
+
+The optional `experimental_erofs_pmem_images_path` must be an absolute host
+directory. The runtime creates it as needed and stores each image at
+`<path>/<sandbox-id>/<container-id>/erofs-pmem.raw`. Image files are removed
+during container cleanup; unrelated files in the configured base are untouched.
+Directory creation or image-write failures are returned rather than falling
+back to the default location. The setting is used only when
+`experimental_erofs_pmem = true`.
+
+!!! warning "Choose disk-backed storage"
+    When the path is omitted or empty, images remain under
+    `/run/kata-containers`, which is often tmpfs. Writing complete images there
+    allocates host shared memory charged to the pod, offsetting guest DAX
+    savings. Select a disk-backed filesystem and verify it with
+    `findmnt -T /opt/kata` before enabling the example path.
+    Copying images still warms the host file cache on disk-backed storage, but
+    those clean pages can be reclaimed. This setting does not evict cache pages
+    or introduce cross-container image sharing.
 
 The prototype requires x86_64 QEMU with ACPI NVDIMM support, a guest kernel
 with NVDIMM PFN, device-memory mapping and EROFS DAX support, and an agent built with the corresponding
