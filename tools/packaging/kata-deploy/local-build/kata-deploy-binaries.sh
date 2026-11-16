@@ -801,7 +801,7 @@ install_image() {
 
 	info "Create image"
 
-	export FS_TYPE="erofs"
+	export FS_TYPE="ext4"
 
 	if [[ -n "${variant}" ]]; then
 		# Both the standard confidential image and the NVIDIA confidential
@@ -1016,7 +1016,7 @@ install_image_devkit_extension() {
 
 	export USE_DOCKER="1"
 	export BUILD_VARIANT="devkit-extension"
-	export FS_TYPE="erofs"
+	export FS_TYPE="ext4"
 	# s390x does not use a measured rootfs, so no dm-verity hash is produced.
 	if [[ "${ARCH}" == "s390x" ]]; then
 		export MEASURED_ROOTFS="no"
@@ -1199,7 +1199,7 @@ install_initrd_confidential() {
 install_image_nvidia_gpu() {
 	export AGENT_POLICY
 	export MEASURED_ROOTFS="yes"
-	export FS_TYPE="erofs"
+	export FS_TYPE="ext4"
 	export SKIP_DAX_HEADER="yes"
 	local version
 	version=$(get_latest_nvidia_driver_version)
@@ -1213,7 +1213,7 @@ install_image_nvidia_gpu_confidential() {
 	export CONFIDENTIAL_GUEST="yes"
 	export AGENT_POLICY
 	export MEASURED_ROOTFS="yes"
-	export FS_TYPE="erofs"
+	export FS_TYPE="ext4"
 	export SKIP_DAX_HEADER="yes"
 	local version
 	version=$(get_latest_nvidia_driver_version)
@@ -1230,7 +1230,7 @@ install_image_nvidia_gpu_confidential() {
 install_image_nvidia() {
 	export AGENT_POLICY
 	export MEASURED_ROOTFS="yes"
-	export FS_TYPE="erofs"
+	export FS_TYPE="ext4"
 	export SKIP_DAX_HEADER="yes"
 	local version
 	version=$(get_latest_nvidia_driver_version)
@@ -1271,7 +1271,7 @@ install_image_nvidia_gpu_extension() {
 	# policy: disable it (install_image defaults AGENT_POLICY to "yes").
 	export AGENT_POLICY="no"
 	export MEASURED_ROOTFS="yes"
-	export FS_TYPE="erofs"
+	export FS_TYPE="ext4"
 	export SKIP_DAX_HEADER="yes"
 	# The gpu extension is GPU-userspace-only content mounted into the nvidia base image; it
 	# ships no /sbin/init, so skip the rootfs init/agent sanity check.
