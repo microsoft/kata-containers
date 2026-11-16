@@ -9,6 +9,7 @@ use crate::device::pci_path::PciPath;
 use crate::device::topology::PCIePort;
 use crate::qemu::cmdline_generator::{VfioDeviceConfig, VfioDeviceFdConfig};
 use crate::qemu::qmp::get_qmp_socket_path;
+use crate::virtio_blk_modern::BlockSourceFormat;
 use crate::{
     device::driver::ProtectionDeviceConfig, hypervisor_persist::HypervisorState, selinux,
     HypervisorConfig, MemoryConfig, VcpuThreadIds, VsockDevice, HYPERVISOR_QEMU, KATA_BLK_DEV_TYPE,
@@ -744,6 +745,11 @@ impl QemuInner {
     }
 
     pub(crate) async fn save_vm(&mut self) -> Result<()> {
+        if self.config.blockdev_info.experimental_erofs_pmem {
+            return Err(anyhow!(
+                "experimental_erofs_pmem does not support VM snapshots"
+            ));
+        }
         let qmp = self.qmp.as_mut().ok_or(anyhow!("QMP not initialized"))?;
 
         if self.config.vm_template.boot_to_be_template {
@@ -1224,6 +1230,15 @@ impl QemuInner {
 
     pub(crate) async fn remove_device(&mut self, device: DeviceType) -> Result<()> {
         info!(sl!(), "QemuInner::remove_device() {} ", device);
+        if self.config.blockdev_info.experimental_erofs_pmem {
+            if let DeviceType::BlockModern(block) = &device {
+                if block.lock().await.config.driver_option == KATA_NVDIMM_DEV_TYPE {
+                    // QEMU cannot unplug NVDIMMs. Keep the mapping until VM exit.
+                    info!(sl!(), "Retaining EROFS NVDIMM until sandbox shutdown");
+                    return Ok(());
+                }
+            }
+        }
         // Network devices cannot be hot-unplugged, but they go away with QEMU.
         if matches!(
             device,
@@ -1346,6 +1361,17 @@ impl QemuInner {
             }
             DeviceType::BlockModern(ref block_device) => {
                 info!(sl!(), "Starting QMP hotplug for BlockModern device");
+                let config = block_device.lock().await.config.clone();
+                if config.driver_option == KATA_NVDIMM_DEV_TYPE
+                    && self.config.blockdev_info.experimental_erofs_pmem
+                {
+                    if !config.is_readonly || !matches!(config.source, BlockSourceFormat::Raw) {
+                        return Err(anyhow!("EROFS NVDIMM requires a read-only raw image"));
+                    }
+                    qmp.hotplug_nvdimm(config.index, &config.path_on_host)
+                        .context("hotplug EROFS NVDIMM")?;
+                    return Ok(DeviceType::BlockModern(block_device.clone()));
+                }
 
                 // First, snapshot parameters within the lock.
                 // Do not hold the lock across the 'await' point of the hotplug operation to avoid blocking.
@@ -1587,6 +1613,19 @@ mod tests {
     use crate::qemu::Qemu;
     use crate::Hypervisor;
     use rstest::rstest;
+
+    #[tokio::test]
+    async fn erofs_pmem_rejects_vm_snapshots() {
+        let (exit_notify, _exit_waiter) = mpsc::channel(1);
+        let mut qemu = QemuInner::new(exit_notify);
+        qemu.config.blockdev_info.experimental_erofs_pmem = true;
+        assert!(qemu
+            .save_vm()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("does not support VM snapshots"));
+    }
 
     #[tokio::test]
     async fn network_removal_without_qemu_does_not_hotunplug() {

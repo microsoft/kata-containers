@@ -329,6 +329,64 @@ impl Qmp {
         self.guest_memory_block_size
     }
 
+    pub fn hotplug_nvdimm(&mut self, index: u64, path: &str) -> Result<()> {
+        let size = std::fs::metadata(path)
+            .context("stat EROFS PMEM image")?
+            .len();
+        if size == 0 || size % 4096 != 0 {
+            return Err(anyhow!(
+                "EROFS PMEM image must be nonempty and 4 KiB aligned"
+            ));
+        }
+        let backend_id = format!("erofs-pmem-{index}");
+        self.qmp
+            .execute(&qmp::object_add(qmp::ObjectOptions::memory_backend_file {
+                id: backend_id.clone(),
+                memory_backend_file: qmp::MemoryBackendFileProperties {
+                    base: qmp::MemoryBackendProperties {
+                        dump: Some(false),
+                        host_nodes: None,
+                        merge: Some(false),
+                        policy: None,
+                        prealloc: Some(false),
+                        prealloc_context: None,
+                        prealloc_threads: None,
+                        reserve: None,
+                        share: Some(true),
+                        x_use_canonical_path_for_ramblock_id: None,
+                        size,
+                    },
+                    align: None,
+                    discard_data: Some(false),
+                    offset: None,
+                    pmem: None,
+                    readonly: Some(true),
+                    mem_path: path.to_string(),
+                    rom: None,
+                },
+            }))
+            .context("add EROFS PMEM memory backend")?;
+
+        let mut arguments = Dictionary::new();
+        arguments.insert("memdev".to_string(), backend_id.clone().into());
+        arguments.insert("unarmed".to_string(), true.into());
+        if let Err(error) = self.qmp.execute(&qmp::device_add {
+            bus: None,
+            id: Some(format!("erofs-nvdimm-{index}")),
+            driver: "nvdimm".to_string(),
+            arguments,
+        }) {
+            if let Err(cleanup_error) = self.qmp.execute(&qmp::object_del { id: backend_id }) {
+                warn!(
+                    sl!(),
+                    "Failed to clean up EROFS PMEM backend: {cleanup_error}"
+                );
+            }
+            return Err(error).context("add read-only EROFS NVDIMM");
+        }
+        Ok(())
+    }
+
     pub fn hotplugged_memory_size(&mut self) -> Result<u64> {
         let memory_frontends = self.qmp.execute(&qapi_qmp::query_memory_devices {})?;
 
@@ -1910,6 +1968,121 @@ fn block_node_name(index: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pmem_hotplug_rolls_back_backend_on_device_failure() {
+        use std::io::{BufRead, Write};
+        let image = tempfile::NamedTempFile::new().unwrap();
+        image.as_file().set_len(4096).unwrap();
+        let (client, server) = UnixStream::pair().unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let server_thread = thread::spawn(move || {
+            let mut reader = BufReader::new(server.try_clone().unwrap());
+            let mut writer = server;
+            for command in ["object-add", "device_add", "object-del"] {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+                assert_eq!(request["execute"], command);
+                let args = &request["arguments"];
+                if command == "object-add" {
+                    assert_eq!(args["readonly"], true);
+                    assert_eq!(args["share"], true);
+                    assert_eq!(args["prealloc"], false);
+                    assert_eq!(args["size"], 4096);
+                } else if command == "device_add" {
+                    assert_eq!(args["driver"], "nvdimm");
+                    assert_eq!(args["unarmed"], true);
+                } else {
+                    assert_eq!(args["id"], "erofs-pmem-2");
+                }
+                let response = if command == "device_add" {
+                    serde_json::json!({"error": {"class": "GenericError", "desc": "no memory slots"}})
+                } else {
+                    serde_json::json!({"return": {}})
+                };
+                let mut response = response;
+                if let Some(id) = request.get("id") {
+                    response["id"] = id.clone();
+                }
+                writeln!(writer, "{response}").unwrap();
+            }
+        });
+        let mut qmp = Qmp {
+            qmp: qapi::Qmp::new(qapi::Stream::new(
+                BufReader::new(client.try_clone().unwrap()),
+                client,
+            )),
+            guest_memory_block_size: 0,
+            ccw_subchannel: None,
+            pci_bridge_devices: HashMap::new(),
+            block_fdsets: HashMap::new(),
+        };
+        assert!(qmp
+            .hotplug_nvdimm(2, image.path().to_str().unwrap())
+            .is_err());
+        server_thread.join().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires /dev/kvm and KATA_QEMU_TEST_BINARY pointing to QEMU"]
+    fn pmem_hotplug_with_qemu() {
+        use std::process::{Command, Stdio};
+        struct QemuChild(std::process::Child);
+        impl Drop for QemuChild {
+            fn drop(&mut self) {
+                if self.0.try_wait().unwrap().is_none() {
+                    self.0.kill().unwrap();
+                }
+                self.0.wait().unwrap();
+            }
+        }
+        let binary = std::env::var("KATA_QEMU_TEST_BINARY").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("qmp.sock");
+        let child = Command::new(binary)
+            .args([
+                "-machine",
+                "q35,nvdimm=on",
+                "-accel",
+                "kvm",
+                "-m",
+                "128M,slots=8,maxmem=1G",
+                "-S",
+                "-nodefaults",
+                "-display",
+                "none",
+                "-monitor",
+                "none",
+                "-qmp",
+            ])
+            .arg(format!("unix:{},server=on,wait=off", socket.display()))
+            .stdin(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut child = QemuChild(child);
+        assert!(child.0.try_wait().unwrap().is_none());
+        let mut qmp = Qmp::new(socket.to_str().unwrap()).unwrap();
+        let image = dir.path().join("image.raw");
+        std::fs::File::create(&image)
+            .unwrap()
+            .set_len(4096)
+            .unwrap();
+        qmp.hotplug_nvdimm(0, image.to_str().unwrap()).unwrap();
+        // Retaining the first mapping must still permit subsequent container images.
+        qmp.hotplug_nvdimm(1, image.to_str().unwrap()).unwrap();
+        let devices = qmp.qmp.execute(&qmp::query_memory_devices {}).unwrap();
+        assert_eq!(devices.len(), 2);
+        assert!(devices
+            .iter()
+            .all(|d| matches!(d, qmp::MemoryDeviceInfo::nvdimm(_))));
+        assert_eq!(qmp.hotplugged_memory_size().unwrap(), 0);
+    }
 
     #[test]
     fn reconstructs_kata_block_fdsets_from_qmp() {

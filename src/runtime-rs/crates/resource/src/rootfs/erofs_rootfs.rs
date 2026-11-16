@@ -31,15 +31,17 @@ use hypervisor::{
 use kata_types::mount::Mount;
 use kata_types::{
     gpt_disk::{
-        extract_dmverity_annotation, extract_snapshot_id, generate_dmverity_options,
-        generate_gpt_metadata, generate_padding_file, get_erofs_layer_size,
-        parse_dmverity_metadata_file, ErofsLayer, GptDiskLayout, GptMetadataFiles,
+        calculate_gpt_layout, extract_dmverity_annotation, extract_snapshot_id,
+        generate_dmverity_options, generate_full_gpt_image, generate_gpt_metadata,
+        generate_padding_file, get_erofs_layer_size, parse_dmverity_metadata_file, ErofsLayer,
+        GptDiskLayout, GptMetadataFiles,
     },
     vmdk::VmdkConfig,
 };
 use oci_spec::runtime as oci;
 use std::collections::HashMap;
 use std::fs;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -51,6 +53,140 @@ pub(crate) const EROFS_ROOTFS_TYPE: &str = "erofs";
 pub(crate) const RW_LAYER_ROOTFS_TYPE: &str = "ext4";
 /// VMDK file extension for merged EROFS image
 const EROFS_MERGED_VMDK: &str = "merged_fs.vmdk";
+const EROFS_PMEM_IMAGE: &str = "erofs-pmem.raw";
+const PMEM_NAMESPACE_ALIGNMENT: u64 = 2 * 1024 * 1024;
+const PMEM_PAGE_SIZE: u64 = 4096;
+
+fn pmem_namespace_superblock(payload_size: u64) -> [u8; 4096] {
+    // Linux nd_pfn_sb v1.4, PFN_MODE_RAM: page metadata must not write to the image.
+    let mut sb = [0u8; 4096];
+    sb[..16].copy_from_slice(b"NVDIMM_PFN_INFO\0");
+    sb[16..32].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+    sb[52..54].copy_from_slice(&1u16.to_le_bytes());
+    sb[54..56].copy_from_slice(&4u16.to_le_bytes());
+    sb[56..64].copy_from_slice(&PMEM_NAMESPACE_ALIGNMENT.to_le_bytes());
+    sb[64..72].copy_from_slice(&(payload_size / PMEM_PAGE_SIZE).to_le_bytes());
+    sb[72..76].copy_from_slice(&1u32.to_le_bytes());
+    sb[84..88].copy_from_slice(&(PMEM_NAMESPACE_ALIGNMENT as u32).to_le_bytes());
+    sb[88..92].copy_from_slice(&(PMEM_PAGE_SIZE as u32).to_le_bytes());
+    let (mut low, mut high) = (0u32, 0u32);
+    for word in sb.chunks_exact(4) {
+        low = low.wrapping_add(u32::from_le_bytes([word[0], word[1], word[2], word[3]]));
+        high = high.wrapping_add(low);
+    }
+    sb[4088..].copy_from_slice(&((u64::from(high) << 32) | u64::from(low)).to_le_bytes());
+    sb
+}
+
+fn validate_pmem_layer(mount: &Mount) -> Result<()> {
+    if mount.options.iter().any(|o| o.starts_with("device=")) {
+        return Err(anyhow!(
+            "experimental_erofs_pmem requires independent, self-contained EROFS layers"
+        ));
+    }
+    let mut image = fs::File::open(&mount.source)?;
+    image.seek(SeekFrom::Start(1024))?;
+    let mut superblock = [0u8; 128];
+    image.read_exact(&mut superblock)?;
+    // Reject compression-capable layouts conservatively, including legacy LZ4.
+    if superblock[..4] != [0xe2, 0xe1, 0xf5, 0xe0]
+        || superblock[12] != 12
+        || superblock[80..84] != [0; 4]
+        || superblock[84..88] != [0; 4]
+        || superblock[88..90] != [0; 2]
+    {
+        return Err(anyhow!(
+            "experimental_erofs_pmem requires uncompressed, self-contained 4 KiB EROFS layers: {}",
+            mount.source
+        ));
+    }
+    Ok(())
+}
+
+fn materialize_pmem_image(layout: &GptDiskLayout, directory: &Path) -> Result<PathBuf> {
+    let layers: Vec<_> = layout.partitions.iter().map(|p| p.layer.clone()).collect();
+    let mut full_layout = calculate_gpt_layout(&layers)?;
+    let alignment_sectors = PMEM_NAMESPACE_ALIGNMENT / full_layout.lb_size;
+    full_layout.total_sectors =
+        full_layout.total_sectors.div_ceil(alignment_sectors) * alignment_sectors;
+    let payload_size = full_layout
+        .total_sectors
+        .checked_mul(full_layout.lb_size)
+        .context("EROFS PMEM GPT size overflow")?;
+    let namespace_size = payload_size
+        .checked_add(PMEM_NAMESPACE_ALIGNMENT)
+        .context("EROFS PMEM namespace size overflow")?;
+    let first = full_layout
+        .partitions
+        .first()
+        .context("no EROFS partitions")?;
+    let last = full_layout
+        .partitions
+        .last()
+        .context("no EROFS partitions")?;
+    let head_size = first.start_lba * full_layout.lb_size;
+    let tail_offset = (last.end_lba + 1) * full_layout.lb_size;
+
+    // The sparse template contains only GPT metadata; copy layer data just once.
+    let mut metadata = tempfile::NamedTempFile::new_in(directory)?;
+    generate_full_gpt_image(&full_layout, metadata.path())?;
+    let mut image = tempfile::NamedTempFile::new_in(directory)?;
+    image.as_file().set_len(namespace_size)?;
+    image.seek(SeekFrom::Start(PMEM_PAGE_SIZE))?;
+    image.write_all(&pmem_namespace_superblock(payload_size))?;
+    image.seek(SeekFrom::Start(PMEM_NAMESPACE_ALIGNMENT))?;
+    std::io::copy(&mut metadata.as_file_mut().take(head_size), &mut image)?;
+    metadata.seek(SeekFrom::Start(tail_offset))?;
+    image.seek(SeekFrom::Start(PMEM_NAMESPACE_ALIGNMENT + tail_offset))?;
+    std::io::copy(&mut metadata, &mut image)?;
+
+    for partition in &layout.partitions {
+        let mut layer = fs::File::open(&partition.layer.path)?;
+        let expected = partition
+            .layer
+            .size_sectors
+            .checked_mul(layout.lb_size)
+            .context("EROFS partition size overflow")?;
+        if layer.metadata()?.len() != expected {
+            return Err(anyhow!(
+                "EROFS layer size changed or is not sector aligned: {}",
+                partition.layer.path
+            ));
+        }
+        image.seek(SeekFrom::Start(
+            PMEM_NAMESPACE_ALIGNMENT
+                + partition
+                    .start_lba
+                    .checked_mul(layout.lb_size)
+                    .context("EROFS partition offset overflow")?,
+        ))?;
+        let copied = std::io::copy(&mut layer, &mut image)?;
+        if copied != expected {
+            return Err(anyhow!(
+                "EROFS layer changed while copying: {}",
+                partition.layer.path
+            ));
+        }
+    }
+    image.as_file().sync_all()?;
+    let path = directory.join(EROFS_PMEM_IMAGE);
+    image.persist_noclobber(&path)?;
+    Ok(path)
+}
+
+fn erofs_partition_options(partition: u32, pmem: bool) -> Vec<String> {
+    let mut options = vec![
+        "ro".to_string(),
+        "X-kata.overlay-lower".to_string(),
+        "X-kata.multi-layer=true".to_string(),
+        "X-kata.gpt-partitioned=true".to_string(),
+        format!("X-kata.partition-number={partition}"),
+    ];
+    if pmem {
+        options.push("dax=always".to_string());
+    }
+    options
+}
 
 /// Maximum number of rootfs layer devices (erofs + rw layer) allowed in multi-layer EROFS mode.
 /// This is a pre-flight sanity check before VMDK merging, to prevent excessive block devices
@@ -416,6 +552,19 @@ impl ErofsMultiLayerRootfs {
 
         let blkdev_info = get_block_device_info(device_manager).await;
         let block_driver = blkdev_info.block_device_driver.clone();
+        let pmem = blkdev_info.experimental_erofs_pmem;
+        if pmem {
+            warn!(
+                sl!(),
+                "Experimental EROFS PMEM: guest dm-verity is disabled"
+            );
+            for mount in rootfs_mounts
+                .iter()
+                .filter(|m| m.fs_type.eq_ignore_ascii_case(EROFS_ROOTFS_TYPE))
+            {
+                validate_pmem_layer(mount).context("validate EROFS PMEM layer")?;
+            }
+        }
 
         // Check block device count limit
         let expected_device_count = rootfs_mounts
@@ -538,7 +687,7 @@ impl ErofsMultiLayerRootfs {
                     let total_erofs_mounts = erofs_mounts_indexed.len();
 
                     // GPT+VMDK mode: Multiple independent erofs layer files
-                    if total_erofs_mounts > 1 {
+                    if total_erofs_mounts > 1 || pmem {
                         info!(
                             sl!(),
                             "multi-layer erofs: using GPT+VMDK mode for {} independent layers",
@@ -615,9 +764,33 @@ impl ErofsMultiLayerRootfs {
                             layout.partitions.len()
                         );
 
+                        let (erofs_path, source, driver, layout) = if pmem {
+                            let directory = ensure_container_dir(sid, cid)?;
+                            let (layout, path) = tokio::task::spawn_blocking(move || {
+                                materialize_pmem_image(&layout, &directory)
+                                    .map(|path| (layout, path))
+                            })
+                            .await
+                            .context("join EROFS PMEM materialization")?
+                            .context("materialize EROFS PMEM GPT image")?;
+                            cleanup_paths.push(path.clone());
+                            (
+                                path.display().to_string(),
+                                BlockSourceFormat::Raw,
+                                "virtio-pmem".to_string(),
+                                layout,
+                            )
+                        } else {
+                            (
+                                erofs_path,
+                                BlockSourceFormat::Vmdk(vmdk),
+                                block_driver.clone(),
+                                layout,
+                            )
+                        };
                         let device_config = &mut BlockConfigModern {
-                            driver_option: block_driver.clone(),
-                            source: BlockSourceFormat::Vmdk(vmdk),
+                            driver_option: driver,
+                            source,
                             path_on_host: erofs_path,
                             is_readonly: true,
                             blkdev_aio: BlockDeviceAio::new(&blkdev_info.block_device_aio),
@@ -626,12 +799,22 @@ impl ErofsMultiLayerRootfs {
                             ..Default::default()
                         };
 
-                        let device_info = do_handle_device(
+                        let attached = do_handle_device(
                             device_manager,
                             &DeviceConfig::BlockCfgModern(device_config.clone()),
                         )
-                        .await
-                        .context("failed to attach GPT VMDK block device")?;
+                        .await;
+                        if pmem && attached.is_err() {
+                            for path in &cleanup_paths {
+                                if path.exists() {
+                                    if let Err(error) = fs::remove_file(path) {
+                                        warn!(sl!(), "Failed to clean up EROFS PMEM attachment: {error}";
+                                            "path" => path.display());
+                                    }
+                                }
+                            }
+                        }
+                        let device_info = attached.context("failed to attach GPT image device")?;
 
                         let (base_device, device_id) =
                             extract_block_device_info(&device_info, true).await?;
@@ -667,12 +850,7 @@ impl ErofsMultiLayerRootfs {
                             let original_mount = &rootfs_mounts[*original_mount_idx];
 
                             let mut rolayer = base_device.clone();
-                            let mut options: Vec<String> = vec![
-                                "X-kata.overlay-lower".to_string(),
-                                "X-kata.multi-layer=true".to_string(),
-                                "X-kata.gpt-partitioned=true".to_string(),
-                                format!("X-kata.partition-number={}", part.partition_number),
-                            ];
+                            let mut options = erofs_partition_options(part.partition_number, pmem);
 
                             // Look up dm-verity annotation from the original mount
                             let options_map: HashMap<String, String> = original_mount
@@ -684,7 +862,9 @@ impl ErofsMultiLayerRootfs {
                                 })
                                 .collect();
 
-                            if let Some(dmverity_path) = extract_dmverity_annotation(&options_map) {
+                            if let Some(dmverity_path) =
+                                extract_dmverity_annotation(&options_map).filter(|_| !pmem)
+                            {
                                 info!(
                                     sl!(),
                                     "Found dm-verity annotation for partition {} from {}",
@@ -980,8 +1160,9 @@ pub fn is_erofs_multi_layer(rootfs_mounts: &[Mount]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_erofs_multi_layer, EROFS_ROOTFS_TYPE, RW_LAYER_ROOTFS_TYPE};
+    use super::*;
     use kata_types::mount::Mount;
+    use std::convert::TryInto;
     use std::path::PathBuf;
 
     fn mount(fs_type: &str, options: &[&str]) -> Mount {
@@ -991,6 +1172,106 @@ mod tests {
             destination: PathBuf::from("/"),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn pmem_image_contains_layers_and_both_gpt_headers() {
+        let dir = tempfile::tempdir().unwrap();
+        let layers = [4096, 12288]
+            .iter()
+            .enumerate()
+            .map(|(index, size)| {
+                let path = dir.path().join(format!("layer-{index}.erofs"));
+                fs::write(&path, vec![index as u8 + 1; *size]).unwrap();
+                ErofsLayer {
+                    path: path.display().to_string(),
+                    size_sectors: (*size / 512) as u64,
+                    snapshot_id: index.to_string(),
+                }
+            })
+            .collect::<Vec<_>>();
+        let (layout, _) =
+            generate_gpt_metadata("sandbox", "container", layers, dir.path()).unwrap();
+        let path = materialize_pmem_image(&layout, dir.path()).unwrap();
+        let disk = fs::read(&path).unwrap();
+        let payload = PMEM_NAMESPACE_ALIGNMENT as usize;
+        assert_eq!(disk.len() % payload, 0);
+        assert_eq!(&disk[4096..4112], b"NVDIMM_PFN_INFO\0");
+        assert_eq!(
+            u64::from_le_bytes(disk[4152..4160].try_into().unwrap()),
+            PMEM_NAMESPACE_ALIGNMENT
+        );
+        assert_eq!(
+            u64::from_le_bytes(disk[4160..4168].try_into().unwrap()),
+            ((disk.len() - payload) / 4096) as u64
+        );
+        assert_eq!(u32::from_le_bytes(disk[4168..4172].try_into().unwrap()), 1);
+        assert_eq!(&disk[payload + 512..payload + 520], b"EFI PART");
+        assert_eq!(&disk[disk.len() - 512..disk.len() - 504], b"EFI PART");
+        for (index, partition) in layout.partitions.iter().enumerate() {
+            let start = payload + (partition.start_lba * 512) as usize;
+            let size = (partition.layer.size_sectors * 512) as usize;
+            assert_eq!(&disk[start..start + size], vec![index as u8 + 1; size]);
+            let entry = payload + 1024 + index * 128;
+            assert_eq!(
+                u64::from_le_bytes(disk[entry + 32..entry + 40].try_into().unwrap()),
+                partition.start_lba
+            );
+            assert_eq!(
+                u64::from_le_bytes(disk[entry + 40..entry + 48].try_into().unwrap()),
+                partition.end_lba
+            );
+        }
+        // A second creation must not overwrite an image potentially still mapped by QEMU.
+        assert!(materialize_pmem_image(&layout, dir.path()).is_err());
+        assert_eq!(fs::read(path).unwrap(), disk);
+    }
+
+    #[test]
+    fn pmem_image_rejects_changed_layers_without_publishing_an_image() {
+        let dir = tempfile::tempdir().unwrap();
+        let layer = dir.path().join("layer.erofs");
+        fs::write(&layer, vec![1; 4096]).unwrap();
+        let layout = calculate_gpt_layout(&[ErofsLayer {
+            path: layer.display().to_string(),
+            size_sectors: 16,
+            snapshot_id: "1".to_string(),
+        }])
+        .unwrap();
+        assert!(materialize_pmem_image(&layout, dir.path()).is_err());
+        assert!(!dir.path().join(EROFS_PMEM_IMAGE).exists());
+    }
+
+    #[test]
+    fn pmem_layer_validation_rejects_compression_and_external_devices() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut data = vec![0u8; 4096];
+        data[1024..1028].copy_from_slice(&[0xe2, 0xe1, 0xf5, 0xe0]);
+        data[1036] = 12;
+        file.write_all(&data).unwrap();
+        let mut layer = mount("erofs", &[]);
+        layer.source = file.path().display().to_string();
+        validate_pmem_layer(&layer).unwrap();
+        for (offset, value) in [(12, 9), (80, 2), (84, 1), (86, 1)] {
+            let mut invalid = data.clone();
+            invalid[1024 + offset] = value;
+            fs::write(file.path(), invalid).unwrap();
+            assert!(validate_pmem_layer(&layer).is_err());
+        }
+        fs::write(file.path(), data).unwrap();
+        layer.options.push("device=/another-layer".to_string());
+        assert!(validate_pmem_layer(&layer).is_err());
+    }
+
+    #[test]
+    fn pmem_partition_options_request_dax_without_verity() {
+        let options = erofs_partition_options(2, true);
+        assert!(options.iter().any(|o| o == "dax=always"));
+        assert!(options.iter().any(|o| o == "X-kata.partition-number=2"));
+        assert!(!options.iter().any(|o| o.contains("dmverity")));
+        assert!(!erofs_partition_options(2, false)
+            .iter()
+            .any(|o| o.starts_with("dax")));
     }
 
     #[test]

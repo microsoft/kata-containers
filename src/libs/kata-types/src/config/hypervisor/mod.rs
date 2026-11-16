@@ -228,6 +228,10 @@ pub fn get_hypervisor_plugin(name: &str) -> Option<Arc<dyn ConfigPlugin>> {
 /// Configuration information for block device.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct BlockDeviceInfo {
+    /// Experimental raw GPT EROFS images on read-only NVDIMM, without guest dm-verity.
+    #[serde(default)]
+    pub experimental_erofs_pmem: bool,
+
     /// Block storage driver to be used for the hypervisor in case the container rootfs is backed
     /// by a block device. Options include:
     /// - `virtio-scsi`
@@ -1812,6 +1816,37 @@ fn yes() -> bool {
 }
 
 impl Hypervisor {
+    /// Validate the intentionally restricted EROFS PMEM prototype.
+    pub fn validate_erofs_pmem(&self, hypervisor: &str) -> Result<()> {
+        if !self.blockdev_info.experimental_erofs_pmem {
+            return Ok(());
+        }
+        if hypervisor != "qemu"
+            || !cfg!(target_arch = "x86_64")
+            || self.machine_info.machine_type != "q35"
+            || self.security_info.confidential_guest
+        {
+            return Err(std::io::Error::other(
+                "experimental_erofs_pmem requires non-confidential x86_64 QEMU q35",
+            ));
+        }
+        if self.memory_info.memory_slots == 0
+            || self.memory_info.default_maxmemory <= self.memory_info.default_memory
+            || self.memory_info.enable_virtio_mem
+        {
+            return Err(std::io::Error::other(
+                "experimental_erofs_pmem requires memory_slots > 0, \
+                 default_maxmemory > default_memory and enable_virtio_mem = false",
+            ));
+        }
+        if self.vm_template.boot_to_be_template || self.vm_template.boot_from_template {
+            return Err(std::io::Error::other(
+                "experimental_erofs_pmem does not support VM templates",
+            ));
+        }
+        Ok(())
+    }
+
     /// Validates the path of the hypervisor executable against configured patterns.
     pub fn validate_hypervisor_path<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         validate_path_pattern(&self.valid_hypervisor_paths, path)
@@ -1910,6 +1945,7 @@ impl ConfigOps for Hypervisor {
 
                 // Safe to unwrap() because `hypervisor` is a valid key in the hash map.
                 let hv = conf.hypervisor.get(hypervisor).unwrap();
+                hv.validate_erofs_pmem(hypervisor)?;
                 hv.blockdev_info.validate()?;
                 hv.boot_info.validate()?;
                 for extra in &hv.guest_extension_images {

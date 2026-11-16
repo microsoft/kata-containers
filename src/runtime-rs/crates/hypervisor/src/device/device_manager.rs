@@ -725,6 +725,40 @@ mod tests {
     use tests_utils::load_test_config;
     use tokio::sync::RwLock;
 
+    #[tokio::test]
+    async fn test_erofs_pmem_retains_guest_device_numbers_after_detach() {
+        use crate::HypervisorConfig;
+        let hypervisor = Qemu::new();
+        let mut config = HypervisorConfig::default();
+        config.blockdev_info.experimental_erofs_pmem = true;
+        hypervisor.set_hypervisor_config(config).await;
+        let mut manager = DeviceManager::new(Arc::new(hypervisor), None)
+            .await
+            .unwrap();
+        for index in 0..2 {
+            let image = tempfile::NamedTempFile::new().unwrap();
+            let id = manager
+                .new_device(&DeviceConfig::BlockCfgModern(BlockConfigModern {
+                    path_on_host: image.path().display().to_string(),
+                    driver_option: "virtio-pmem".to_string(),
+                    is_readonly: true,
+                    ..Default::default()
+                }))
+                .await
+                .unwrap();
+            manager.try_add_device(&id).await.unwrap();
+            let DeviceType::BlockModern(block) = manager.get_device_info(&id).await.unwrap() else {
+                panic!("expected block device");
+            };
+            assert_eq!(
+                block.lock().await.config.virt_path,
+                format!("/dev/pmem{index}")
+            );
+            manager.try_remove_device(&id).await.unwrap();
+        }
+        assert!(manager.shared_info.released_pmem_index.is_empty());
+    }
+
     #[cfg(all(
         feature = "cloud-hypervisor",
         any(target_arch = "x86_64", target_arch = "aarch64")

@@ -504,7 +504,8 @@ pub fn generate_gpt_metadata(
     Ok((layout, metadata_files))
 }
 
-fn generate_full_gpt_image(layout: &GptDiskLayout, output_path: &Path) -> Result<()> {
+/// Write primary and backup GPT structures to a disk image with the given layout.
+pub fn generate_full_gpt_image(layout: &GptDiskLayout, output_path: &Path) -> Result<()> {
     let lb_size = layout.lb_size;
     let total_size = layout.total_sectors * lb_size;
 

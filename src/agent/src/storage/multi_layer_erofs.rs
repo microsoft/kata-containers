@@ -23,6 +23,7 @@ use tokio::time::sleep;
 use crate::device::block_device_handler::{
     get_virtio_blk_mmio_device_name, get_virtio_blk_pci_device_name,
 };
+use crate::device::nvdimm_device_handler::wait_for_pmem_device;
 use crate::device::scsi_device_handler::get_scsi_device_name;
 use crate::linux_abi::pcipath_from_dev_tree_path;
 use crate::mount::baremount;
@@ -31,7 +32,9 @@ use crate::sandbox::Sandbox;
 use crate::storage::{StorageContext, StorageHandler};
 use anyhow::{anyhow, Context, Result};
 use kata_sys_util::mount::{create_mount_destination, Mounter};
-use kata_types::device::{DRIVER_BLK_MMIO_TYPE, DRIVER_BLK_PCI_TYPE, DRIVER_SCSI_TYPE};
+use kata_types::device::{
+    DRIVER_BLK_MMIO_TYPE, DRIVER_BLK_PCI_TYPE, DRIVER_NVDIMM_TYPE, DRIVER_SCSI_TYPE,
+};
 #[cfg(feature = "devicemapper")]
 use kata_types::dmverity::{cleanup_dmverity_devices, create_dmverity_device, DmVerityInfo};
 use kata_types::mount::StorageDevice;
@@ -897,7 +900,7 @@ async fn wait_and_mount_layer(
             "mount-point" => layer_mount.display(),
         );
         // EROFS layers must be mounted read-only
-        (nix::mount::MsFlags::MS_RDONLY, "ro".to_string())
+        (nix::mount::MsFlags::MS_RDONLY, erofs_mount_options(layer)?)
     } else {
         // For non-EROFS layers, we can apply any specified mount options.
         // Filter out X-kata.* custom options before mount
@@ -931,6 +934,23 @@ async fn wait_and_mount_layer(
     // After successfully mounting the layer, we track the mount point for cleanup.
     track_temporary_mount_for_cleanup(sandbox, layer_mount, logger).await?;
 
+    if layer.fstype == EROFS_TYPE && layer.options.iter().any(|o| o == "dax=always") {
+        let mounts = procfs::process::Process::myself()
+            .context("get agent process for EROFS DAX verification")?
+            .mountinfo()
+            .context("read mount information for EROFS DAX verification")?;
+        if !mounts.iter().any(|mount| {
+            mount.mount_point == layer_mount
+                && mount.fs_type == EROFS_TYPE
+                && mount.super_options.get("dax").and_then(|v| v.as_deref()) == Some("always")
+        }) {
+            return Err(anyhow!(
+                "EROFS did not enable requested DAX on {}",
+                layer_mount.display()
+            ));
+        }
+    }
+
     Ok(LayerMountInfo {
         verity_device: verity_device_path,
     })
@@ -941,6 +961,10 @@ async fn resolve_base_device_path(
     sandbox: &Arc<Mutex<Sandbox>>,
 ) -> Result<String> {
     let base_dev_path = match layer.driver.as_str() {
+        DRIVER_NVDIMM_TYPE => {
+            wait_for_pmem_device(sandbox, &layer.source).await?;
+            layer.source.clone()
+        }
         DRIVER_SCSI_TYPE => {
             // For SCSI devices, we need to wait for the device to appear and get its path before mounting.
             get_scsi_device_name(sandbox, &layer.source).await?
@@ -967,6 +991,16 @@ async fn resolve_base_device_path(
     };
 
     Ok(base_dev_path)
+}
+
+fn erofs_mount_options(layer: &Storage) -> Result<String> {
+    if layer.options.iter().any(|o| o == "dax=always") {
+        if layer.driver != DRIVER_NVDIMM_TYPE || is_dmverity_enabled(layer) {
+            return Err(anyhow!("EROFS DAX requires NVDIMM without dm-verity"));
+        }
+        return Ok("ro,dax=always".to_string());
+    }
+    Ok("ro".to_string())
 }
 
 /// Check if the storage is GPT-partitioned
@@ -1044,6 +1078,24 @@ async fn wait_for_partition_device(device_path: &str, logger: &Logger) -> Result
 mod tests {
     use super::*;
     use rstest::rstest;
+
+    #[test]
+    fn test_erofs_pmem_mount_options() {
+        let mut layer = Storage {
+            driver: DRIVER_NVDIMM_TYPE.to_string(),
+            options: vec!["dax=always".to_string(), OPT_GPT_PARTITIONED.to_string()],
+            ..Default::default()
+        };
+        assert_eq!(erofs_mount_options(&layer).unwrap(), "ro,dax=always");
+        layer.options.push(OPT_DMVERITY_ENABLED.to_string());
+        assert!(erofs_mount_options(&layer).is_err());
+        layer.options.pop();
+        layer.driver = DRIVER_SCSI_TYPE.to_string();
+        assert!(erofs_mount_options(&layer).is_err());
+        layer.options.clear();
+        assert_eq!(erofs_mount_options(&layer).unwrap(), "ro");
+        assert_eq!(get_partition_device_path("/dev/pmem1", 2), "/dev/pmem1p2");
+    }
 
     // --- validate_container_id ---
 

@@ -12,6 +12,13 @@ the tables below.
 
 There are several kinds of Kata configurations and they are listed below.
 
+!!! warning "Experimental EROFS PMEM is configuration-file only"
+    The `runtime-rs` option `[hypervisor.qemu].experimental_erofs_pmem` has no
+    pod annotation. It deliberately disables guest dm-verity for EROFS lower
+    layers and must be enabled by the administrator in a separate
+    non-confidential runtime configuration. See the
+    [EROFS prototype guide](how-to-use-erofs-snapshotter-with-kata.md#experimental-read-only-nvdimm-images).
+
 ### Global Options
 
 | Key | Value Type | Comments |

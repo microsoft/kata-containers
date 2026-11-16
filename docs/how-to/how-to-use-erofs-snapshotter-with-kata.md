@@ -34,6 +34,80 @@ footprints compared to traditional shared-filesystem approaches.
 > on nodes needing it. Read on for what any of it means, or to set a host up without
 > kata-deploy.
 
+## Experimental read-only NVDIMM images
+
+The `runtime-rs` QEMU backend can materialize the read-only EROFS layers into
+one raw NVDIMM backing image, with one GPT partition per layer, and hotplug it
+read-only. Explicit EROFS DAX mounts avoid copying eligible file data into the
+guest page cache. The writable upper layer is unchanged, including the
+guest-memory upper used with `default_size = "0"`.
+
+!!! warning "Prototype without guest image integrity verification"
+    This path deliberately omits guest dm-verity, even when containerd supplies
+    verity metadata. It is disabled by default and rejected for confidential
+    guests. Use a separate, non-confidential test runtime configuration.
+
+Enable the prototype in that runtime's configuration:
+
+```toml title="Experimental runtime-rs configuration"
+[hypervisor.qemu]
+machine_type = "q35"
+experimental_erofs_pmem = true
+memory_slots = 32
+default_maxmemory = 16384
+```
+
+The prototype requires x86_64 QEMU with ACPI NVDIMM support, a guest kernel
+with NVDIMM PFN, device-memory mapping and EROFS DAX support, and an agent built with the corresponding
+NVDIMM multi-layer storage support. Build both the shim and agent from this
+source tree. No change to `vm_rootfs_driver` or `block_device_driver` is
+necessary: this option changes only the EROFS container lower layers.
+
+Choose `default_maxmemory` above the actual VM RAM size, leaving enough address
+space for all image mappings. The example reserves address space, not 16 GiB
+of resident RAM. VM templates and `enable_virtio_mem = true` are unsupported.
+
+Use independent, self-contained, uncompressed EROFS layer images with 4096-byte
+blocks and no inline file data. For the snapshotter, keep
+`max_unmerged_layers = 0` and `enable_tar_index = false`; do not enable
+compression in `mkfs_options`. The `mkfs.erofs` conversion path used by
+containerd already supplies `-Enoinline_data`. Inspect existing layers with
+`dump.erofs -s` and `dump.erofs -S` before using them. The prototype rejects
+non-4096-byte blocks, compression-related superblock features and external
+data devices rather than converting incompatible images.
+
+Limitations:
+
+- Each container gets its own raw disk file. Materialization copies all layer
+  bytes, including any unused verity trees, increasing startup I/O and disk
+  usage. The file begins with a 2 MiB Linux NVDIMM PFN metadata prefix,
+  followed by a 2 MiB-aligned GPT payload with primary and backup GPT structures.
+  Linux hides the prefix and presents the GPT disk through `/dev/pmemN`.
+  PFN RAM mode keeps page metadata in guest RAM, not in the read-only file:
+  budget approximately 64 bytes per 4 KiB of mapped capacity, depending on the
+  guest kernel's page structure size.
+- There is no cross-container raw-image cache. Separate files do not share
+  host page-cache pages merely because their contents are identical.
+- QEMU cannot hot-unplug these NVDIMMs. Container deletion unmounts the layers
+  and removes the generated files, but QEMU retains the mappings and guest
+  device numbers until sandbox shutdown. Container restarts consume additional
+  memory slots and address space; exhaustion is reported as an attachment error.
+- VM snapshots are rejected while the prototype is enabled.
+- DAX does not eliminate application buffers, writable upper-layer pages,
+  filesystem metadata, or the host's resident image pages.
+
+Verify that guest EROFS lower mounts use `dax=always`, that representative
+regular files report `STATX_ATTR_DAX` through `statx`, and that no
+`kata-verity-*` devices are created for these lower layers. Mounts are in the
+agent's mount namespace and may not be visible in the container's mount table.
+Compare host pod `memory.current` and `memory.stat` under equivalent workloads;
+a smaller guest cache alone does not establish a host-memory saving.
+
+!!! note "Requested DAX versus active DAX"
+    Linux can silently disable requested EROFS DAX on an unsupported device.
+    The PFN prefix enables filesystem DAX for the read-only NVDIMM namespace;
+    the agent also rejects a mount if its effective options omit `dax=always`.
+
 ## Quick Start Guide
 
 This section provides a quick overview of the steps to get started with EROFS snapshotter and Kata Containers. For detailed instructions, see the [Installation Guide](#installation-guide) section.

@@ -27,6 +27,31 @@ mod tests {
     use std::fs;
     use std::path::Path;
     #[test]
+    fn test_experimental_erofs_pmem_config_validation() {
+        use kata_types::config::hypervisor::Hypervisor;
+        let mut hv: Hypervisor = toml::from_str(
+            "experimental_erofs_pmem = true\nmachine_type = 'q35'\n\
+             default_memory = 512\ndefault_maxmemory = 4096\nmemory_slots = 16",
+        )
+        .unwrap();
+        assert_eq!(
+            hv.validate_erofs_pmem("qemu").is_ok(),
+            cfg!(target_arch = "x86_64")
+        );
+        assert!(hv.validate_erofs_pmem("clh").is_err());
+        hv.security_info.confidential_guest = true;
+        assert!(hv.validate_erofs_pmem("qemu").is_err());
+        hv.security_info.confidential_guest = false;
+        hv.memory_info.memory_slots = 0;
+        assert!(hv.validate_erofs_pmem("qemu").is_err());
+        hv.memory_info.memory_slots = 16;
+        hv.memory_info.default_maxmemory = 512;
+        assert!(hv.validate_erofs_pmem("qemu").is_err());
+        hv.blockdev_info.experimental_erofs_pmem = false;
+        hv.validate_erofs_pmem("clh").unwrap();
+    }
+
+    #[test]
     fn test_change_config_annotation() {
         let content = include_str!("texture/configuration-anno-0.toml");
         let qemu = QemuConfig::new();

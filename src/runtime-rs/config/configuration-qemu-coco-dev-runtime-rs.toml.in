@@ -240,6 +240,12 @@ virtio_fs_cache = "@DEFVIRTIOFSCACHE@"
 # or nvdimm.
 block_device_driver = "@DEFBLOCKSTORAGEDRIVER_QEMU@"
 
+# Experimental EROFS raw GPT on read-only NVDIMM (x86_64 q35, non-confidential).
+# Disables guest dm-verity for EROFS lowers; writable upper is unchanged.
+# Requires uncompressed 4 KiB layers, memory slots and spare maxmem address space.
+# NVDIMMs remain attached until sandbox shutdown.
+experimental_erofs_pmem = false
+
 # aio is the I/O mechanism used by qemu
 # Options:
 #

@@ -227,6 +227,15 @@ impl Device for BlockDeviceModernHandle {
             self.increase_attach_count().await?;
             return Err(e);
         }
+        if self.snapshot_config().await.driver_option == kata_types::device::DRIVER_NVDIMM_TYPE
+            && h.hypervisor_config()
+                .await
+                .blockdev_info
+                .experimental_erofs_pmem
+        {
+            // Retained NVDIMMs still occupy their guest pmem device numbers.
+            return Ok(None);
+        }
         Ok(Some(self.snapshot_config().await.index))
     }
 

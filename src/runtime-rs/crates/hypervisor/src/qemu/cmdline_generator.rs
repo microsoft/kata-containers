@@ -3019,6 +3019,7 @@ pub struct QemuCmdLine<'a> {
 
 impl<'a> QemuCmdLine<'a> {
     pub fn new(id: &str, config: &'a HypervisorConfig) -> Result<QemuCmdLine<'a>> {
+        config.validate_erofs_pmem("qemu")?;
         let ccw_subchannel = match bus_type() {
             VirtioBusType::Ccw => Some(CcwSubChannel::new()),
             _ => None,
@@ -3042,6 +3043,9 @@ impl<'a> QemuCmdLine<'a> {
             requires_memlock: false,
             iommufd_objects: HashMap::new(),
         };
+        if config.blockdev_info.experimental_erofs_pmem {
+            qemu_cmd_line.machine.set_nvdimm(true);
+        }
 
         // add_virtiofs_share() installs the file-backed memory backend when
         // filesystem sharing is enabled.
@@ -3258,6 +3262,7 @@ impl<'a> QemuCmdLine<'a> {
         if self.config.boot_info.vm_rootfs_driver != "nvdimm"
             && self.config.boot_info.vm_rootfs_driver != "virtio-pmem"
             && !self.config.memory_info.enable_virtio_mem
+            && !self.config.blockdev_info.experimental_erofs_pmem
         {
             self.memory.set_maxmem_size(0).set_num_slots(0);
         }
@@ -4189,6 +4194,27 @@ mod tests {
         config.memory_info.enable_mem_prealloc = enable_mem_prealloc;
         config.shared_fs.shared_fs = shared_fs.map(str::to_owned);
         config
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[tokio::test]
+    #[serial]
+    async fn test_erofs_pmem_keeps_memory_slots_with_shared_fs() {
+        let mut config = test_qemu_config(Some("virtio-fs"), false);
+        config.boot_info.initrd = "/initrd".to_string();
+        config.memory_info.default_maxmemory = 4096;
+        config.memory_info.memory_slots = 16;
+        config.blockdev_info.experimental_erofs_pmem = true;
+        let _ = std::fs::remove_file(QMP_SOCKET_FILE);
+        let mut cmd = QemuCmdLine::new("erofs-pmem-test", &config).unwrap();
+        cmd.add_virtiofs_share("/tmp/test-virtiofs.sock", "shared", 1024);
+        assert!(cmd.has_memory_hotplug_region());
+        assert!(contains_param(
+            &cmd.machine.qemu_params().await.unwrap(),
+            "nvdimm=on"
+        ));
+        drop(cmd);
+        std::fs::remove_file(QMP_SOCKET_FILE).unwrap();
     }
 
     fn has_qemu_arg(params: &[String], option: &str, value: &str) -> bool {
