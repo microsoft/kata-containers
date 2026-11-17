@@ -38,6 +38,7 @@ use kata_types::{
     },
     vmdk::VmdkConfig,
 };
+use nix::fcntl::{posix_fadvise, PosixFadviseAdvice};
 use oci_spec::runtime as oci;
 use std::collections::HashMap;
 use std::fs;
@@ -169,6 +170,16 @@ fn materialize_pmem_image(layout: &GptDiskLayout, directory: &Path) -> Result<Pa
         }
     }
     image.as_file().sync_all()?;
+    // Drop materialization-warmed cache before QEMU maps the image.
+    if let Err(error) = posix_fadvise(
+        image.as_file(),
+        0,
+        0,
+        PosixFadviseAdvice::POSIX_FADV_DONTNEED,
+    ) {
+        warn!(sl!(), "Failed to advise dropping EROFS PMEM image cache: {error}";
+            "image" => image.path().display());
+    }
     let path = directory.join(EROFS_PMEM_IMAGE);
     image.persist_noclobber(&path)?;
     Ok(path)

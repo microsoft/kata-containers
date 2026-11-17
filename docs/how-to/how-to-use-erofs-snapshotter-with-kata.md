@@ -72,9 +72,13 @@ back to the default location. The setting is used only when
     allocates host shared memory charged to the pod, offsetting guest DAX
     savings. Select a disk-backed filesystem and verify it with
     `findmnt -T /opt/kata` before enabling the example path.
-    Copying images still warms the host file cache on disk-backed storage, but
-    those clean pages can be reclaimed. This setting does not evict cache pages
-    or introduce cross-container image sharing.
+    After writing and syncing each image, the runtime issues
+    `POSIX_FADV_DONTNEED` for the whole image before attachment, requesting
+    eviction of its clean cached pages. This is advisory: eviction is not
+    guaranteed, particularly on tmpfs, and failures are logged without failing
+    container creation. Guest accesses can populate the cache again.
+    Source layer caches are left untouched; there is no global cache drop or
+    cross-container image sharing.
 
 The prototype requires x86_64 QEMU with ACPI NVDIMM support, a guest kernel
 with NVDIMM PFN, device-memory mapping and EROFS DAX support, and an agent built with the corresponding
