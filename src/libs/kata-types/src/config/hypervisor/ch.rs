@@ -145,3 +145,38 @@ impl ConfigPlugin for CloudHypervisorConfig {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::config::hypervisor::{Hypervisor, MemoryInfo, MemoryRestoreMode};
+
+    #[test]
+    fn test_memory_restore_mode_defaults_to_copyonwrite() {
+        let memory_info: MemoryInfo = toml::from_str("default_memory = 128").unwrap();
+        assert_eq!(
+            memory_info.memory_restore_mode,
+            MemoryRestoreMode::CopyOnWrite
+        );
+
+        let config = Hypervisor::default();
+        assert_eq!(
+            config.memory_info.memory_restore_mode,
+            MemoryRestoreMode::CopyOnWrite
+        );
+    }
+
+    #[test]
+    fn test_memory_restore_mode_parses_all_variants() {
+        for (text, expected) in [
+            ("copy", MemoryRestoreMode::Copy),
+            ("ondemand", MemoryRestoreMode::OnDemand),
+            ("copyonwrite", MemoryRestoreMode::CopyOnWrite),
+        ] {
+            let memory_info: MemoryInfo =
+                toml::from_str(&format!("memory_restore_mode = \"{text}\"")).unwrap();
+            assert_eq!(memory_info.memory_restore_mode, expected);
+        }
+
+        assert!(toml::from_str::<MemoryInfo>("memory_restore_mode = \"bogus\"").is_err());
+    }
+}
