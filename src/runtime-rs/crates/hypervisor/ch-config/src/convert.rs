@@ -7,8 +7,8 @@ use crate::ProtectionDevConfig;
 use crate::VmConfig;
 use crate::{
     guest_protection_is_tdx, ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpuTopology,
-    CpusConfig, DiskConfig, MemoryConfig, MemoryZoneConfig, PayloadConfig, PlatformConfig,
-    PmemConfig, RngConfig, VsockConfig,
+    CpusConfig, DiskConfig, ImageType, MemoryConfig, MemoryZoneConfig, PayloadConfig,
+    PlatformConfig, PmemConfig, RngConfig, VsockConfig,
 };
 use anyhow::Result;
 use kata_sys_util::protection::GuestProtection;
@@ -542,6 +542,8 @@ impl TryFrom<BootInfo> for DiskConfig {
             readonly: true,
             num_queues: DEFAULT_DISK_QUEUES,
             queue_size: DEFAULT_DISK_QUEUE_SIZE,
+            // CLH no longer auto-detects raw images; BootInfo.image is always raw.
+            image_type: ImageType::Raw,
 
             ..Default::default()
         };
@@ -750,6 +752,7 @@ mod tests {
             readonly: true,
             num_queues: DEFAULT_DISK_QUEUES,
             queue_size: DEFAULT_DISK_QUEUE_SIZE,
+            image_type: ImageType::Raw,
 
             ..Default::default()
         };
