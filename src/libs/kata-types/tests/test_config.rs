@@ -22,10 +22,36 @@ mod tests {
         KATA_ANNO_CFG_RUNTIME_NAME,
     };
     use kata_types::config::KataConfig;
+    use kata_types::config::{Agent, ConfigOps};
     use kata_types::config::{QemuConfig, TomlConfig};
     use std::collections::HashMap;
     use std::fs;
     use std::path::Path;
+
+    #[test]
+    fn test_create_container_timeout_requires_finite_deadline() {
+        for (setting, expected_ms) in [
+            ("", Some(30_000)),
+            ("create_container_timeout = 0", None),
+            ("create_container_timeout = 1", Some(1_000)),
+            ("create_container_timeout = 1200", Some(1_200_000)),
+        ] {
+            let agent: Agent = toml::from_str(setting).unwrap();
+            let mut config = TomlConfig::default();
+            config.agent.insert("kata".to_string(), agent);
+            let result = Agent::validate(&config);
+            if let Some(ms) = expected_ms {
+                result.unwrap();
+                assert_eq!(config.agent["kata"].request_timeout_ms, ms);
+            } else {
+                assert!(result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("create_container_timeout must be greater than 0"));
+            }
+        }
+    }
+
     #[test]
     fn test_change_config_annotation() {
         let content = include_str!("texture/configuration-anno-0.toml");

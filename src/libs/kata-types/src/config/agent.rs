@@ -127,6 +127,7 @@ pub struct Agent {
     /// This timeout value is used to set the maximum duration for the agent to process a CreateContainerRequest.
     /// It's also used to ensure that workloads, especially those involving large image pulls within the guest,
     /// have sufficient time to complete.
+    /// Must be non-zero so device waits have a finite server-side deadline.
     #[serde(
         default = "default_request_timeout",
         rename = "create_container_timeout",
@@ -247,6 +248,11 @@ fn default_health_check_timeout() -> u32 {
 
 impl Agent {
     fn validate(&self) -> Result<()> {
+        if self.request_timeout_ms == 0 {
+            return Err(std::io::Error::other(
+                "create_container_timeout must be greater than 0.",
+            ));
+        }
         if self.dial_timeout_ms == 0 {
             return Err(std::io::Error::other("dial_timeout_ms couldn't be 0."));
         }
