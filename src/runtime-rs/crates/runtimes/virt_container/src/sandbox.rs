@@ -63,7 +63,7 @@ use hypervisor::{
 };
 use hypervisor::{BlockDeviceAio, PortDeviceConfig};
 use hypervisor::{ProtectionDeviceConfig, SevSnpConfig, TdxConfig};
-use kata_sys_util::fs::reflink_copy;
+use kata_sys_util::fs::reflink_copy_0600;
 use kata_sys_util::hooks::HookStates;
 use kata_sys_util::protection::{available_guest_protection, GuestProtection};
 use kata_sys_util::spec::load_oci_spec;
@@ -97,9 +97,9 @@ use std::convert::TryFrom;
 use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -522,12 +522,16 @@ fn prepare_restore_source(
     let private_parent = private_dir
         .parent()
         .ok_or_else(|| anyhow!("private restore directory has no parent"))?;
-    fs::create_dir_all(private_parent).with_context(|| {
-        format!(
-            "create private restore workspace {}",
-            private_parent.display()
-        )
-    })?;
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(private_parent)
+        .with_context(|| {
+            format!(
+                "create private restore workspace {}",
+                private_parent.display()
+            )
+        })?;
     let parent_metadata = fs::symlink_metadata(private_parent)?;
     if parent_metadata.file_type().is_symlink() || !parent_metadata.is_dir() {
         return Err(anyhow!(
@@ -536,16 +540,16 @@ fn prepare_restore_source(
         ));
     }
     fs::set_permissions(private_parent, fs::Permissions::from_mode(0o700))?;
-    fs::create_dir(private_dir)
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(private_dir)
         .with_context(|| format!("create private restore directory {}", private_dir.display()))?;
-    fs::set_permissions(private_dir, fs::Permissions::from_mode(0o700))?;
     let restore_source = private_dir.join("clh");
-    fs::create_dir(&restore_source)?;
-    fs::set_permissions(&restore_source, fs::Permissions::from_mode(0o700))?;
+    fs::DirBuilder::new().mode(0o700).create(&restore_source)?;
     let private_config_path = restore_source.join("config.json");
     let snapshot_config = validated_snapshot_file(snapshot_dir, Path::new("clh/config.json"))?;
-    reflink_copy(&snapshot_config, &private_config_path).context("copy private restore config")?;
-    fs::set_permissions(&private_config_path, fs::Permissions::from_mode(0o600))?;
+    reflink_copy_0600(&snapshot_config, &private_config_path)
+        .context("copy private restore config")?;
     let snapshot_state = validated_snapshot_file(snapshot_dir, Path::new("clh/state.json"))?;
     std::os::unix::fs::symlink(snapshot_state, restore_source.join("state.json"))
         .context("link immutable restore state")?;
@@ -579,13 +583,14 @@ fn prepare_restore_source(
             let private_container = private_dir
                 .join("containers")
                 .join(&container.source_host_id);
-            fs::create_dir_all(&private_container)?;
-            fs::set_permissions(&private_container, fs::Permissions::from_mode(0o700))?;
+            fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&private_container)?;
             let private_writable = private_container.join("rwlayer.img");
             let source_writable = validated_snapshot_file(snapshot_dir, Path::new(writable))?;
-            reflink_copy(&source_writable, &private_writable)
+            reflink_copy_0600(&source_writable, &private_writable)
                 .with_context(|| format!("clone private writable disk {writable}"))?;
-            fs::set_permissions(&private_writable, fs::Permissions::from_mode(0o600))?;
             if replacements
                 .insert(writable_id.clone(), private_writable)
                 .is_some()
@@ -1182,6 +1187,22 @@ mod snapshot_manifest_tests {
             private_writable.display().to_string()
         );
         assert_eq!(config["disks"][1]["sparse"], true);
+        assert_eq!(
+            fs::metadata(&private_writable)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(restore_source.join("config.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
         assert_eq!(fs::read(private_writable).unwrap(), b"writable");
     }
 
@@ -2665,8 +2686,7 @@ impl VirtSandbox {
         // Keep an incomplete transaction invisible at the requested path. The
         // sibling staging tree is renamed there only after source recovery.
         let staging = parent.join(format!(".{file_name}.partial-{}", uuid::Uuid::new_v4()));
-        fs::create_dir(&staging)?;
-        fs::set_permissions(&staging, fs::Permissions::from_mode(0o700))?;
+        fs::DirBuilder::new().mode(0o700).create(&staging)?;
 
         let inventory = container_manager.snapshot_inventory().await?;
         let runtime_config = self.resource_manager.config().await;
@@ -2716,8 +2736,7 @@ impl VirtSandbox {
 
             self.save().await.context("persist sandbox state")?;
             let clh_staging = staging.join("clh");
-            fs::create_dir(&clh_staging)?;
-            fs::set_permissions(&clh_staging, fs::Permissions::from_mode(0o700))?;
+            fs::DirBuilder::new().mode(0o700).create(&clh_staging)?;
             self.hypervisor
                 .save_vm(&clh_staging)
                 .await
@@ -2746,8 +2765,7 @@ impl VirtSandbox {
                 ));
             }
             let persist_destination = staging.join("runtime-state.json");
-            reflink_copy(&persist_source, &persist_destination)?;
-            fs::set_permissions(&persist_destination, fs::Permissions::from_mode(0o600))?;
+            reflink_copy_0600(&persist_source, &persist_destination)?;
             Ok(artifacts)
         }
         .await;
@@ -2978,8 +2996,12 @@ impl VirtSandbox {
                 files,
             };
             let manifest_path = staging.join("kata-snapshot.json");
-            fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?)?;
-            fs::set_permissions(&manifest_path, fs::Permissions::from_mode(0o600))?;
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&manifest_path)?
+                .write_all(&serde_json::to_vec_pretty(&manifest)?)?;
             fs::rename(&staging, destination).with_context(|| {
                 format!(
                     "publish snapshot {} to {}",
