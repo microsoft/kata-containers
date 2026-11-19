@@ -338,7 +338,7 @@ impl AgentService {
         // After all those storages have been processed, no matter the order
         // here, the agent will rely on rustjail (using the oci.Mounts
         // list) to bind mount all of them inside the container.
-        let m = add_storages(
+        add_storages(
             sl(),
             req.storages.clone(),
             &self.sandbox,
@@ -353,8 +353,6 @@ impl AgentService {
             .map_err(|e| anyhow!("failed to handle sealed secrets: {}", e))?;
 
         let mut s = self.sandbox.lock().await;
-        s.container_mounts.insert(cid.clone(), m);
-
         update_container_namespaces(&s, &mut oci, use_sandbox_pidns)?;
 
         // Append guest hooks
@@ -1559,10 +1557,9 @@ impl agent_ttrpc::AgentService for AgentService {
             s.setup_shared_namespaces().await.map_ttrpc_err(same)?;
         }
 
-        let m = add_storages(sl(), req.storages.clone(), &self.sandbox, None, false)
+        add_storages(sl(), req.storages.clone(), &self.sandbox, None, false)
             .await
             .map_ttrpc_err(same)?;
-        self.sandbox.lock().await.mounts = m;
 
         // Scan guest hooks upon creating new sandbox and append
         // them to guest OCI spec before running containers.
@@ -2944,6 +2941,136 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_ephemeral_storage_survives_failed_container_removal() {
+        skip_if_not_root!();
+
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let agent_service = AgentService {
+            sandbox: Arc::new(Mutex::new(Sandbox::new(&logger).unwrap())),
+            init_mode: true,
+            oma: None,
+        };
+        let root = tempdir().unwrap();
+        let path = root.path().join("emptydir");
+        let path_str = path.display().to_string();
+        let sentinel = path.join("data");
+        scopeguard::defer! {
+            if crate::mount::is_mounted(&path_str).unwrap() {
+                nix::mount::umount(&path).unwrap();
+            }
+        }
+        let ephemeral = protocols::agent::Storage {
+            driver: kata_types::device::DRIVER_EPHEMERAL_TYPE.to_string(),
+            source: "tmpfs".to_string(),
+            fstype: "tmpfs".to_string(),
+            mount_point: path_str.clone(),
+            shared: false,
+            ..Default::default()
+        };
+        for attempt in 0..3 {
+            let missing = protocols::agent::Storage {
+                driver: kata_types::device::DRIVER_BLK_MMIO_TYPE.to_string(),
+                source: "/dev/kata-test-missing-device".to_string(),
+                mount_point: root.path().join("missing").display().to_string(),
+                ..Default::default()
+            };
+            let mut pending = Box::pin(add_storages(
+                logger.clone(),
+                vec![ephemeral.clone(), missing],
+                &agent_service.sandbox,
+                Some("failed".to_string()),
+                false,
+            ));
+            assert!(futures::poll!(pending.as_mut()).is_pending());
+            if attempt == 0 {
+                fs::write(&sentinel, "pod data").unwrap();
+            }
+            assert_eq!(fs::read_to_string(&sentinel).unwrap(), "pod data");
+            drop(pending);
+            agent_service
+                .do_remove_container(protocols::agent::RemoveContainerRequest {
+                    container_id: "failed".to_string(),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            let sb = agent_service.sandbox.lock().await;
+            assert!(sb.storages[&path_str].is_shared());
+            assert_eq!(sb.storages[&path_str].ref_count().await, 1);
+            assert_eq!(fs::read_to_string(&sentinel).unwrap(), "pod data");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_storage_list_cancellation_keeps_completed_cleanup_owner() {
+        for shared in [false, true] {
+            for reuse in [false, true] {
+                let logger = slog::Logger::root(slog::Discard, o!());
+                let agent_service = AgentService {
+                    sandbox: Arc::new(Mutex::new(Sandbox::new(&logger).unwrap())),
+                    init_mode: true,
+                    oma: None,
+                };
+                let root = tempdir().unwrap();
+                let path = root.path().join("first").display().to_string();
+                let first = protocols::agent::Storage {
+                    driver: kata_types::device::DRIVER_LOCAL_TYPE.to_string(),
+                    mount_point: path.clone(),
+                    shared,
+                    ..Default::default()
+                };
+                if reuse {
+                    add_storages(
+                        logger.clone(),
+                        vec![first.clone()],
+                        &agent_service.sandbox,
+                        Some("other".to_string()),
+                        false,
+                    )
+                    .await
+                    .unwrap();
+                }
+                let missing = protocols::agent::Storage {
+                    driver: kata_types::device::DRIVER_BLK_MMIO_TYPE.to_string(),
+                    source: "/dev/kata-test-missing-device".to_string(),
+                    mount_point: root.path().join("missing").display().to_string(),
+                    ..Default::default()
+                };
+                let mut pending = Box::pin(add_storages(
+                    logger,
+                    vec![first, missing],
+                    &agent_service.sandbox,
+                    Some("cancelled".to_string()),
+                    false,
+                ));
+                assert!(futures::poll!(pending.as_mut()).is_pending());
+                drop(pending);
+                {
+                    let sb = agent_service.sandbox.lock().await;
+                    assert_eq!(sb.container_mounts["cancelled"], vec![path.clone()]);
+                    assert_eq!(
+                        sb.storages[&path].ref_count().await,
+                        if reuse { 2 } else { 1 }
+                    );
+                }
+                agent_service
+                    .do_remove_container(protocols::agent::RemoveContainerRequest {
+                        container_id: "cancelled".to_string(),
+                        ..Default::default()
+                    })
+                    .await
+                    .unwrap();
+                let sb = agent_service.sandbox.lock().await;
+                assert!(!sb.container_mounts.contains_key("cancelled"));
+                assert_eq!(sb.storages.contains_key(&path), shared || reuse);
+                if shared || reuse {
+                    assert_eq!(sb.storages[&path].ref_count().await, 1);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn test_storage_deadline_retry_mounts_device() {
         use std::time::Duration;
 
@@ -2965,11 +3092,26 @@ mod tests {
             mount_point: path.clone(),
             ..Default::default()
         };
+        let earlier_path = root.path().join("earlier").display().to_string();
+        let earlier = protocols::agent::Storage {
+            driver: kata_types::device::DRIVER_BLK_MMIO_TYPE.to_string(),
+            source: "/dev/null".to_string(),
+            fstype: "tmpfs".to_string(),
+            mount_point: earlier_path.clone(),
+            ..Default::default()
+        };
+        scopeguard::defer! {
+            for mount_point in [&earlier_path, &path] {
+                if crate::mount::is_mounted(mount_point).unwrap() {
+                    nix::mount::umount(Path::new(mount_point)).unwrap();
+                }
+            }
+        }
         tokio::time::timeout(
             Duration::from_millis(10),
             add_storages(
                 logger.clone(),
-                vec![storage.clone()],
+                vec![earlier, storage.clone()],
                 &agent_service.sandbox,
                 Some(cid.to_string()),
                 false,
@@ -2977,6 +3119,7 @@ mod tests {
         )
         .await
         .expect_err("storage setup did not wait for hotplug");
+        assert!(crate::mount::is_mounted(&earlier_path).unwrap());
         agent_service
             .do_remove_container(protocols::agent::RemoveContainerRequest {
                 container_id: cid.to_string(),
@@ -2984,6 +3127,13 @@ mod tests {
             })
             .await
             .unwrap();
+        assert!(!crate::mount::is_mounted(&earlier_path).unwrap());
+        assert!(!agent_service
+            .sandbox
+            .lock()
+            .await
+            .storages
+            .contains_key(&earlier_path));
 
         let mut uevent = crate::uevent::Uevent::default();
         uevent.subsystem = "block".to_string();
@@ -3009,12 +3159,6 @@ mod tests {
         .unwrap();
         assert_eq!(mounts, vec![path.clone()]);
         assert!(crate::mount::is_mounted(&path).unwrap());
-        agent_service
-            .sandbox
-            .lock()
-            .await
-            .container_mounts
-            .insert(cid.to_string(), mounts);
         agent_service
             .do_remove_container(protocols::agent::RemoveContainerRequest {
                 container_id: cid.to_string(),
