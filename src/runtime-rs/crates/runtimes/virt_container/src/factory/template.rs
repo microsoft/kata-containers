@@ -16,7 +16,7 @@ use nix::mount::{mount, MsFlags};
 use slog::warn;
 
 use crate::factory::{
-    template_device_state_path,
+    template_device_state_path, template_memory_path, template_needs_memory_backing_file,
     vm::{TemplateVm, VmConfig},
     vm_config_value,
 };
@@ -110,7 +110,7 @@ impl Template {
     }
 
     fn memory_path(&self) -> PathBuf {
-        self.state_path.join("memory")
+        template_memory_path(&self.config.hypervisor_name, &self.state_path)
     }
 
     fn device_state_path(&self) -> PathBuf {
@@ -161,6 +161,10 @@ impl Template {
                 "state path {:?} is not a directory after mount",
                 self.state_path
             ));
+        }
+
+        if !template_needs_memory_backing_file(&self.config.hypervisor_name) {
+            return Ok(());
         }
 
         // Create memory file

@@ -30,6 +30,22 @@ pub(crate) fn template_device_state_path(hypervisor_name: &str, template_path: &
     template_path.join(state_file)
 }
 
+/// Returns the path to the hypervisor's guest-memory artifact in the template directory.
+pub(crate) fn template_memory_path(hypervisor_name: &str, template_path: &Path) -> PathBuf {
+    let memory_file = match hypervisor_name {
+        HYPERVISOR_NAME_CH => "memory-ranges",
+        _ => "memory",
+    };
+
+    template_path.join(memory_file)
+}
+
+/// Whether the factory must pre-allocate the memory artifact as a RAM backing
+/// file before the template VM boots. CLH writes it itself during vm.snapshot.
+pub(crate) fn template_needs_memory_backing_file(hypervisor_name: &str) -> bool {
+    hypervisor_name != HYPERVISOR_NAME_CH
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FactoryConfig {
     /// Path to the directory where VM templates are stored.
@@ -238,5 +254,24 @@ static_sandbox_resource_mgmt = true
         let limits = HashMap::from([(SANDBOX_MEM_KEY.to_string(), (512u64 << 20).to_string())]);
         let limited = sandbox_config(&config, limits);
         assert!(check_template_vm_config(&limited).is_err());
+    }
+
+    #[test]
+    fn test_template_artifact_paths() {
+        let dir = Path::new("/run/vc/vm/template");
+
+        assert_eq!(
+            template_memory_path(HYPERVISOR_NAME_CH, dir),
+            dir.join("memory-ranges")
+        );
+        assert_eq!(
+            template_device_state_path(HYPERVISOR_NAME_CH, dir),
+            dir.join("state.json")
+        );
+        assert!(!template_needs_memory_backing_file(HYPERVISOR_NAME_CH));
+
+        assert_eq!(template_memory_path("qemu", dir), dir.join("memory"));
+        assert_eq!(template_device_state_path("qemu", dir), dir.join("state"));
+        assert!(template_needs_memory_backing_file("qemu"));
     }
 }
