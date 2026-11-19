@@ -45,6 +45,7 @@ nix = { workspace = true }
 rstest = { workspace = true }
 tempfile = "3.19.1"
 test-utils = { path = "../test-utils" }
+tokio = { features = ["macros", "rt", "sync"], workspace = true }
 
 [features]
 default = []
