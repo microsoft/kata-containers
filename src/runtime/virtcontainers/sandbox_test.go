@@ -15,6 +15,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/device/config"
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/device/drivers"
@@ -1289,6 +1290,35 @@ func TestSandboxStopStopped(t *testing.T) {
 	err := s.Stop(context.Background(), false)
 
 	assert.Nil(t, err)
+}
+
+type timeoutSandboxAgent struct {
+	mockAgent
+}
+
+func (agent *timeoutSandboxAgent) stopSandbox(ctx context.Context, _ *Sandbox) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+type timeoutSandboxHypervisor struct {
+	mockHypervisor
+	stopped bool
+}
+
+func (hypervisor *timeoutSandboxHypervisor) StopVM(context.Context, bool) error {
+	hypervisor.stopped = true
+	return nil
+}
+
+func TestSandboxStopVMGuestTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	hypervisor := &timeoutSandboxHypervisor{}
+	sandbox := &Sandbox{agent: &timeoutSandboxAgent{}, hypervisor: hypervisor}
+	assert.NoError(t, sandbox.stopVM(ctx))
+	assert.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
+	assert.True(t, hypervisor.stopped)
 }
 
 func checkDirNotExist(path string) error {
