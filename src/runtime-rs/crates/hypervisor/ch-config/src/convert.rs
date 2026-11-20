@@ -12,7 +12,7 @@ use crate::{
 use anyhow::Result;
 use kata_types::config::default::DEFAULT_CH_ENTROPY_SOURCE;
 use kata_types::config::hypervisor::Hypervisor as HypervisorConfig;
-use kata_types::config::hypervisor::{CpuInfo, MachineInfo, MemoryInfo};
+use kata_types::config::hypervisor::{CpuInfo, MachineInfo, MemoryInfo, VIRTIO_PMEM};
 use kata_types::config::BootInfo;
 use std::convert::TryFrom;
 use std::fs;
@@ -75,8 +75,8 @@ impl TryFrom<NamedHypervisorConfig> for VmConfig {
         // Note how CH handles the different image types:
         //
         // - An initrd/initramfs is specified in PayloadConfig.
-        // - An image is specified in DiskConfig.
-        //   Note: pmem is not used as it's not properly supported by Cloud Hypervisor.
+        // - An image is specified in PmemConfig or DiskConfig according to
+        //   vm_rootfs_driver.
         let boot_info = cfg.boot_info;
 
         let use_initrd = !boot_info.initrd.is_empty();
@@ -90,6 +90,14 @@ impl TryFrom<NamedHypervisorConfig> for VmConfig {
             return Err(VmConfigError::NoBootFile);
         }
 
+        let pmem = if use_image && boot_info.vm_rootfs_driver == VIRTIO_PMEM {
+            Some(vec![
+                PmemConfig::try_from(&boot_info).map_err(VmConfigError::PmemError)?
+            ])
+        } else {
+            None
+        };
+
         let payload = Some(
             PayloadConfig::try_from((boot_info.clone(), kernel_params, protection_dev))
                 .map_err(VmConfigError::PayloadError)?,
@@ -97,7 +105,7 @@ impl TryFrom<NamedHypervisorConfig> for VmConfig {
 
         let mut disks: Vec<DiskConfig> = vec![];
 
-        if use_image {
+        if use_image && pmem.is_none() {
             let disk = DiskConfig::try_from(boot_info).map_err(VmConfigError::DiskError)?;
 
             disks.push(disk);
@@ -143,6 +151,7 @@ impl TryFrom<NamedHypervisorConfig> for VmConfig {
             fs,
             net,
             devices: host_devices,
+            pmem,
             disks,
             vsock: Some(vsock),
             rng,
@@ -1562,6 +1571,28 @@ mod tests {
             ..Default::default()
         };
 
+        let mut named_hypervisor_cfg_with_pmem = named_hypervisor_cfg_with_image_and_kernel.clone();
+        named_hypervisor_cfg_with_pmem
+            .cfg
+            .boot_info
+            .vm_rootfs_driver = VIRTIO_PMEM.into();
+        let mut vmconfig_with_pmem = vmconfig_with_image_and_kernel.clone();
+        vmconfig_with_pmem.disks = None;
+        vmconfig_with_pmem.pmem = Some(vec![make_bootinfo_pmemconfig_objects(image).1]);
+
+        let boot_disk = make_bootinfo_diskconfig_objects("initdata").1;
+        let mut named_hypervisor_cfg_with_pmem_and_boot_disk =
+            named_hypervisor_cfg_with_pmem.clone();
+        named_hypervisor_cfg_with_pmem_and_boot_disk.boot_disks = Some(vec![boot_disk.clone()]);
+        let mut vmconfig_with_pmem_and_boot_disk = vmconfig_with_pmem.clone();
+        vmconfig_with_pmem_and_boot_disk.disks = Some(vec![boot_disk]);
+
+        let mut named_hypervisor_cfg_with_pmem_initrd = named_hypervisor_cfg_with_initrd.clone();
+        named_hypervisor_cfg_with_pmem_initrd
+            .cfg
+            .boot_info
+            .vm_rootfs_driver = VIRTIO_PMEM.into();
+
         //------------------------------
 
         let tests = &[
@@ -1653,6 +1684,18 @@ mod tests {
                 result: Ok(vmconfig_with_image_and_kernel),
             },
             TestData {
+                cfg: named_hypervisor_cfg_with_pmem,
+                result: Ok(vmconfig_with_pmem),
+            },
+            TestData {
+                cfg: named_hypervisor_cfg_with_pmem_and_boot_disk,
+                result: Ok(vmconfig_with_pmem_and_boot_disk),
+            },
+            TestData {
+                cfg: named_hypervisor_cfg_with_pmem_initrd,
+                result: Ok(vmconfig_with_initrd.clone()),
+            },
+            TestData {
                 cfg: named_hypervisor_cfg_with_initrd,
                 result: Ok(vmconfig_with_initrd),
             },
@@ -1663,7 +1706,9 @@ mod tests {
 
             let result = VmConfig::try_from(d.cfg.clone());
 
-            if !d.cfg.cfg.boot_info.image.is_empty() {
+            if !d.cfg.cfg.boot_info.image.is_empty()
+                && d.cfg.cfg.boot_info.vm_rootfs_driver != VIRTIO_PMEM
+            {
                 if let Ok(config) = &result {
                     // CLH v54.0 rejects boot disks without an explicit format.
                     let json = serde_json::to_value(config).unwrap();
