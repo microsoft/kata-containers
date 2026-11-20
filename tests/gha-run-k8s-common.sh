@@ -165,17 +165,8 @@ wait_for_nodes_ready() {
 }
 
 function _print_instance_type() {
-	case "${K8S_TEST_HOST_TYPE}" in
-		small)
-			echo "Standard_D2s_v5"
-			;;
-		all|normal)
-			echo "Standard_D4s_v5"
-			;;
-		*)
-			echo "Unknown instance type '${K8S_TEST_HOST_TYPE}'" >&2
-			exit 1
-	esac
+	# echo "Standard_DC16as_cc_v5"
+	echo "Standard_D16s_v5"
 }
 
 # Print the cluster name set by $AKS_NAME or generated out of runtime
@@ -253,6 +244,7 @@ function create_cluster() {
 		-s "$(_print_instance_type)"
 		--node-count 1
 		--generate-ssh-keys
+		--enable-aad
 		--tags "${tags[@]}")
 	[[ "${KATA_HOST_OS}" = "cbl-mariner" ]] && aks_create+=( --os-sku AzureLinux --workload-runtime KataVmIsolation)
 	[[ -n "${AZ_NODEPOOL_TAGS}" ]] && aks_create+=(--nodepool-tags "${AZ_NODEPOOL_TAGS}")
