@@ -8839,6 +8839,7 @@ dependencies = [
  "slog",
  "slog-scope",
  "strum 0.24.1",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tracing",

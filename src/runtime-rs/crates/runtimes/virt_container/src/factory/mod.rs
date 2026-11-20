@@ -3,17 +3,21 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
+use common::RuntimeHandler;
 use hypervisor::HYPERVISOR_NAME_CH;
 use kata_sys_util::mount::umount_all;
 use kata_types::config::TomlConfig;
+use resource::cpu_mem::initial_size::InitialSizeManager;
 use serde::{Deserialize, Serialize};
 use slog::{error, info, warn};
 
 use crate::factory::{template::Template, vm::VmConfig};
+use crate::VirtContainer;
 
 pub mod template;
 pub mod vm;
@@ -69,9 +73,26 @@ impl FactoryConfig {
     }
 }
 
-/// Load and validate factory configuration
-fn load_and_validate_factory_config() -> Result<(TomlConfig, FactoryConfig)> {
-    let (toml_config, _) = TomlConfig::load_from_default().context("load toml config")?;
+/// Load and validate factory configuration.
+///
+/// Mirrors the shim's config pipeline: load and adjust, then size as a
+/// sandbox with no resource limits so a clone restored for such a sandbox
+/// matches the saved template VM.
+fn load_and_validate_factory_config(
+    config_path: Option<&Path>,
+) -> Result<(TomlConfig, FactoryConfig)> {
+    // adjust_config() needs the hypervisor plugins; kata-ctl does not register them.
+    VirtContainer::init().context("initialize runtime handler")?;
+
+    // An empty path makes load_from_file() probe the default locations.
+    let config_path = config_path.map(Path::as_os_str).unwrap_or_default();
+    let (mut toml_config, _) =
+        TomlConfig::load_from_file(config_path).context("load toml config")?;
+
+    InitialSizeManager::new_from(&HashMap::new())
+        .context("construct static resource manager")?
+        .setup_config(&mut toml_config)
+        .context("apply static sandbox sizing")?;
 
     let factory_config = FactoryConfig::new(&toml_config);
 
@@ -83,7 +104,7 @@ fn load_and_validate_factory_config() -> Result<(TomlConfig, FactoryConfig)> {
 }
 
 pub async fn init_factory_command() -> Result<()> {
-    let (toml_config, mut factory_config) = load_and_validate_factory_config()?;
+    let (toml_config, mut factory_config) = load_and_validate_factory_config(None)?;
 
     new_factory(&mut factory_config, toml_config, false)
         .await
@@ -95,7 +116,7 @@ pub async fn init_factory_command() -> Result<()> {
 }
 
 pub async fn destroy_factory_command() -> Result<()> {
-    let (toml_config, mut factory_config) = load_and_validate_factory_config()?;
+    let (toml_config, mut factory_config) = load_and_validate_factory_config(None)?;
 
     new_factory(&mut factory_config, toml_config, true)
         .await
@@ -108,7 +129,7 @@ pub async fn destroy_factory_command() -> Result<()> {
 }
 
 pub async fn status_factory_command() -> Result<()> {
-    let (toml_config, mut factory_config) = load_and_validate_factory_config()?;
+    let (toml_config, mut factory_config) = load_and_validate_factory_config(None)?;
 
     if new_factory(&mut factory_config, toml_config, true)
         .await
@@ -182,6 +203,140 @@ pub fn close_factory(config: &mut FactoryConfig) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn load_factory_config_from_explicit_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("configuration.toml");
+        fs::write(
+            &config_path,
+            r#"
+[runtime]
+hypervisor_name = "qemu"
+
+[hypervisor.qemu]
+path = "/bin/true"
+kernel = "/bin/true"
+image = "/bin/true"
+default_memory = 512
+shared_fs = "none"
+
+[hypervisor.qemu.factory]
+enable_template = true
+template_path = "/run/vc/vm/preview-template"
+"#,
+        )
+        .unwrap();
+
+        let (toml_config, factory_config) =
+            load_and_validate_factory_config(Some(&config_path)).unwrap();
+
+        assert!(factory_config.template);
+        assert_eq!(factory_config.template_path, "/run/vc/vm/preview-template");
+        assert_eq!(
+            factory_config
+                .vm_config
+                .hypervisor_config
+                .memory_info
+                .default_memory,
+            512
+        );
+        // adjust_config() must have run: "none" is normalized to None.
+        assert!(toml_config
+            .hypervisor
+            .get("qemu")
+            .unwrap()
+            .shared_fs
+            .shared_fs
+            .is_none());
+    }
+
+    #[test]
+    fn load_factory_config_rejects_disabled_template() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("configuration.toml");
+        fs::write(
+            &config_path,
+            r#"
+[runtime]
+hypervisor_name = "qemu"
+
+[hypervisor.qemu]
+path = "/bin/true"
+kernel = "/bin/true"
+image = "/bin/true"
+"#,
+        )
+        .unwrap();
+
+        let error = load_and_validate_factory_config(Some(&config_path)).unwrap_err();
+        assert!(error.to_string().contains("vm factory is not enabled"));
+    }
+
+    fn load_factory_config_from_toml(contents: &str) -> Result<(TomlConfig, FactoryConfig)> {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("configuration.toml");
+        fs::write(&config_path, contents).unwrap();
+        load_and_validate_factory_config(Some(&config_path))
+    }
+
+    #[test]
+    fn template_is_sized_like_a_sandbox_without_limits() {
+        let (_, factory_config) = load_factory_config_from_toml(
+            r#"
+[runtime]
+hypervisor_name = "qemu"
+static_sandbox_resource_mgmt = true
+static_sandbox_default_workload_mem = 512
+static_sandbox_default_workload_vcpus = 1.5
+
+[hypervisor.qemu]
+path = "/bin/true"
+kernel = "/bin/true"
+image = "/bin/true"
+default_memory = 0
+default_vcpus = 0
+overhead_memory = 64
+overhead_vcpus = 0.5
+
+[hypervisor.qemu.factory]
+enable_template = true
+"#,
+        )
+        .unwrap();
+
+        let hv = &factory_config.vm_config.hypervisor_config;
+        assert_eq!(hv.memory_info.default_memory, 576);
+        assert_eq!(hv.cpu_info.default_vcpus, 2.0);
+        assert_eq!(hv.cpu_info.default_maxvcpus, 2);
+    }
+
+    #[test]
+    fn template_keeps_toml_sizes_without_static_resource_mgmt() {
+        let (_, factory_config) = load_factory_config_from_toml(
+            r#"
+[runtime]
+hypervisor_name = "qemu"
+static_sandbox_resource_mgmt = false
+static_sandbox_default_workload_mem = 512
+
+[hypervisor.qemu]
+path = "/bin/true"
+kernel = "/bin/true"
+image = "/bin/true"
+default_memory = 256
+default_vcpus = 2
+
+[hypervisor.qemu.factory]
+enable_template = true
+"#,
+        )
+        .unwrap();
+
+        let hv = &factory_config.vm_config.hypervisor_config;
+        assert_eq!(hv.memory_info.default_memory, 256);
+        assert_eq!(hv.cpu_info.default_vcpus, 2.0);
+    }
 
     #[test]
     fn test_template_artifact_paths() {
