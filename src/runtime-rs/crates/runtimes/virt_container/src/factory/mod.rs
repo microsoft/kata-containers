@@ -103,8 +103,8 @@ fn load_and_validate_factory_config(
     Ok((toml_config, factory_config))
 }
 
-pub async fn init_factory_command() -> Result<()> {
-    let (toml_config, mut factory_config) = load_and_validate_factory_config(None)?;
+pub async fn init_factory_command(config_path: Option<&Path>) -> Result<()> {
+    let (toml_config, mut factory_config) = load_and_validate_factory_config(config_path)?;
 
     new_factory(&mut factory_config, toml_config, false)
         .await
@@ -115,8 +115,8 @@ pub async fn init_factory_command() -> Result<()> {
     Ok(())
 }
 
-pub async fn destroy_factory_command() -> Result<()> {
-    let (toml_config, mut factory_config) = load_and_validate_factory_config(None)?;
+pub async fn destroy_factory_command(config_path: Option<&Path>) -> Result<()> {
+    let (toml_config, mut factory_config) = load_and_validate_factory_config(config_path)?;
 
     new_factory(&mut factory_config, toml_config, true)
         .await
@@ -128,8 +128,8 @@ pub async fn destroy_factory_command() -> Result<()> {
     Ok(())
 }
 
-pub async fn status_factory_command() -> Result<()> {
-    let (toml_config, mut factory_config) = load_and_validate_factory_config(None)?;
+pub async fn status_factory_command(config_path: Option<&Path>) -> Result<()> {
+    let (toml_config, mut factory_config) = load_and_validate_factory_config(config_path)?;
 
     if new_factory(&mut factory_config, toml_config, true)
         .await

@@ -30,6 +30,10 @@ pub struct KataCtlCli {
     /// If specified, display a list of config file locations.
     #[clap(long, action)]
     pub show_default_config_paths: bool,
+
+    /// Path to the Kata runtime configuration file for VM factory operations.
+    #[clap(long, global = true, value_name = "PATH")]
+    pub config: Option<PathBuf>,
 }
 
 fn parse_log_level(arg: &str) -> Result<slog::Level, String> {
@@ -296,4 +300,30 @@ pub enum LogOutputFormat {
     Toml,
     Xml,
     Yaml,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_factory_with_config() {
+        let config_path = PathBuf::from("/tmp/configuration.toml");
+        let args = KataCtlCli::try_parse_from([
+            "kata-ctl",
+            "--config",
+            config_path.to_str().unwrap(),
+            "factory",
+            "init",
+        ])
+        .unwrap();
+
+        assert_eq!(args.config, Some(config_path));
+        assert!(matches!(
+            args.command,
+            Some(Commands::Factory(FactoryArgs {
+                command: FactorySubCommand::Init
+            }))
+        ));
+    }
 }
