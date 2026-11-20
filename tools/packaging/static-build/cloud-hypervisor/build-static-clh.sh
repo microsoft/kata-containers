@@ -41,6 +41,14 @@ else
 	[[ -n "${cloud_hypervisor_version}" ]] || die "failed to get cloud_hypervisor version"
 fi
 
+pmem_cow_patch=""
+if [[ " ${features//,/ } " == *" mshv_pmem_cow "* ]]; then
+	[[ "${ARCH}" == "x86_64" ]] || die "Experimental PMEM CoW requires x86_64"
+	[[ -z "${cloud_hypervisor_pr}" ]] || die "Experimental PMEM CoW does not support PR builds"
+	pmem_cow_patch="${script_dir}/patches/${cloud_hypervisor_version}/pmem-cow.patch"
+	[[ -f "${pmem_cow_patch}" ]] || die "No experimental PMEM CoW patch for ${cloud_hypervisor_version}"
+fi
+
 pull_clh_released_binary() {
 	info "Download cloud-hypervisor version: ${cloud_hypervisor_version}"
 	cloud_hypervisor_binary="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/${cloud_hypervisor_version}/cloud-hypervisor-static"
@@ -72,6 +80,11 @@ build_clh_from_source() {
 	else
 		git fetch || true
 		git checkout "${cloud_hypervisor_version}"
+	fi
+
+	if [[ -n "${pmem_cow_patch}" ]]; then
+		git apply --check "${pmem_cow_patch}"
+		git apply "${pmem_cow_patch}"
 	fi
 
 	# Cloud Hypervisor auto-detects the build backend from a device node.

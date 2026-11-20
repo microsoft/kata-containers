@@ -1,0 +1,727 @@
+diff --git a/cloud-hypervisor/Cargo.toml b/cloud-hypervisor/Cargo.toml
+index 3e9526b..a0c97a6 100644
+--- a/cloud-hypervisor/Cargo.toml
++++ b/cloud-hypervisor/Cargo.toml
+@@ -53,6 +53,7 @@ io_uring = ["vmm/io_uring"]
+ ivshmem = ["vmm/ivshmem"]
+ kvm = ["vmm/kvm"]
+ mshv = ["vmm/mshv"]
++mshv_pmem_cow = ["mshv", "vmm/mshv_pmem_cow"]
+ pvmemcontrol = ["vmm/pvmemcontrol"]
+ sev_snp = ["igvm", "vmm/sev_snp"]
+ tdx = ["vmm/tdx"]
+diff --git a/hypervisor/Cargo.toml b/hypervisor/Cargo.toml
+index 9053265..fc45a1e 100644
+--- a/hypervisor/Cargo.toml
++++ b/hypervisor/Cargo.toml
+@@ -10,6 +10,7 @@ version = "0.1.0"
+ kvm = ["kvm-bindings", "kvm-ioctls", "vfio-ioctls/kvm"]
+ mshv = ["mshv-bindings", "mshv-ioctls", "mshv_emulator", "vfio-ioctls/mshv"]
+ mshv_emulator = ["iced-x86", "mshv-bindings"]
++mshv_pmem_cow = ["mshv"]
+ sev_snp = ["dep:bitfield-struct", "igvm", "igvm_defs"]
+ tdx = []
+ 
+diff --git a/hypervisor/src/mshv/mod.rs b/hypervisor/src/mshv/mod.rs
+index 4cc5027..bc11e5e 100644
+--- a/hypervisor/src/mshv/mod.rs
++++ b/hypervisor/src/mshv/mod.rs
+@@ -9,6 +9,8 @@
+ use std::num::NonZeroUsize;
+ #[cfg(feature = "sev_snp")]
+ use std::ptr;
++#[cfg(all(feature = "mshv_pmem_cow", target_arch = "x86_64"))]
++use std::sync::Mutex;
+ use std::sync::{Arc, RwLock};
+ use std::{fs, io, result};
+ 
+@@ -28,7 +30,12 @@
+ use mshv_ioctls::{Mshv, NoDatamatch, VcpuFd, VmFd, VmType, set_registers_64};
+ use vfio_ioctls::VfioDeviceFd;
+ use vm::DataMatch;
+-#[cfg(feature = "sev_snp")]
++#[cfg(all(feature = "mshv_pmem_cow", target_arch = "x86_64"))]
++use vm_memory::MmapRegion;
++#[cfg(any(
++    feature = "sev_snp",
++    all(feature = "mshv_pmem_cow", target_arch = "x86_64")
++))]
+ use vm_memory::bitmap::AtomicBitmap;
+ 
+ #[cfg(target_arch = "aarch64")]
+@@ -46,6 +53,8 @@
+ use crate::mshv::emulator::MshvEmulatorContext;
+ use crate::vm::{self, InterruptSourceConfig, VmOps};
+ use crate::{HypervisorType, HypervisorVmConfig, cpu, hypervisor, vec_with_array_field};
++#[cfg(all(feature = "mshv_pmem_cow", target_arch = "x86_64"))]
++mod pmem_cow;
+ #[cfg(feature = "sev_snp")]
+ mod snp_constants;
+ // x86_64 dependencies
+@@ -360,6 +369,8 @@ fn create_vm(&self, _config: HypervisorVmConfig) -> hypervisor::Result<Arc<dyn v
+                 fd: vm_fd,
+                 msrs: ArcSwap::new(Vec::<MsrEntry>::new().into()),
+                 dirty_log_slots: RwLock::new(HashMap::new()),
++                #[cfg(feature = "mshv_pmem_cow")]
++                pmem_cow: Arc::new(Mutex::new(pmem_cow::PmemCow::default())),
+                 #[cfg(feature = "sev_snp")]
+                 sev_snp_enabled: mshv_vm_type == VmType::Snp,
+                 #[cfg(feature = "sev_snp")]
+@@ -462,6 +473,8 @@ pub struct MshvVcpu {
+     vm_ops: Option<Arc<dyn vm::VmOps>>,
+     #[cfg_attr(not(target_arch = "x86_64"), expect(dead_code))]
+     vm_fd: Arc<VmFd>,
++    #[cfg(all(feature = "mshv_pmem_cow", target_arch = "x86_64"))]
++    pmem_cow: Arc<Mutex<pmem_cow::PmemCow>>,
+     #[cfg(feature = "sev_snp")]
+     ghcb: Option<Ghcb>,
+     #[cfg(feature = "sev_snp")]
+@@ -672,6 +685,31 @@ fn run(&mut self) -> result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
+                     let gva = info.guest_virtual_address;
+                     let gpa = info.guest_physical_address;
+ 
++                    #[cfg(feature = "mshv_pmem_cow")]
++                    if info.header.intercept_access_type == HV_INTERCEPT_ACCESS_WRITE as u8
++                        && self
++                            .pmem_cow
++                            .lock()
++                            .unwrap()
++                            .handle_write(&self.vm_fd, gpa)
++                            .map_err(cpu::HypervisorCpuError::RunVcpu)?
++                    {
++                        // Retry the same instruction with a private writable page.
++                        // Unlike MMIO emulation, this must not advance RIP.
++                        return Ok(cpu::VmExit::Ignore);
++                    }
++
++                    #[cfg(feature = "mshv_pmem_cow")]
++                    if info.header.intercept_access_type != HV_INTERCEPT_ACCESS_WRITE as u8
++                        && self.pmem_cow.lock().unwrap().contains(gpa)
++                    {
++                        return Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
++                            "unhandled PMEM read/execute intercept: type {msg_type:#x}, \
++                             access {}, GPA {gpa:#x}",
++                            info.header.intercept_access_type
++                        )));
++                    }
++
+                     // The GvaGpaValid flag indicates that the GPA in the intercept
+                     // message corresponds to the GVA in the message. If that flag
+                     // is set, and the GVA in the message matches the GVA in the decoded
+@@ -1798,6 +1836,8 @@ pub struct MshvVm {
+     #[cfg(target_arch = "x86_64")]
+     msrs: ArcSwap<Vec<MsrEntry>>,
+     dirty_log_slots: RwLock<HashMap<u64, MshvDirtyLogSlot>>,
++    #[cfg(all(feature = "mshv_pmem_cow", target_arch = "x86_64"))]
++    pmem_cow: Arc<Mutex<pmem_cow::PmemCow>>,
+     #[cfg(feature = "sev_snp")]
+     sev_snp_enabled: bool,
+     #[cfg(feature = "sev_snp")]
+@@ -1842,6 +1882,25 @@ pub fn set_partition_property(&self, code: u32, value: u64) -> anyhow::Result<()
+ /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
+ /// ```
+ impl vm::Vm for MshvVm {
++    #[cfg(all(feature = "mshv_pmem_cow", target_arch = "x86_64"))]
++    fn create_cow_memory_region(
++        &self,
++        guest_phys_addr: u64,
++        source: Arc<MmapRegion<AtomicBitmap>>,
++    ) -> vm::Result<()> {
++        #[cfg(feature = "sev_snp")]
++        if self.sev_snp_enabled {
++            return Err(vm::HypervisorVmError::CreateUserMemory(anyhow!(
++                "experimental PMEM CoW does not support SNP guests"
++            )));
++        }
++        self.pmem_cow
++            .lock()
++            .unwrap()
++            .register(&self.fd, guest_phys_addr, source)
++            .map_err(vm::HypervisorVmError::CreateUserMemory)
++    }
++
+     #[cfg(target_arch = "x86_64")]
+     ///
+     /// Sets the address of the one-page region in the VM's address space.
+@@ -1900,6 +1959,14 @@ fn create_vcpu(
+         vm_ops: Option<Arc<dyn VmOps>>,
+         #[cfg(target_arch = "x86_64")] _msr_config_update: Option<VcpuMsrConfigUpdate>,
+     ) -> vm::Result<Box<dyn cpu::Vcpu>> {
++        #[cfg(all(feature = "mshv_pmem_cow", target_arch = "x86_64"))]
++        let mut cow = self.pmem_cow.lock().unwrap();
++        #[cfg(all(feature = "mshv_pmem_cow", target_arch = "x86_64"))]
++        if cow.active() && cow.vcpu_count != 0 {
++            return Err(vm::HypervisorVmError::CreateVcpu(anyhow!(
++                "experimental PMEM CoW requires one vCPU"
++            )));
++        }
+         let id: u8 = id.try_into().unwrap();
+         let vcpu_fd = self
+             .fd
+@@ -1942,11 +2009,17 @@ fn create_vcpu(
+             msrs: self.msrs.load().as_ref().clone(),
+             vm_ops,
+             vm_fd: Arc::clone(&self.fd),
++            #[cfg(all(feature = "mshv_pmem_cow", target_arch = "x86_64"))]
++            pmem_cow: Arc::clone(&self.pmem_cow),
+             #[cfg(feature = "sev_snp")]
+             ghcb,
+             #[cfg(feature = "sev_snp")]
+             host_access_pages: ArcSwap::new(self.host_access_pages.load().clone()),
+         };
++        #[cfg(all(feature = "mshv_pmem_cow", target_arch = "x86_64"))]
++        {
++            cow.vcpu_count += 1;
++        }
+         Ok(Box::new(vcpu))
+     }
+ 
+@@ -2069,6 +2142,21 @@ unsafe fn remove_user_memory_region(
+         userspace_addr: *mut u8,
+         readonly: bool,
+     ) -> vm::Result<()> {
++        #[cfg(all(feature = "mshv_pmem_cow", target_arch = "x86_64"))]
++        if self
++            .pmem_cow
++            .lock()
++            .unwrap()
++            .unregister(
++                &self.fd,
++                guest_phys_addr,
++                userspace_addr as u64,
++                memory_size,
++            )
++            .map_err(vm::HypervisorVmError::RemoveUserMemory)?
++        {
++            return Ok(());
++        }
+         let mut flags = 1 << MSHV_SET_MEM_BIT_EXECUTABLE;
+         if !readonly {
+             flags |= 1 << MSHV_SET_MEM_BIT_WRITABLE;
+@@ -2165,6 +2253,12 @@ fn set_gsi_routing(&self, entries: &[IrqRoutingEntry]) -> vm::Result<()> {
+     /// Start logging dirty pages
+     ///
+     fn start_dirty_log(&self) -> vm::Result<()> {
++        #[cfg(all(feature = "mshv_pmem_cow", target_arch = "x86_64"))]
++        if self.pmem_cow.lock().unwrap().active() {
++            return Err(vm::HypervisorVmError::StartDirtyLog(anyhow!(
++                "migration is unsupported with experimental PMEM CoW"
++            )));
++        }
+         self.fd
+             .enable_dirty_page_tracking()
+             .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))
+diff --git a/hypervisor/src/mshv/pmem_cow.rs b/hypervisor/src/mshv/pmem_cow.rs
+new file mode 100644
+index 0000000..91958b1
+--- /dev/null
++++ b/hypervisor/src/mshv/pmem_cow.rs
+@@ -0,0 +1,289 @@
++// Copyright (c) 2026 Microsoft Corporation.
++// SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
++
++use std::collections::BTreeMap;
++use std::sync::Arc;
++use std::{io, ptr};
++
++use anyhow::{Context, Result, ensure};
++use log::info;
++use mshv_bindings::{MSHV_SET_MEM_BIT_EXECUTABLE, MSHV_SET_MEM_BIT_WRITABLE, mshv_user_mem_region};
++use mshv_ioctls::VmFd;
++use vm_memory::{
++    MmapRegion,
++    bitmap::{AtomicBitmap, Bitmap},
++};
++
++const PAGE_SIZE: u64 = 4096;
++// This MSHV kernel rejects compound file-cache folios smaller than 2 MiB
++// when considering a 512-page huge mapping. Shorter regions force 4 KiB
++// mappings without changing the backing folios or kernel.
++const MAX_REGION_SIZE: u64 = 511 * PAGE_SIZE;
++
++fn exclude_from_dump<B: Bitmap>(region: &MmapRegion<B>) -> Result<()> {
++    // SAFETY: region owns this complete mapping for the duration of this call.
++    let ret = unsafe { libc::madvise(region.as_ptr().cast(), region.size(), libc::MADV_DONTDUMP) };
++    if ret != 0 {
++        return Err(io::Error::last_os_error()).context("MADV_DONTDUMP for PMEM");
++    }
++    Ok(())
++}
++
++struct CowRegion {
++    source: Arc<MmapRegion<AtomicBitmap>>,
++    mappings: BTreeMap<u64, mshv_user_mem_region>,
++    private_pages: Vec<MmapRegion<()>>,
++}
++
++#[derive(Default)]
++pub(super) struct PmemCow {
++    pub(super) vcpu_count: usize,
++    regions: BTreeMap<u64, CowRegion>,
++}
++
++fn mapping(gpa: u64, hva: u64, size: u64, writable: bool) -> mshv_user_mem_region {
++    mshv_user_mem_region {
++        guest_pfn: gpa / PAGE_SIZE,
++        userspace_addr: hva,
++        size,
++        flags: (1 << MSHV_SET_MEM_BIT_EXECUTABLE)
++            | if writable {
++                1 << MSHV_SET_MEM_BIT_WRITABLE
++            } else {
++                0
++            },
++        ..Default::default()
++    }
++}
++
++fn shared_mappings(gpa: u64, hva: u64, size: u64) -> impl Iterator<Item = mshv_user_mem_region> {
++    (0..size)
++        .step_by(MAX_REGION_SIZE as usize)
++        .map(move |offset| {
++            mapping(
++                gpa + offset,
++                hva + offset,
++                (size - offset).min(MAX_REGION_SIZE),
++                false,
++            )
++        })
++}
++
++fn split_mapping(
++    original: mshv_user_mem_region,
++    page_gpa: u64,
++    private_hva: u64,
++) -> Vec<mshv_user_mem_region> {
++    let start = original.guest_pfn * PAGE_SIZE;
++    let end = start + original.size;
++    let mut result = Vec::with_capacity(3);
++    if page_gpa > start {
++        result.push(mapping(
++            start,
++            original.userspace_addr,
++            page_gpa - start,
++            false,
++        ));
++    }
++    result.push(mapping(page_gpa, private_hva, PAGE_SIZE, true));
++    if page_gpa + PAGE_SIZE < end {
++        result.push(mapping(
++            page_gpa + PAGE_SIZE,
++            original.userspace_addr + page_gpa + PAGE_SIZE - start,
++            end - page_gpa - PAGE_SIZE,
++            false,
++        ));
++    }
++    result
++}
++
++impl PmemCow {
++    pub(super) fn active(&self) -> bool {
++        !self.regions.is_empty()
++    }
++
++    pub(super) fn register(
++        &mut self,
++        vm: &VmFd,
++        gpa: u64,
++        source: Arc<MmapRegion<AtomicBitmap>>,
++    ) -> Result<()> {
++        ensure!(
++            self.vcpu_count <= 1,
++            "experimental PMEM CoW requires one vCPU"
++        );
++        let size = source.size() as u64;
++        let end = gpa.checked_add(size).context("PMEM address overflow")?;
++        ensure!(
++            size != 0 && gpa.is_multiple_of(PAGE_SIZE) && size.is_multiple_of(PAGE_SIZE),
++            "PMEM CoW region must be page aligned"
++        );
++        for (&base, region) in &self.regions {
++            ensure!(
++                end <= base || gpa >= base + region.source.size() as u64,
++                "overlapping PMEM CoW regions"
++            );
++        }
++        exclude_from_dump(source.as_ref())?;
++        let hva = source.as_ptr() as u64;
++        let region = self.regions.entry(gpa).or_insert(CowRegion {
++            source,
++            mappings: BTreeMap::new(),
++            private_pages: Vec::new(),
++        });
++        for original in shared_mappings(gpa, hva, size) {
++            vm.map_user_memory(original)
++                .context("register shared read-only PMEM")?;
++            region
++                .mappings
++                .insert(original.guest_pfn * PAGE_SIZE, original);
++        }
++        Ok(())
++    }
++
++    pub(super) fn handle_write(&mut self, vm: &VmFd, gpa: u64) -> Result<bool> {
++        let Some((&base, region)) = self.regions.range_mut(..=gpa).next_back() else {
++            return Ok(false);
++        };
++        if gpa - base >= region.source.size() as u64 {
++            return Ok(false);
++        }
++        let page_gpa = gpa & !(PAGE_SIZE - 1);
++        let (&start, original) = region
++            .mappings
++            .range(..=page_gpa)
++            .next_back()
++            .context("missing PMEM CoW mapping")?;
++        let original = *original;
++        ensure!(
++            page_gpa - start < original.size,
++            "guest write outside registered PMEM mapping"
++        );
++        ensure!(
++            original.flags & (1 << MSHV_SET_MEM_BIT_WRITABLE) == 0,
++            "unexpected write fault on private writable PMEM"
++        );
++        let private =
++            MmapRegion::<()>::new(PAGE_SIZE as usize).context("allocate private PMEM page")?;
++        exclude_from_dump(&private)?;
++        // SAFETY: the source offset is within the owned source mapping. Only one
++        // vCPU is supported, and it is stopped at this write intercept.
++        unsafe {
++            ptr::copy_nonoverlapping(
++                region.source.as_ptr().add((page_gpa - base) as usize),
++                private.as_ptr(),
++                PAGE_SIZE as usize,
++            );
++        }
++        let replacements = split_mapping(original, page_gpa, private.as_ptr() as u64);
++        // Retain the allocation even if a subsequent ioctl fails: any successful
++        // mapping must keep valid backing until the VM is torn down.
++        region.private_pages.push(private);
++        vm.unmap_user_memory(original)
++            .context("unmap PMEM CoW extent")?;
++        region.mappings.remove(&start);
++        for replacement in replacements {
++            vm.map_user_memory(replacement)
++                .context("remap PMEM CoW extent")?;
++            region
++                .mappings
++                .insert(replacement.guest_pfn * PAGE_SIZE, replacement);
++        }
++        info!(
++            "PMEM CoW: GPA {page_gpa:#x}, {} private pages ({} bytes)",
++            region.private_pages.len(),
++            region.private_pages.len() * PAGE_SIZE as usize
++        );
++        Ok(true)
++    }
++
++    pub(super) fn contains(&self, gpa: u64) -> bool {
++        self.regions
++            .range(..=gpa)
++            .next_back()
++            .is_some_and(|(&base, region)| gpa - base < region.source.size() as u64)
++    }
++
++    pub(super) fn unregister(
++        &mut self,
++        vm: &VmFd,
++        gpa: u64,
++        hva: u64,
++        size: usize,
++    ) -> Result<bool> {
++        let Some(region) = self.regions.get_mut(&gpa) else {
++            return Ok(false);
++        };
++        ensure!(
++            region.source.as_ptr() as u64 == hva && region.source.size() == size,
++            "PMEM CoW unmap does not match registered region"
++        );
++        while let Some((&start, original)) = region.mappings.first_key_value() {
++            vm.unmap_user_memory(*original)
++                .context("unregister PMEM CoW extent")?;
++            region.mappings.remove(&start);
++        }
++        self.regions.remove(&gpa);
++        Ok(true)
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn shared_extents_avoid_unsupported_compound_folio_stride() {
++        for pages in [1, 511, 512, 1024, 65536] {
++            let size = pages * PAGE_SIZE;
++            let parts: Vec<_> = shared_mappings(0x200000, 0x1000000, size).collect();
++            let mut covered = 0;
++            for part in parts {
++                assert!(part.size > 0 && part.size < 512 * PAGE_SIZE);
++                assert_eq!({ part.guest_pfn }, (0x200000 + covered) / PAGE_SIZE);
++                assert_eq!({ part.userspace_addr }, 0x1000000 + covered);
++                covered += part.size;
++            }
++            assert_eq!(covered, size);
++        }
++    }
++
++    #[test]
++    fn splits_only_the_guest_written_page() {
++        for page in [0x1000, 0x2000, 0x3000] {
++            let parts = split_mapping(mapping(0x1000, 0x10000, 0x3000, false), page, 0x80000);
++            assert_eq!(parts.iter().map(|part| part.size).sum::<u64>(), 0x3000);
++            let writable: Vec<_> = parts
++                .iter()
++                .filter(|part| part.flags & (1 << MSHV_SET_MEM_BIT_WRITABLE) != 0)
++                .collect();
++            assert_eq!(writable.len(), 1);
++            assert_eq!({ writable[0].guest_pfn }, page / PAGE_SIZE);
++            assert_eq!({ writable[0].size }, PAGE_SIZE);
++            assert_eq!({ writable[0].userspace_addr }, 0x80000);
++            for part in &parts {
++                if part.flags & (1 << MSHV_SET_MEM_BIT_WRITABLE) == 0 {
++                    assert_eq!(
++                        { part.userspace_addr },
++                        0x10000 + part.guest_pfn * PAGE_SIZE - 0x1000
++                    );
++                }
++            }
++            for pair in parts.windows(2) {
++                assert_eq!(
++                    pair[0].guest_pfn * PAGE_SIZE + pair[0].size,
++                    pair[1].guest_pfn * PAGE_SIZE
++                );
++            }
++        }
++    }
++
++    #[test]
++    fn promotes_the_last_remaining_read_only_page() {
++        let parts = split_mapping(mapping(0x2000, 0x11000, PAGE_SIZE, false), 0x2000, 0x80000);
++        assert_eq!(parts.len(), 1);
++        assert_eq!({ parts[0].userspace_addr }, 0x80000);
++        assert_eq!({ parts[0].size }, PAGE_SIZE);
++        assert_ne!(parts[0].flags & (1 << MSHV_SET_MEM_BIT_WRITABLE), 0);
++    }
++}
+diff --git a/hypervisor/src/vm.rs b/hypervisor/src/vm.rs
+index 0cc7260..6ea52e5 100644
+--- a/hypervisor/src/vm.rs
++++ b/hypervisor/src/vm.rs
+@@ -23,6 +23,7 @@
+ #[cfg(feature = "sev_snp")]
+ use igvm_defs::SnpPolicy;
+ use thiserror::Error;
++use vm_memory::{MmapRegion, bitmap::AtomicBitmap};
+ use vmm_sys_util::eventfd::EventFd;
+ 
+ #[cfg(target_arch = "x86_64")]
+@@ -321,6 +322,17 @@ pub enum MemoryVisibility {
+ /// This crate provides a hypervisor-agnostic interfaces for Vm
+ ///
+ pub trait Vm: Send + Sync + Any {
++    /// Experimental, single-vCPU, userspace CoW for a shared PMEM mapping.
++    fn create_cow_memory_region(
++        &self,
++        _guest_phys_addr: u64,
++        _source: Arc<MmapRegion<AtomicBitmap>>,
++    ) -> Result<()> {
++        Err(HypervisorVmError::CreateUserMemory(anyhow::anyhow!(
++            "userspace PMEM CoW is only supported by x86_64 MSHV"
++        )))
++    }
++
+     #[cfg(target_arch = "x86_64")]
+     /// Sets the address of the one-page region in the VM's address space.
+     fn set_identity_map_address(&self, address: u64) -> Result<()>;
+diff --git a/vmm/Cargo.toml b/vmm/Cargo.toml
+index ff5a359..39c1cfd 100644
+--- a/vmm/Cargo.toml
++++ b/vmm/Cargo.toml
+@@ -33,6 +33,7 @@ mshv = [
+   "vm-device/mshv",
+ ]
+ pvmemcontrol = ["devices/pvmemcontrol"]
++mshv_pmem_cow = ["mshv", "hypervisor/mshv_pmem_cow"]
+ sev_snp = [
+   "arch/sev_snp",
+   "dep:sha2",
+diff --git a/vmm/src/cpu.rs b/vmm/src/cpu.rs
+index 0e41280..213c589 100644
+--- a/vmm/src/cpu.rs
++++ b/vmm/src/cpu.rs
+@@ -2426,7 +2426,7 @@ pub(crate) fn sev_snp_enabled(&self) -> bool {
+         self.sev_snp_enabled
+     }
+ 
+-    #[cfg(feature = "igvm")]
++    #[cfg(any(feature = "igvm", feature = "mshv_pmem_cow"))]
+     pub(crate) fn hypervisor_type(&self) -> hypervisor::HypervisorType {
+         self.hypervisor.hypervisor_type()
+     }
+diff --git a/vmm/src/device_manager.rs b/vmm/src/device_manager.rs
+index 5644b2c..ab6f6da 100644
+--- a/vmm/src/device_manager.rs
++++ b/vmm/src/device_manager.rs
+@@ -354,6 +354,12 @@ pub enum DeviceManagerError {
+     #[error("Cannot open persistent memory file")]
+     PmemFileOpen(#[source] io::Error),
+ 
++    #[error("Experimental PMEM CoW requires x86_64 MSHV, boot=max=1 vCPU, and no restore")]
++    PmemCowConfiguration,
++
++    #[error("Cannot register experimental PMEM CoW")]
++    PmemCowRegistration(#[source] hypervisor::HypervisorVmError),
++
+     /// Cannot set persistent memory file size
+     #[error("Cannot set persistent memory file size")]
+     PmemFileSetLen(#[source] io::Error),
+@@ -3436,6 +3442,20 @@ fn make_virtio_pmem_device(
+         pmem_cfg: &mut PmemConfig,
+         snapshot: Option<&Snapshot>,
+     ) -> DeviceManagerResult<MetaVirtioDevice> {
++        let userspace_cow = cfg!(feature = "mshv_pmem_cow") && pmem_cfg.discard_writes;
++        #[cfg(feature = "mshv_pmem_cow")]
++        if userspace_cow {
++            let config = self.config.lock().unwrap();
++            if !cfg!(target_arch = "x86_64")
++                || self.cpu_manager.lock().unwrap().hypervisor_type()
++                    != hypervisor::HypervisorType::Mshv
++                || config.cpus.boot_vcpus != 1
++                || config.cpus.max_vcpus != 1
++                || snapshot.is_some()
++            {
++                return Err(DeviceManagerError::PmemCowConfiguration);
++            }
++        }
+         let id = match pmem_cfg.pci_common.id.as_ref() {
+             Some(id) => id.clone(),
+             None => pmem_cfg
+@@ -3490,7 +3510,7 @@ fn make_virtio_pmem_device(
+ 
+         let mut file = OpenOptions::new()
+             .read(true)
+-            .write(!pmem_cfg.discard_writes)
++            .write(!pmem_cfg.discard_writes || userspace_cow)
+             .custom_flags(custom_flags)
+             .open(&pmem_cfg.file)
+             .map_err(DeviceManagerError::PmemFileOpen)?;
+@@ -3544,7 +3564,7 @@ fn make_virtio_pmem_device(
+             region_size as usize,
+             PROT_READ | PROT_WRITE,
+             MAP_NORESERVE
+-                | if pmem_cfg.discard_writes {
++                | if pmem_cfg.discard_writes && !userspace_cow {
+                     MAP_PRIVATE
+                 } else {
+                     MAP_SHARED
+@@ -3552,29 +3572,39 @@ fn make_virtio_pmem_device(
+         )
+         .map_err(DeviceManagerError::NewMmapRegion)?;
+         let host_addr = mmap_region.as_ptr();
++        let mmap_region = Arc::new(mmap_region);
+ 
+-        // SAFETY: host_addr points to region_size bytes of mmap-allocated memory.
+-        let mem_slot = unsafe {
+-            let region_size = region_size.try_into().unwrap();
+-            self.memory_manager
+-                .lock()
+-                .unwrap()
+-                .create_userspace_mapping(
+-                    region_base,
+-                    region_size,
+-                    host_addr,
+-                    false,
+-                    false,
+-                    false,
+-                    hypervisor::MemoryVisibility::Shared,
+-                )
+-                .map_err(DeviceManagerError::MemoryManager)
+-        }?;
++        let mem_slot = if userspace_cow {
++            let slot = self.memory_manager.lock().unwrap().allocate_memory_slot();
++            self.address_manager
++                .vm
++                .create_cow_memory_region(region_base, Arc::clone(&mmap_region))
++                .map_err(DeviceManagerError::PmemCowRegistration)?;
++            slot
++        } else {
++            // SAFETY: host_addr points to region_size bytes of mmap-allocated memory.
++            unsafe {
++                let region_size = region_size.try_into().unwrap();
++                self.memory_manager
++                    .lock()
++                    .unwrap()
++                    .create_userspace_mapping(
++                        region_base,
++                        region_size,
++                        host_addr,
++                        false,
++                        false,
++                        false,
++                        hypervisor::MemoryVisibility::Shared,
++                    )
++                    .map_err(DeviceManagerError::MemoryManager)?
++            }
++        };
+ 
+         let mapping = UserspaceMapping {
+             mem_slot,
+             addr: GuestAddress(region_base),
+-            mapping: Arc::new(mmap_region),
++            mapping: mmap_region,
+             mergeable: false,
+         };
+ 
+@@ -6593,6 +6623,19 @@ fn id(&self) -> String {
+     }
+ 
+     fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
++        if cfg!(feature = "mshv_pmem_cow")
++            && self
++                .config
++                .lock()
++                .unwrap()
++                .pmem
++                .as_ref()
++                .is_some_and(|devices| devices.iter().any(|device| device.discard_writes))
++        {
++            return Err(MigratableError::Snapshot(anyhow!(
++                "snapshots are unsupported with experimental PMEM CoW"
++            )));
++        }
+         let mut snapshot = Snapshot::from_data(SnapshotData::new_from_state(&self.state())?);
+ 
+         // We aggregate all devices snapshots.
+diff --git a/vmm/src/lib.rs b/vmm/src/lib.rs
+index da26842..0408bbe 100644
+--- a/vmm/src/lib.rs
++++ b/vmm/src/lib.rs
+@@ -395,6 +395,8 @@ pub fn feature_list() -> Vec<String> {
+         "kvm".to_string(),
+         #[cfg(feature = "mshv")]
+         "mshv".to_string(),
++        #[cfg(feature = "mshv_pmem_cow")]
++        "mshv_pmem_cow".to_string(),
+         #[cfg(feature = "sev_snp")]
+         "sev_snp".to_string(),
+         #[cfg(feature = "tdx")]
+diff --git a/vmm/src/vm_config.rs b/vmm/src/vm_config.rs
+index d45495a..343b3a7 100644
+--- a/vmm/src/vm_config.rs
++++ b/vmm/src/vm_config.rs
+@@ -694,7 +694,11 @@ pub struct PmemConfig {
+ 
+ impl ApplyLandlock for PmemConfig {
+     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+-        let access = if self.discard_writes { "r" } else { "rw" };
++        let access = if self.discard_writes && !cfg!(feature = "mshv_pmem_cow") {
++            "r"
++        } else {
++            "rw"
++        };
+         landlock.add_rule_with_access(&self.file, access)?;
+         Ok(())
+     }
