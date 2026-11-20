@@ -20,10 +20,7 @@ image = "@IMAGEPATH_CLH_AZURE@"
 #   - erofs (default)
 rootfs_type = @DEFROOTFSTYPE@
 
-# Block storage driver to be used for the VM rootfs is backed
-# by a block device.
-#
-# virtio-pmem is not supported with Cloud Hypervisor.
+# Driver used to attach the VM rootfs: virtio-blk-pci or virtio-pmem.
 vm_rootfs_driver = "@VMROOTFSDRIVER_CLH@"
 
 # Path to the firmware.

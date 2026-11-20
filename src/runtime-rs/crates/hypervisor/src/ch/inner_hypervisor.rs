@@ -95,9 +95,12 @@ impl CloudHypervisorInner {
 
         let enable_debug = cfg.debug_info.enable_debug;
 
-        // Note that the configuration option hypervisor.block_device_driver is not used.
-        // NVDIMM is not supported for Cloud Hypervisor.
-        let rootfs_driver = VM_ROOTFS_DRIVER_BLK;
+        // The rootfs driver is independent of the container block device driver.
+        let rootfs_driver = if cfg.boot_info.vm_rootfs_driver == crate::VM_ROOTFS_DRIVER_PMEM {
+            crate::VM_ROOTFS_DRIVER_PMEM
+        } else {
+            VM_ROOTFS_DRIVER_BLK
+        };
 
         let rootfs_type = match cfg.boot_info.rootfs_type.is_empty() {
             true => DEFAULT_CH_ROOTFS_TYPE,
@@ -1206,9 +1209,7 @@ mod tests {
         let image = crate::kernel_param::tests::rootfs_image();
         let mut ch = CloudHypervisorInner::default();
         ch.config.boot_info.image = image.path().to_str().unwrap().into();
-        // CLH always attaches the root image as virtio-blk, regardless of the
-        // configured container block driver or a requested pmem rootfs driver.
-        ch.config.boot_info.vm_rootfs_driver = crate::VM_ROOTFS_DRIVER_PMEM.into();
+        ch.config.boot_info.vm_rootfs_driver = VM_ROOTFS_DRIVER_BLK.into();
         ch.config.blockdev_info.block_device_driver = "virtio-scsi".into();
 
         for verity in [
@@ -1227,6 +1228,29 @@ mod tests {
                 assert!(params.contains("dm-mod.waitfor=PARTUUID=603f58ab-01,PARTUUID=603f58ab-02"));
             }
         }
+    }
+
+    #[actix_rt::test]
+    async fn test_pmem_rootfs_kernel_params() {
+        let mut ch = CloudHypervisorInner::default();
+        let mut config = HypervisorConfig::default();
+        config.boot_info.image = "/pmem-rootfs.img".into();
+        config.boot_info.vm_rootfs_driver = crate::VM_ROOTFS_DRIVER_PMEM.into();
+        config.blockdev_info.block_device_driver = VM_ROOTFS_DRIVER_BLK.into();
+        ch.set_hypervisor_config(config);
+
+        let params = ch.get_kernel_params().await.unwrap();
+        assert!(params.contains("root=/dev/pmem0p1"));
+        assert!(params.contains("rootflags=dax"));
+        assert!(!params.contains("PARTUUID"));
+        assert!(!params.contains("/dev/vda"));
+
+        ch.config.boot_info.kernel_verity_params =
+            "root_hash=abc,salt=def,data_blocks=1,data_block_size=4096,hash_block_size=4096".into();
+        let params = ch.get_kernel_params().await.unwrap();
+        assert!(params.contains("root=/dev/dm-0"));
+        assert!(params.contains("verity 1 /dev/pmem0p1 /dev/pmem0p2 "));
+        assert!(!params.contains("/dev/vda"));
     }
 
     #[actix_rt::test]
