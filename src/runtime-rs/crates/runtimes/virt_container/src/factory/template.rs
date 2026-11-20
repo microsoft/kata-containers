@@ -4,28 +4,33 @@
 //
 
 use std::fmt::Debug;
-use std::fs::File;
 use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use hypervisor::HYPERVISOR_NAME_CH;
+use hypervisor::{Hypervisor, VmSnapshot};
 use kata_types::config::TomlConfig;
 use nix::mount::{mount, MsFlags};
 use slog::warn;
 
-use crate::factory::{
-    template_device_state_path, template_memory_path, template_needs_memory_backing_file,
-    vm::{TemplateVm, VmConfig},
-};
+use crate::factory::vm::{TemplateVm, VmConfig};
 
 /// Maximum time to wait for the Kata Agent to become ready when initializing a template VM.
 const TEMPLATE_WAIT_FOR_AGENT: Duration = Duration::from_secs(2);
 
-/// Preallocated size (in MB) for saving the device state snapshot of the template VM.
+/// Headroom (in MB) on top of guest memory for the hypervisor's device-state artifacts.
 const TEMPLATE_DEVICE_STATE_SIZE_MB: u32 = 8;
-const MIB: u64 = 1024 * 1024;
+
+/// Return the snapshot implementation for `hypervisor`, or an error if it has none.
+pub(crate) fn snapshot_support<'a>(
+    hypervisor: &'a dyn Hypervisor,
+    name: &str,
+) -> Result<&'a dyn VmSnapshot> {
+    hypervisor
+        .snapshot()
+        .ok_or_else(|| anyhow!("hypervisor '{name}' does not support VM snapshots"))
+}
 
 #[derive(Debug)]
 pub struct Template {
@@ -42,13 +47,18 @@ impl Template {
         }
     }
 
-    pub fn fetch(config: VmConfig, template_path: PathBuf) -> Result<Box<Template>> {
+    /// Return the existing template at `template_path`, or an error if the
+    /// hypervisor does not recognise a complete snapshot there.
+    pub async fn fetch(
+        config: VmConfig,
+        toml_config: &TomlConfig,
+        template_path: PathBuf,
+    ) -> Result<Box<Template>> {
         let t = Template::new(config, template_path);
 
-        // Call template_vm_exists to validate the template's files
-        if !t.template_vm_exists() {
-            return Err(anyhow!("no template vm found"));
-        }
+        t.validate_template(toml_config)
+            .await
+            .context("no template vm found")?;
 
         Ok(Box::new(t))
     }
@@ -62,7 +72,7 @@ impl Template {
     ) -> Result<Box<Template>> {
         let t = Template::new(config, template_path);
 
-        if t.template_vm_exists() {
+        if t.validate_template(&toml_config).await.is_ok() {
             return Err(anyhow!(
                 "There is already a VM template in {:?}",
                 t.state_path
@@ -78,27 +88,13 @@ impl Template {
         Ok(Box::new(t))
     }
 
-    pub fn template_vm_exists(&self) -> bool {
-        if !self.memory_path().exists() || !self.device_state_path().exists() {
-            return false;
-        }
-
-        self.config_path().is_none_or(|path| path.exists())
-    }
-
-    fn memory_path(&self) -> PathBuf {
-        template_memory_path(&self.config.hypervisor_name, &self.state_path)
-    }
-
-    fn device_state_path(&self) -> PathBuf {
-        template_device_state_path(&self.config.hypervisor_name, &self.state_path)
-    }
-
-    fn config_path(&self) -> Option<PathBuf> {
-        match self.config.hypervisor_name.as_str() {
-            HYPERVISOR_NAME_CH => Some(self.state_path.join("config.json")),
-            _ => None,
-        }
+    /// Ask the hypervisor whether `state_path` holds a complete template.
+    pub async fn validate_template(&self, toml_config: &TomlConfig) -> Result<()> {
+        let hypervisor = TemplateVm::new_hypervisor(&self.config, toml_config)
+            .await
+            .context("new hypervisor")?;
+        snapshot_support(hypervisor.as_ref(), &self.config.hypervisor_name)?
+            .validate_snapshot(&self.state_path)
     }
 
     pub fn prepare_template_files(&self) -> Result<()> {
@@ -117,7 +113,6 @@ impl Template {
         // Mount tmpfs to store template VM memory data in memory for:
         // - Accelerating VM cloning by avoiding disk I/O
         // - Enhancing security by keeping sensitive data in memory
-        // - Supporting QEMU's shared memory clone model
         let opts = format!(
             "size={}M",
             self.config.hypervisor_config.memory_info.default_memory
@@ -140,46 +135,11 @@ impl Template {
             ));
         }
 
-        if !template_needs_memory_backing_file(&self.config.hypervisor_name) {
-            return Ok(());
-        }
-
-        // Create memory file
-        let memory_file = self.memory_path();
-        let file = File::create(&memory_file)
-            .context(format!("failed to create memory file: {memory_file:?}"))?;
-        let memory_size_bytes = u64::from(self.config.hypervisor_config.memory_info.default_memory)
-            .checked_mul(MIB)
-            .ok_or_else(|| anyhow!("template memory size overflows u64"))?;
-        file.set_len(memory_size_bytes)
-            .context(format!("failed to size memory file: {memory_file:?}"))?;
-
-        // Verify memory file was created successfully
-        if !memory_file.exists() {
-            return Err(anyhow!(
-                "memory file {:?} does not exist after creation",
-                memory_file
-            ));
-        }
-
         Ok(())
     }
 
-    /// Configures the VM configuration for template operations.
-    fn prepare_vm_config(&self, boot_to_be_template: bool) -> VmConfig {
-        let mut config = self.config.clone();
-        config.hypervisor_config.vm_template.boot_to_be_template = boot_to_be_template;
-        config.hypervisor_config.vm_template.boot_from_template = !boot_to_be_template;
-        config.hypervisor_config.vm_template.memory_path =
-            self.memory_path().to_string_lossy().to_string();
-        config.hypervisor_config.vm_template.device_state_path =
-            self.device_state_path().to_string_lossy().to_string();
-        config
-    }
-
     pub async fn save_to_template(&self, toml_config: TomlConfig) -> Result<()> {
-        let config = self.prepare_vm_config(true);
-        let vm = TemplateVm::new_vm(config, toml_config)
+        let vm = TemplateVm::new_vm(self.config.clone(), toml_config)
             .await
             .context("new template vm")?;
 
@@ -198,7 +158,7 @@ impl Template {
             sleep(TEMPLATE_WAIT_FOR_AGENT);
 
             vm.pause().await.context("pause template vm")?;
-            vm.save().await.context("save template vm")
+            vm.save(&self.state_path).await.context("save template vm")
         }
         .await;
 
@@ -216,5 +176,45 @@ impl Template {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_validate_template_requires_hypervisor_artifacts() {
+        let dir = tempfile::tempdir().unwrap();
+        let template = Template::new(
+            VmConfig {
+                hypervisor_name: hypervisor::HYPERVISOR_QEMU.to_string(),
+                ..Default::default()
+            },
+            dir.path().to_path_buf(),
+        );
+        let toml_config = TomlConfig::default();
+
+        assert!(template.validate_template(&toml_config).await.is_err());
+
+        std::fs::write(dir.path().join("state"), b"{}").unwrap();
+        template.validate_template(&toml_config).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_validate_template_rejects_unsupported_hypervisor() {
+        let template = Template::new(
+            VmConfig {
+                hypervisor_name: "firecracker".to_string(),
+                ..Default::default()
+            },
+            PathBuf::from("/template"),
+        );
+
+        let error = template
+            .validate_template(&TomlConfig::default())
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("Unsupported hypervisor"));
     }
 }

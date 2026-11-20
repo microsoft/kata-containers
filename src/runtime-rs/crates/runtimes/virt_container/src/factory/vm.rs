@@ -35,6 +35,9 @@ pub struct TemplateVm {
     /// The hypervisor responsible for managing the virtual machine lifecycle.
     pub hypervisor: Arc<dyn Hypervisor>,
 
+    /// Name of the hypervisor backend, for diagnostics.
+    hypervisor_name: String,
+
     /// The guest agent that communicates with the virtual machine.
     pub agent: Arc<dyn Agent>,
 
@@ -169,7 +172,7 @@ impl VmConfig {
 
 impl TemplateVm {
     /// Creates a new TemplateVm instance from its owning sandbox.
-    pub fn new(sandbox: VirtSandbox, cpu: f32, memory: u32) -> Self {
+    pub fn new(sandbox: VirtSandbox, hypervisor_name: String, cpu: f32, memory: u32) -> Self {
         let id = sandbox.get_sid();
         let hypervisor = sandbox.get_hypervisor();
         let agent = sandbox.get_agent();
@@ -177,6 +180,7 @@ impl TemplateVm {
             sandbox,
             id,
             hypervisor,
+            hypervisor_name,
             agent,
             cpu,
             memory,
@@ -185,7 +189,7 @@ impl TemplateVm {
     }
 
     /// Initializes the configured hypervisor for Kata.
-    async fn new_hypervisor(
+    pub(crate) async fn new_hypervisor(
         config: &VmConfig,
         _toml_config: &TomlConfig,
     ) -> Result<Arc<dyn Hypervisor>> {
@@ -322,6 +326,7 @@ impl TemplateVm {
         let hypervisor_config = sandbox.get_hypervisor().hypervisor_config().await;
         let vm = TemplateVm::new(
             sandbox,
+            config.hypervisor_name.clone(),
             hypervisor_config.cpu_info.default_vcpus,
             hypervisor_config.memory_info.default_memory,
         );
@@ -402,8 +407,11 @@ impl TemplateVm {
     }
 
     /// Save a VM to persistent disk.
-    pub async fn save(&self) -> Result<()> {
-        self.hypervisor.save_vm().await.context("save vm")
+    pub async fn save(&self, snapshot_dir: &std::path::Path) -> Result<()> {
+        crate::factory::template::snapshot_support(self.hypervisor.as_ref(), &self.hypervisor_name)?
+            .save_vm(snapshot_dir)
+            .await
+            .context("save vm")
     }
 
     /// Resume resumes a paused VM.

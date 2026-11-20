@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use common::RuntimeHandler;
-use hypervisor::HYPERVISOR_NAME_CH;
 use kata_sys_util::mount::umount_all;
 use kata_types::config::TomlConfig;
 use resource::cpu_mem::initial_size::InitialSizeManager;
@@ -21,32 +20,6 @@ use crate::VirtContainer;
 
 pub mod template;
 pub mod vm;
-
-/// Returns the path to the hypervisor's device-state artifact in the template directory.
-pub(crate) fn template_device_state_path(hypervisor_name: &str, template_path: &Path) -> PathBuf {
-    let state_file = match hypervisor_name {
-        HYPERVISOR_NAME_CH => "state.json",
-        _ => "state",
-    };
-
-    template_path.join(state_file)
-}
-
-/// Returns the path to the hypervisor's guest-memory artifact in the template directory.
-pub(crate) fn template_memory_path(hypervisor_name: &str, template_path: &Path) -> PathBuf {
-    let memory_file = match hypervisor_name {
-        HYPERVISOR_NAME_CH => "memory-ranges",
-        _ => "memory",
-    };
-
-    template_path.join(memory_file)
-}
-
-/// Whether the factory must pre-allocate the memory artifact as a RAM backing
-/// file before the template VM boots. CLH writes it itself during vm.snapshot.
-pub(crate) fn template_needs_memory_backing_file(hypervisor_name: &str) -> bool {
-    hypervisor_name != HYPERVISOR_NAME_CH
-}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FactoryConfig {
@@ -156,7 +129,9 @@ pub async fn new_factory(
 
         let path: PathBuf = config.template_path.clone().into();
         if fetch_only {
-            Template::fetch(config.vm_config.clone(), path).context("fetch VM template")?;
+            Template::fetch(config.vm_config.clone(), &toml_config, path)
+                .await
+                .context("fetch VM template")?;
         } else {
             Template::create(config.vm_config.clone(), toml_config, path)
                 .await
@@ -336,24 +311,5 @@ enable_template = true
         let hv = &factory_config.vm_config.hypervisor_config;
         assert_eq!(hv.memory_info.default_memory, 256);
         assert_eq!(hv.cpu_info.default_vcpus, 2.0);
-    }
-
-    #[test]
-    fn test_template_artifact_paths() {
-        let dir = Path::new("/run/vc/vm/template");
-
-        assert_eq!(
-            template_memory_path(HYPERVISOR_NAME_CH, dir),
-            dir.join("memory-ranges")
-        );
-        assert_eq!(
-            template_device_state_path(HYPERVISOR_NAME_CH, dir),
-            dir.join("state.json")
-        );
-        assert!(!template_needs_memory_backing_file(HYPERVISOR_NAME_CH));
-
-        assert_eq!(template_memory_path("qemu", dir), dir.join("memory"));
-        assert_eq!(template_device_state_path("qemu", dir), dir.join("state"));
-        assert!(template_needs_memory_backing_file("qemu"));
     }
 }

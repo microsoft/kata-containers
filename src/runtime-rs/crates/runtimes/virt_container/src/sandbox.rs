@@ -42,7 +42,9 @@ use hypervisor::HYPERVISOR_REMOTE;
 use hypervisor::{dragonball::Dragonball, HYPERVISOR_DRAGONBALL};
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use hypervisor::{firecracker::Firecracker, HYPERVISOR_FIRECRACKER};
-use hypervisor::{is_vfio_ap_device, BlockConfigModern, Hypervisor, VfioDeviceBase};
+use hypervisor::{
+    is_vfio_ap_device, BlockConfigModern, Hypervisor, RestoreVmRequest, VfioDeviceBase,
+};
 #[cfg(all(
     feature = "openvmm",
     any(target_arch = "x86_64", target_arch = "aarch64")
@@ -92,6 +94,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 
 pub(crate) const VIRTCONTAINER: &str = "virt_container";
+const VMM_START_TIMEOUT_SECS: i32 = 10_000;
 
 pub struct SandboxRestoreArgs {
     pub sid: String,
@@ -1033,8 +1036,29 @@ impl Sandbox for VirtSandbox {
             .await
             .context("set up device before start vm")?;
 
-        // start vm
-        self.hypervisor.start_vm(10_000).await.context("start vm")?;
+        // Factory clones restore from the template snapshot; everything else
+        // cold boots. restore_vm() hands back a paused VM.
+        if self.is_factory_enabled() {
+            let hypervisor_config = self.hypervisor.hypervisor_config().await;
+            self.hypervisor
+                .snapshot()
+                .ok_or_else(|| anyhow!("hypervisor does not support VM snapshots"))?
+                .restore_vm(RestoreVmRequest {
+                    snapshot_dir: PathBuf::from(&hypervisor_config.factory.template_path),
+                    timeout_secs: VMM_START_TIMEOUT_SECS,
+                })
+                .await
+                .context("restore factory vm")?;
+            self.hypervisor
+                .resume_vm()
+                .await
+                .context("resume factory vm")?;
+        } else {
+            self.hypervisor
+                .start_vm(VMM_START_TIMEOUT_SECS)
+                .await
+                .context("start vm")?;
+        }
         info!(sl!(), "start vm");
 
         let sandbox = self.clone();
@@ -1258,7 +1282,7 @@ impl Sandbox for VirtSandbox {
             .context("set up device before start vm")?;
 
         self.hypervisor
-            .start_vm(10_000)
+            .start_vm(VMM_START_TIMEOUT_SECS)
             .await
             .context("start template vm")?;
         info!(sl!(), "vm started from template");

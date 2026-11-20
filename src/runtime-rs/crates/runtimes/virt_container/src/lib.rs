@@ -64,9 +64,7 @@ use hypervisor::{openvmm::OpenVmm, HYPERVISOR_NAME_OPENVMM};
 ))]
 use kata_types::config::OpenVmmConfig;
 
-use crate::factory::{
-    template::Template, template_device_state_path, template_memory_path, vm::VmConfig,
-};
+use crate::factory::{template::Template, vm::VmConfig};
 use resource::cpu_mem::initial_size::InitialSizeManager;
 use resource::ResourceManager;
 use sandbox::VIRTCONTAINER;
@@ -195,8 +193,10 @@ async fn new_vm_components(
     if factory.enable_template {
         let template = Template::fetch(
             VmConfig::new(toml_config),
+            toml_config,
             Path::new(&factory.template_path).to_path_buf(),
-        );
+        )
+        .await;
 
         match template {
             Ok(_) => match build_vm_from_template(toml_config).await {
@@ -222,6 +222,9 @@ async fn new_vm_components(
     Ok((hypervisor, agent, factory))
 }
 
+/// Build the hypervisor for a sandbox that will restore from the factory
+/// template. The hypervisor must implement VmSnapshot; the sandbox later calls
+/// restore_vm() with the template directory instead of start_vm().
 async fn build_vm_from_template(
     toml_config: &TomlConfig,
 ) -> Result<(Arc<dyn Hypervisor>, Arc<dyn Agent>)> {
@@ -231,22 +234,17 @@ async fn build_vm_from_template(
         .get(&hypervisor_name)
         .cloned()
         .ok_or_else(|| anyhow!("hypervisor '{}' not found", hypervisor_name))?;
-    let path = Path::new(&hypervisor_config.factory.template_path);
-    hypervisor_config.vm_template.boot_to_be_template = false;
-    hypervisor_config.vm_template.boot_from_template = true;
-    hypervisor_config.vm_template.memory_path = template_memory_path(&hypervisor_name, path)
-        .to_string_lossy()
-        .to_string();
-    hypervisor_config.vm_template.device_state_path =
-        template_device_state_path(&hypervisor_name, path)
-            .to_string_lossy()
-            .to_string();
     VmConfig::validate_hypervisor_config(&mut hypervisor_config)
         .context("validate template hypervisor config")?;
 
     let hypervisor = new_hypervisor_with_config(toml_config, &hypervisor_config)
         .await
         .context("new hypervisor")?;
+    if hypervisor.snapshot().is_none() {
+        return Err(anyhow!(
+            "hypervisor '{hypervisor_name}' does not support VM snapshots"
+        ));
+    }
     let agent = new_agent(toml_config).context("new agent")? as Arc<dyn agent::Agent>;
 
     Ok((hypervisor, agent))
@@ -429,16 +427,11 @@ agent_name = "kata"
         let hypervisor_config = hypervisor.hypervisor_config().await;
 
         assert_eq!(hypervisor_config.memory_info.default_memory, 768);
-        assert!(hypervisor_config.vm_template.boot_from_template);
-        assert!(!hypervisor_config.vm_template.boot_to_be_template);
         assert_eq!(
-            hypervisor_config.vm_template.memory_path,
-            "/run/vc/vm/active-template/memory"
+            hypervisor_config.factory.template_path,
+            "/run/vc/vm/active-template"
         );
-        assert_eq!(
-            hypervisor_config.vm_template.device_state_path,
-            "/run/vc/vm/active-template/state"
-        );
+        assert!(hypervisor.snapshot().is_some());
     }
 
     #[tokio::test]
@@ -473,7 +466,6 @@ agent_name = "kata"
         let hypervisor_config = hypervisor.hypervisor_config().await;
 
         assert!(!factory.enable_template);
-        assert!(!hypervisor_config.vm_template.boot_from_template);
         assert_eq!(hypervisor_config.memory_info.default_memory, 512);
     }
 }
