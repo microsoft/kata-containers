@@ -20,7 +20,9 @@ use super::{
 };
 use crate::kernel_param::KernelParams;
 use crate::utils::{get_jailer_root, get_sandbox_path};
-use crate::{DeviceType, MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK};
+use crate::{
+    DeviceType, MemoryConfig, VcpuThreadIds, VmmState, VM_ROOTFS_DRIVER_BLK, VM_ROOTFS_DRIVER_PMEM,
+};
 
 const OPENVMM_STANDALONE_VIRTIO_FS: &str = "virtio-fs";
 
@@ -28,13 +30,14 @@ fn build_kernel_cmdline(
     debug: bool,
     kernel_params: &str,
     kernel_verity_params: &str,
+    rootfs_driver: &str,
     rootfs_type: &str,
 ) -> Result<String> {
     let mut params = KernelParams::new(debug);
 
     let mut rootfs_params = KernelParams::new_rootfs_kernel_params(
         kernel_verity_params,
-        VM_ROOTFS_DRIVER_BLK,
+        rootfs_driver,
         rootfs_type,
         false,
     )?;
@@ -78,13 +81,36 @@ pub(super) fn blk_device_kind(path: String, read_only: bool) -> vmservice::PcieD
     }))
 }
 
+fn rootfs_device_kind(driver: &str, path: String) -> Result<vmservice::PcieDeviceKind> {
+    match driver {
+        VM_ROOTFS_DRIVER_BLK => Ok(blk_device_kind(path, true)),
+        VM_ROOTFS_DRIVER_PMEM => Ok(virtio_pcie_device(vmservice::virtio_device::Kind::Pmem(
+            vmservice::VirtioPmem {
+                backend: MessageField::some(vmservice::PmemBackend {
+                    kind: Some(vmservice::pmem_backend::Kind::File(vmservice::PmemFile {
+                        path,
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                }),
+                read_only: true,
+                ..Default::default()
+            },
+        ))),
+        _ => Err(anyhow!(
+            "openvmm: unsupported VM rootfs driver '{}'",
+            driver
+        )),
+    }
+}
+
 /// Build a virtio-net-pci endpoint backed by a host TAP, opened by name inside
 /// the OpenVMM process (which runs in the sandbox network namespace).
 fn net_device_kind(mac_address: String, tap_name: String) -> vmservice::PcieDeviceKind {
     virtio_pcie_device(vmservice::virtio_device::Kind::Net(vmservice::VirtioNet {
         backend: MessageField::some(vmservice::NicBackend {
             kind: Some(vmservice::nic_backend::Kind::Tap(vmservice::TapBackend {
-                name: tap_name,
+                source: Some(vmservice::tap_backend::Source::Name(tap_name)),
                 ..Default::default()
             })),
             ..Default::default()
@@ -202,6 +228,7 @@ impl OpenVmmInner {
             self.config.debug_info.enable_debug,
             &self.config.boot_info.kernel_params,
             &self.config.boot_info.kernel_verity_params,
+            &self.config.boot_info.vm_rootfs_driver,
             &self.config.boot_info.rootfs_type,
         )?;
         let cmdline = adapt_cmdline_for_rpc(cmdline);
@@ -217,13 +244,14 @@ impl OpenVmmInner {
         // into the pre-declared empty hotplug ports.
         let mut root_ports: Vec<vmservice::PciePort> = Vec::new();
 
-        // rootfs as virtio-blk-pci. The guest mounts it via the kernel cmdline
-        // (root=/dev/vda), so no guest pci_path needs to be reported.
+        // The guest mounts the rootfs via the kernel cmdline, so no guest
+        // pci_path needs to be reported.
         let rootfs_disk_path = if !self.config.boot_info.image.is_empty() {
             let disk_path = self.config.boot_info.image.clone();
             info!(
                 sl!(),
-                "openvmm: rootfs as virtio-blk-pci at device {}: {}",
+                "openvmm: rootfs as {} at device {}: {}",
+                self.config.boot_info.vm_rootfs_driver,
                 OPENVMM_ROOTFS_PCI_DEVICE,
                 disk_path
             );
@@ -231,7 +259,10 @@ impl OpenVmmInner {
                 "rootfs",
                 OPENVMM_ROOTFS_PCI_DEVICE,
                 false,
-                Some(blk_device_kind(disk_path.clone(), true)),
+                Some(rootfs_device_kind(
+                    &self.config.boot_info.vm_rootfs_driver,
+                    disk_path.clone(),
+                )?),
             ));
             Some(disk_path)
         } else {
@@ -257,6 +288,7 @@ impl OpenVmmInner {
                     // relay, so normalize Kata's hybrid-vsock request to it.
                     agent_vsock_port = Some(agent_vsock_pcie_port(&vsock_socket_path));
                 }
+
                 DeviceType::Vsock(vsock_dev) => {
                     info!(
                         sl!(),
@@ -563,5 +595,88 @@ impl OpenVmmInner {
 
     pub(crate) async fn get_passfd_listener_addr(&self) -> Result<(String, u32)> {
         Err(anyhow!("openvmm passfd IO is not supported"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rootfs_devices_are_read_only_and_use_the_selected_driver() {
+        let path = "/rootfs.img";
+        for driver in [VM_ROOTFS_DRIVER_BLK, VM_ROOTFS_DRIVER_PMEM] {
+            let device = rootfs_device_kind(driver, path.into()).unwrap();
+            let Some(vmservice::pcie_device_kind::Kind::Virtio(virtio)) = device.kind else {
+                panic!("expected virtio device");
+            };
+            match virtio.kind.unwrap() {
+                vmservice::virtio_device::Kind::Blk(blk) => {
+                    assert_eq!(driver, VM_ROOTFS_DRIVER_BLK);
+                    assert!(blk.read_only);
+                    let Some(vmservice::disk_backend::Kind::File(file)) = &blk.backend.kind else {
+                        panic!("expected file disk");
+                    };
+                    assert_eq!(file.path, path);
+                }
+                vmservice::virtio_device::Kind::Pmem(pmem) => {
+                    assert_eq!(driver, VM_ROOTFS_DRIVER_PMEM);
+                    assert!(pmem.read_only);
+                    let Some(vmservice::pmem_backend::Kind::File(file)) = &pmem.backend.kind else {
+                        panic!("expected PMEM file");
+                    };
+                    assert_eq!(file.path, path);
+                }
+                _ => panic!("unexpected rootfs device"),
+            }
+        }
+        assert!(rootfs_device_kind("virtio-scsi", path.into()).is_err());
+    }
+
+    #[test]
+    fn kernel_cmdline_uses_selected_rootfs_and_verity_devices() {
+        for (driver, root, hash) in [
+            (VM_ROOTFS_DRIVER_BLK, "/dev/vda1", "/dev/vda2"),
+            (VM_ROOTFS_DRIVER_PMEM, "/dev/pmem0p1", "/dev/pmem0p2"),
+        ] {
+            for fs in ["ext4", "xfs", "erofs"] {
+                let cmdline = build_kernel_cmdline(false, "", "", driver, fs).unwrap();
+                assert!(cmdline
+                    .split_whitespace()
+                    .any(|p| p == format!("root={root}")));
+                assert!(cmdline.contains(&format!("rootfstype={fs}")));
+                assert!(!cmdline.contains("dax"));
+
+                let cmdline = build_kernel_cmdline(
+                    false,
+                    "",
+                    "root_hash=abc,salt=def,data_blocks=1,data_block_size=4096,hash_block_size=4096",
+                    driver,
+                    fs,
+                )
+                .unwrap();
+                assert!(cmdline.contains("root=/dev/dm-0"));
+                assert!(cmdline.contains(&format!("verity 1 {root} {hash} ")));
+                assert!(!cmdline.contains("dax"));
+            }
+        }
+    }
+
+    #[test]
+    fn net_device_uses_named_tap_backend() {
+        let device = net_device_kind("02-00-00-00-00-01".into(), "tap0".into());
+        let Some(vmservice::pcie_device_kind::Kind::Virtio(virtio)) = device.kind else {
+            panic!("expected virtio device");
+        };
+        let Some(vmservice::virtio_device::Kind::Net(net)) = virtio.kind else {
+            panic!("expected virtio-net device");
+        };
+        let Some(vmservice::nic_backend::Kind::Tap(tap)) = &net.backend.kind else {
+            panic!("expected TAP backend");
+        };
+        assert_eq!(
+            tap.source,
+            Some(vmservice::tap_backend::Source::Name("tap0".into()))
+        );
     }
 }

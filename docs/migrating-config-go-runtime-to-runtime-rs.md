@@ -126,7 +126,7 @@ configuration-file option** in the Go runtime.
 
 | Option | Purpose in `runtime-rs` |
 | --- | --- |
-| `vm_rootfs_driver` | Dedicated block driver for the VM rootfs (`virtio-pmem`, `virtio-blk-pci`, `virtio-blk-mmio`), separate from `block_device_driver`. |
+| `vm_rootfs_driver` | Dedicated block driver for the VM rootfs (`virtio-pmem`, `virtio-blk-pci`, `virtio-blk-mmio`), separate from `block_device_driver`. OpenVMM supports `virtio-blk-pci` (default) and file-backed `virtio-pmem`. |
 | `queue_size` | virtio queue size, in bytes, for block devices. |
 | `num_queues` | Block device multi-queue count. |
 | `network_queues` | Number of `virtio-net` RX/TX queue pairs exposed to the guest. |

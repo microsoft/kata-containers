@@ -20,8 +20,11 @@ image = "@IMAGEPATH_OPENVMM_AZURE@"
 #   - erofs (default)
 rootfs_type = @DEFROOTFSTYPE@
 
-# Block storage driver to be used for the VM rootfs is backed
-# by a block device.
+# Driver for the read-only VM rootfs image:
+#   - virtio-blk-pci (default)
+#   - virtio-pmem (file-backed persistent memory)
+# virtio-pmem requires guest kernel support for VIRTIO_PMEM_F_SHMEM_REGION.
+# The image must be non-empty and its size a multiple of 4 KiB.
 vm_rootfs_driver = "@VMROOTFSDRIVER_OPENVMM@"
 
 # Path to the firmware.
