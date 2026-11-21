@@ -44,6 +44,31 @@ There are several kinds of Kata configurations and they are listed below.
 
 ### Hypervisor Options
 
+#### OpenVMM VM rootfs driver
+
+In `runtime-rs`, OpenVMM can expose the VM rootfs image as read-only persistent
+memory instead of a virtio block disk. Set the driver in the configuration file:
+
+```toml title="configuration-openvmm-azure-runtime-rs.toml"
+[hypervisor.openvmm]
+vm_rootfs_driver = "virtio-pmem"
+```
+
+The default remains `virtio-blk-pci`. This setting changes only the VM rootfs;
+container volumes still use `block_device_driver = "virtio-blk-pci"`.
+With `virtio-pmem`, the runtime uses `/dev/pmem0p1` for the root partition and
+`/dev/pmem0p2` for the hash partition when `kernel_verity_params` is configured.
+Direct filesystem access (`DAX`) is not enabled.
+
+!!! note "Guest kernel and image requirements"
+    The guest kernel must include the virtio persistent memory driver and
+    support `VIRTIO_PMEM_F_SHMEM_REGION` for shared-memory region discovery.
+    Use a non-empty regular file whose size is a multiple of 4 KiB.
+    OpenVMM pads the read-only mapping to 2 MiB alignment without modifying the
+    image file.
+
+#### Hypervisor annotations
+
 Hypervisor annotations must be explicitly whitelisted in the Kata runtime config. Example:
 
 ```toml title="/path/to/configuration.toml"

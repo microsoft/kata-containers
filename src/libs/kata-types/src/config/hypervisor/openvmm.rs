@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::config::{ConfigPlugin, TomlConfig};
 use crate::validate_path;
 
-use super::register_hypervisor_plugin;
+use super::{register_hypervisor_plugin, VIRTIO_BLK_PCI, VIRTIO_PMEM};
 
 /// Hypervisor name for openvmm, used to index `TomlConfig::hypervisor`.
 pub const HYPERVISOR_NAME_OPENVMM: &str = "openvmm";
@@ -72,6 +72,13 @@ impl ConfigPlugin for OpenVmmConfig {
             }
             validate_path!(ovmm.path, "OpenVMM binary path `{}` is invalid: {}")?;
 
+            if ![VIRTIO_BLK_PCI, VIRTIO_PMEM].contains(&ovmm.boot_info.vm_rootfs_driver.as_str()) {
+                return Err(std::io::Error::other(format!(
+                    "OpenVMM does not support VM rootfs driver '{}'; use '{}' or '{}'",
+                    ovmm.boot_info.vm_rootfs_driver, VIRTIO_BLK_PCI, VIRTIO_PMEM,
+                )));
+            }
+
             if (ovmm.cpu_info.default_vcpus > 0.0
                 && ovmm.cpu_info.default_vcpus as u32 > MAX_OPENVMM_VCPUS)
                 || ovmm.cpu_info.default_maxvcpus > MAX_OPENVMM_VCPUS
@@ -98,10 +105,11 @@ mod tests {
     use tempfile::NamedTempFile;
 
     fn create_config(path: &Path) -> TomlConfig {
-        let hypervisor = Hypervisor {
+        let mut hypervisor = Hypervisor {
             path: path.to_string_lossy().into_owned(),
             ..Default::default()
         };
+        hypervisor.boot_info.vm_rootfs_driver = VIRTIO_BLK_PCI.into();
         let mut config = TomlConfig::default();
         config
             .hypervisor
@@ -179,5 +187,28 @@ mod tests {
             .default_memory = MIN_OPENVMM_MEMORY_SIZE_MB - 1;
 
         assert!(OpenVmmConfig::new().validate(&config).is_err());
+    }
+
+    #[test]
+    fn validate_rootfs_drivers() {
+        let binary = NamedTempFile::new().unwrap();
+        let mut config = create_config(binary.path());
+        let hypervisor = config.hypervisor.get_mut(HYPERVISOR_NAME_OPENVMM).unwrap();
+        hypervisor.memory_info.default_memory = MIN_OPENVMM_MEMORY_SIZE_MB;
+
+        for (driver, supported) in [
+            (VIRTIO_BLK_PCI, true),
+            (VIRTIO_PMEM, true),
+            ("virtio-blk-mmio", false),
+            ("virtio-scsi", false),
+        ] {
+            config
+                .hypervisor
+                .get_mut(HYPERVISOR_NAME_OPENVMM)
+                .unwrap()
+                .boot_info
+                .vm_rootfs_driver = driver.into();
+            assert_eq!(OpenVmmConfig::new().validate(&config).is_ok(), supported);
+        }
     }
 }
