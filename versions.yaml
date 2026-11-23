@@ -80,7 +80,8 @@ assets:
         OpenVMM is a modular, cross-platform Virtual Machine Monitor written
         in Rust
       url: "https://github.com/microsoft/openvmm"
-      version: "79577a0ec3584d078f8b03d230d74021d7421b9d"
+      #version: "79577a0ec3584d078f8b03d230d74021d7421b9d"
+      version: "a345c97efe7b6add4729a3cf3b08d1333c5398ce"
 
     firecracker:
       description: "Firecracker micro-VMM"
