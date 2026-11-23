@@ -45,10 +45,11 @@ use crate::{DeviceType, Hypervisor, MemoryConfig, RestoreVmRequest, VcpuThreadId
 // a virtio (or vhost-user) function behind its own root port at function 0 of a
 // distinct device number, so the guest-visible path is "DD/00". Device 0 (00.0)
 // is intentionally left unused so the layout does not depend on whether the root
-// complex reserves it. Cold-plug devices use fixed device numbers 1..=7; block
-// hotplug ports use device numbers 8..=31 (hp0..hp23). VFIO cold-plug ports
+// complex reserves it. Cold-plug devices use fixed device numbers 1..=7;
+// hotplug ports (block volumes and NICs added after VM start) use device
+// numbers 8..=31 (hp0..hp23). VFIO cold-plug ports
 // use functions 1 and 2 of devices 8..=23, after the corresponding
-// function-zero block ports make those multifunction devices discoverable. The
+// function-zero hotplug ports make those multifunction devices discoverable. The
 // virtio-console port shares the vsock device at function 1 for the same reason.
 pub(crate) const OPENVMM_ROOTFS_PCI_DEVICE: u8 = 1;
 pub(crate) const OPENVMM_SHAREFS_PCI_DEVICE: u8 = 2;
@@ -56,9 +57,9 @@ pub(crate) const OPENVMM_VSOCK_PCI_DEVICE: u8 = 3;
 pub(crate) const OPENVMM_CONSOLE_PCI_FUNCTION: u8 = 1;
 pub(crate) const OPENVMM_NET_PCI_FIRST_DEVICE: u8 = 4;
 pub(crate) const OPENVMM_NET_PCI_MAX_COUNT: u8 = 4;
-pub(crate) const OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE: u8 = 8;
-pub(crate) const OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX: &str = "hp";
-pub(crate) const OPENVMM_BLOCK_HOTPLUG_PORT_COUNT: u8 = 24;
+pub(crate) const OPENVMM_HOTPLUG_FIRST_DEVICE: u8 = 8;
+pub(crate) const OPENVMM_HOTPLUG_PORT_PREFIX: &str = "hp";
+pub(crate) const OPENVMM_HOTPLUG_PORT_COUNT: u8 = 24;
 pub(crate) const OPENVMM_VFIO_COLDPLUG_FIRST_DEVICE: u8 = 8;
 pub(crate) const OPENVMM_VFIO_COLDPLUG_DEVICE_COUNT: u8 = 16;
 pub(crate) const OPENVMM_VFIO_COLDPLUG_FUNCTION: u8 = 1;

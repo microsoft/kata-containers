@@ -18,13 +18,12 @@ use super::inner::OpenVmmInner;
 use super::vmm_instance::OPENVMM_READY_TIMEOUT;
 use super::vmservice;
 use super::{
-    OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE, OPENVMM_BLOCK_HOTPLUG_PORT_COUNT,
-    OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, OPENVMM_CONSOLE_PCI_FUNCTION, OPENVMM_NET_PCI_FIRST_DEVICE,
-    OPENVMM_NET_PCI_MAX_COUNT, OPENVMM_ROOTFS_PCI_DEVICE, OPENVMM_SHAREFS_PCI_DEVICE,
-    OPENVMM_VFIO_COLDPLUG_DEVICE_COUNT, OPENVMM_VFIO_COLDPLUG_FIRST_DEVICE,
-    OPENVMM_VFIO_COLDPLUG_FUNCTION, OPENVMM_VFIO_COLDPLUG_PORT_COUNT,
-    OPENVMM_VFIO_COLDPLUG_PORT_COUNT_WITH_COHERENT_GPU, OPENVMM_VFIO_COLDPLUG_PORT_PREFIX,
-    OPENVMM_VSOCK_PCI_DEVICE,
+    OPENVMM_CONSOLE_PCI_FUNCTION, OPENVMM_HOTPLUG_FIRST_DEVICE, OPENVMM_HOTPLUG_PORT_COUNT,
+    OPENVMM_HOTPLUG_PORT_PREFIX, OPENVMM_NET_PCI_FIRST_DEVICE, OPENVMM_NET_PCI_MAX_COUNT,
+    OPENVMM_ROOTFS_PCI_DEVICE, OPENVMM_SHAREFS_PCI_DEVICE, OPENVMM_VFIO_COLDPLUG_DEVICE_COUNT,
+    OPENVMM_VFIO_COLDPLUG_FIRST_DEVICE, OPENVMM_VFIO_COLDPLUG_FUNCTION,
+    OPENVMM_VFIO_COLDPLUG_PORT_COUNT, OPENVMM_VFIO_COLDPLUG_PORT_COUNT_WITH_COHERENT_GPU,
+    OPENVMM_VFIO_COLDPLUG_PORT_PREFIX, OPENVMM_VSOCK_PCI_DEVICE,
 };
 use crate::device::driver::vfio_device::{DeviceAddress, VfioDeviceModern};
 use crate::device::pci_path::{PciPath, PciSlot};
@@ -223,7 +222,7 @@ pub(super) fn blk_device_kind(path: String, read_only: bool) -> vmservice::PcieD
 
 /// Build a virtio-net-pci endpoint backed by a host TAP, opened by name inside
 /// the OpenVMM process (which runs in the sandbox network namespace).
-fn net_device_kind(mac_address: String, tap_name: String) -> vmservice::PcieDeviceKind {
+pub(super) fn net_device_kind(mac_address: String, tap_name: String) -> vmservice::PcieDeviceKind {
     virtio_pcie_device(vmservice::virtio_device::Kind::Net(vmservice::VirtioNet {
         backend: MessageField::some(vmservice::NicBackend {
             kind: Some(vmservice::nic_backend::Kind::Tap(vmservice::TapBackend {
@@ -359,7 +358,7 @@ fn make_pcie_port(
 }
 
 /// The guest slot of the `index`th rc0 VFIO cold-plug port: functions 1 and
-/// up of the block hotplug devices, whose function 0 is always present.
+/// up of the hotplug port devices, whose function 0 is always present.
 fn vfio_coldplug_slot(index: u8) -> Result<PciSlot> {
     PciSlot::new_with_function(
         OPENVMM_VFIO_COLDPLUG_FIRST_DEVICE + index % OPENVMM_VFIO_COLDPLUG_DEVICE_COUNT,
@@ -703,7 +702,7 @@ fn make_pcie_topology(
     ))
 }
 
-fn mac_address(device: &crate::NetworkDevice, index: usize) -> String {
+pub(super) fn mac_address(device: &crate::NetworkDevice, index: usize) -> String {
     device
         .config
         .guest_mac
@@ -723,7 +722,7 @@ impl OpenVmmInner {
         self.id = id.to_string();
         self.state = VmmState::NotReady;
         self.pending_devices.clear();
-        self.reset_block_hotplug_ports();
+        self.reset_hotplug_ports();
         self.vm_path = get_sandbox_path(id);
         self.jailer_root = get_jailer_root(id);
         self.netns = netns;
@@ -756,8 +755,9 @@ impl OpenVmmInner {
         // Build the PCIe topology: every Kata device is a virtio (or
         // vhost-user) function at function 0 of its own root port on a single
         // root complex. Cold-plug devices (rootfs, sharefs, network, the agent
-        // vsock) are attached here; block volumes are hot-added after resume
-        // into the pre-declared empty hotplug ports.
+        // vsock, NICs that exist before start_vm) are attached here; block
+        // volumes and later NICs are hot-added after resume into the
+        // pre-declared empty hotplug ports.
         let mut root_ports: Vec<vmservice::PciePort> = Vec::new();
 
         // rootfs as virtio-blk-pci. The guest mounts it via the kernel cmdline
@@ -965,13 +965,15 @@ impl OpenVmmInner {
         root_ports.push(console_pcie_port(&console_socket_path)?);
 
         // Pre-declare empty, hotplug-capable ports (hp0..) for block volumes
-        // that are hot-added after resume. Their device numbers match the
+        // and NICs that are hot-added after resume (nerdctl, for example,
+        // creates the container network in a createRuntime hook that runs
+        // after start_vm). Their device numbers match the
         // OpenVmmHotplugPort pool so the guest pci_path can be computed without
         // an OpenVMM round-trip.
-        for index in 0..OPENVMM_BLOCK_HOTPLUG_PORT_COUNT {
-            let device = OPENVMM_BLOCK_HOTPLUG_FIRST_DEVICE + index;
+        for index in 0..OPENVMM_HOTPLUG_PORT_COUNT {
+            let device = OPENVMM_HOTPLUG_FIRST_DEVICE + index;
             root_ports.push(make_pcie_port(
-                &format!("{}{}", OPENVMM_BLOCK_HOTPLUG_PORT_PREFIX, index),
+                &format!("{}{}", OPENVMM_HOTPLUG_PORT_PREFIX, index),
                 PciSlot::new(device),
                 true,
                 None,
@@ -1107,7 +1109,7 @@ impl OpenVmmInner {
                     "openvmm: failed cleaning up unsuccessful startup: {:?}", cleanup_err
                 );
             }
-            self.reset_block_hotplug_ports();
+            self.reset_hotplug_ports();
             return Err(err);
         }
 

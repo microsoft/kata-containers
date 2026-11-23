@@ -16,7 +16,6 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use super::empty::Empty;
-use super::inner_hypervisor::blk_device_kind;
 use super::vmservice;
 use super::vmservice_ttrpc::VmClient;
 use protobuf::MessageField;
@@ -263,17 +262,16 @@ impl VmmInstance {
             .map_err(|e| anyhow!("openvmm pause_vm RPC failed: {:?}", e))
     }
 
-    /// Hot-add a virtio-blk-pci device behind the named (pre-declared) PCIe
-    /// hotplug port.
+    /// Hot-add a PCIe endpoint (virtio-blk or virtio-net) behind the named
+    /// (pre-declared) PCIe hotplug port.
     pub(crate) async fn add_pcie_device(
         &self,
         port_name: &str,
-        host_path: String,
-        read_only: bool,
+        device: vmservice::PcieDeviceKind,
     ) -> Result<()> {
         let request = vmservice::AddPcieDeviceRequest {
             port_name: port_name.to_string(),
-            device: MessageField::some(blk_device_kind(host_path, read_only)),
+            device: MessageField::some(device),
             ..Default::default()
         };
 
