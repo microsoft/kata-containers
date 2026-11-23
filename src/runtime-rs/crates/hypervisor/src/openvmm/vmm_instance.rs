@@ -312,6 +312,16 @@ impl VmmInstance {
     }
 
     async fn create_vm(client: &VmClient, request: vmservice::CreateVMRequest) -> Result<()> {
+        if requires_pmem_discard_writes(&request) {
+            let capabilities = client
+                .capabilities_vm(rpc_ctx(), &Empty::new())
+                .await
+                .map_err(|e| anyhow!("openvmm capabilities_vm RPC failed: {:?}", e))?;
+            anyhow::ensure!(
+                capabilities.virtio_pmem_discard_writes,
+                "openvmm does not support virtio-pmem discard writes; use a patched OpenVMM binary or vm_rootfs_driver = \"virtio-blk-pci\""
+            );
+        }
         client
             .create_vm(rpc_ctx(), &request)
             .await
@@ -340,6 +350,24 @@ impl VmmInstance {
             .as_ref()
             .context("openvmm TTRPC client not connected")
     }
+}
+
+fn requires_pmem_discard_writes(request: &vmservice::CreateVMRequest) -> bool {
+    request
+        .config
+        .pcie
+        .root_complexes
+        .iter()
+        .flat_map(|root| &root.root_ports)
+        .any(|port| {
+            let Some(vmservice::pcie_attachment::Kind::Device(device)) = &port.attached.kind else {
+                return false;
+            };
+            let Some(vmservice::pcie_device_kind::Kind::Virtio(virtio)) = &device.kind else {
+                return false;
+            };
+            matches!(&virtio.kind, Some(vmservice::virtio_device::Kind::Pmem(pmem)) if pmem.discard_writes)
+        })
 }
 
 async fn wait_for_child_exit(child: &mut Child, pid: u32) {
@@ -414,6 +442,46 @@ mod tests {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
+
+    #[test]
+    fn discard_writes_capability_is_required_only_for_private_pmem() {
+        let mut request = vmservice::CreateVMRequest::new();
+        assert!(!requires_pmem_discard_writes(&request));
+        request.config = MessageField::some(vmservice::VMConfig {
+            pcie: MessageField::some(vmservice::PcieTopologyConfig {
+                root_complexes: vec![vmservice::PcieRootComplex {
+                    root_ports: vec![vmservice::PciePort {
+                        attached: MessageField::some(vmservice::PcieAttachment {
+                            kind: Some(vmservice::pcie_attachment::Kind::Device(
+                                vmservice::PcieDeviceKind {
+                                    kind: Some(vmservice::pcie_device_kind::Kind::Virtio(
+                                        vmservice::VirtioDevice {
+                                            kind: Some(vmservice::virtio_device::Kind::Pmem(
+                                                vmservice::VirtioPmem {
+                                                    discard_writes: true,
+                                                    ..Default::default()
+                                                },
+                                            )),
+                                            ..Default::default()
+                                        },
+                                    )),
+                                    ..Default::default()
+                                },
+                            )),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        assert!(requires_pmem_discard_writes(&request));
+        request.config.as_mut().unwrap().pcie = MessageField::none();
+        assert!(!requires_pmem_discard_writes(&request));
+    }
 
     fn make_nonresponsive_openvmm(temp_dir: &TempDir) -> (String, std::path::PathBuf) {
         let script_path = temp_dir.path().join("openvmm");

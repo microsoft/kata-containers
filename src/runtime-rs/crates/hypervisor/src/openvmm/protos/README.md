@@ -4,6 +4,12 @@ The protobuf files in this folder are vendored from the [upstream
 OpenVMM vmservice.proto file][upstream-vmservice] at the revision pinned
 in `versions.yaml`.
 
+This checkout additionally includes the local PMEM extensions
+`VirtioPmem.discard_writes` and
+`CapabilitiesVMResponse.virtio_pmem_discard_writes`. They must stay synchronized
+with the accompanying OpenVMM changes. The pinned upstream revision does not
+yet provide these extensions; refreshing from it removes them.
+
 They can be updated via the following command:
 
 ```shell

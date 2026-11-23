@@ -313,6 +313,11 @@ message VirtioPmem {
     PmemBackend backend = 1;
     // Expose the device read-only to the guest.
     bool read_only = 2;
+    // Use a writable private mapping; writes never modify the backing file.
+    // Mutually exclusive with read_only. Requires a single memory mapper and
+    // cannot be shared with fd-based DMA consumers. May charge private pages
+    // to the VM's memory cgroup when the host faults pages for write access.
+    bool discard_writes = 3;
 }
 
 // Backing store for a virtio-pmem device. Additional backing types can be
@@ -1004,6 +1009,8 @@ message CapabilitiesVMResponse {
     }
     repeated SupportedResource supported_resources = 1;
     repeated SupportedGuestOS supported_guest_os = 2;
+    // Supports VirtioPmem.discard_writes without modifying the backing file.
+    bool virtio_pmem_discard_writes = 3;
 }
 
 //

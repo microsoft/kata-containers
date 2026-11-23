@@ -93,7 +93,7 @@ fn rootfs_device_kind(driver: &str, path: String) -> Result<vmservice::PcieDevic
                     })),
                     ..Default::default()
                 }),
-                read_only: true,
+                discard_writes: true,
                 ..Default::default()
             },
         ))),
@@ -603,7 +603,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rootfs_devices_are_read_only_and_use_the_selected_driver() {
+    fn rootfs_devices_preserve_the_image_and_use_the_selected_driver() {
         let path = "/rootfs.img";
         for driver in [VM_ROOTFS_DRIVER_BLK, VM_ROOTFS_DRIVER_PMEM] {
             let device = rootfs_device_kind(driver, path.into()).unwrap();
@@ -621,7 +621,8 @@ mod tests {
                 }
                 vmservice::virtio_device::Kind::Pmem(pmem) => {
                     assert_eq!(driver, VM_ROOTFS_DRIVER_PMEM);
-                    assert!(pmem.read_only);
+                    assert!(!pmem.read_only);
+                    assert!(pmem.discard_writes);
                     let Some(vmservice::pmem_backend::Kind::File(file)) = &pmem.backend.kind else {
                         panic!("expected PMEM file");
                     };

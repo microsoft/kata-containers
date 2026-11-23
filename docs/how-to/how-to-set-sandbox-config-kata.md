@@ -46,8 +46,8 @@ There are several kinds of Kata configurations and they are listed below.
 
 #### OpenVMM VM rootfs driver
 
-In `runtime-rs`, OpenVMM can expose the VM rootfs image as read-only persistent
-memory instead of a virtio block disk. Set the driver in the configuration file:
+In `runtime-rs`, OpenVMM can expose the VM rootfs image as persistent memory
+instead of a virtio block disk. Set the driver in the configuration file:
 
 ```toml title="configuration-openvmm-azure-runtime-rs.toml"
 [hypervisor.openvmm]
@@ -60,11 +60,23 @@ With `virtio-pmem`, the runtime uses `/dev/pmem0p1` for the root partition and
 `/dev/pmem0p2` for the hash partition when `kernel_verity_params` is configured.
 Direct filesystem access (`DAX`) is not enabled.
 
+The PMEM backing file is opened read-only and mapped privately with write access.
+Guest writes do not modify the image file. This discard-writes mode allows boot
+on MSHV hosts that require writable host mappings when faulting PMEM pages.
+It does not eliminate private memory charges to the VM's memory cgroup.
+
+!!! warning "Patched OpenVMM required"
+    The OpenVMM binary must advertise support for `VirtioPmem.discard_writes`
+    through `CapabilitiesVM`. The runtime rejects an older binary before
+    creating the VM, rather than allowing it to ignore the discard-writes flag
+    and modify the image. This mode does not support VM snapshots, multiple
+    memory mappers, or fd-based DMA sharing of PMEM.
+
 !!! note "Guest kernel and image requirements"
     The guest kernel must include the virtio persistent memory driver and
     support `VIRTIO_PMEM_F_SHMEM_REGION` for shared-memory region discovery.
     Use a non-empty regular file whose size is a multiple of 4 KiB.
-    OpenVMM pads the read-only mapping to 2 MiB alignment without modifying the
+    OpenVMM pads the private mapping to 2 MiB alignment without modifying the
     image file.
 
 #### Hypervisor annotations
