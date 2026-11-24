@@ -651,10 +651,11 @@ fn make_coherent_gpu_root_complex(
 }
 
 fn make_numa_config(memory_mb: u64, gi_node_count: u32) -> vmservice::NumaConfig {
+    // transparent_hugepages stays unset, so OpenVMM backs guest RAM with
+    // transparent hugepages as it does for memory_config.
     let mut nodes = vec![vmservice::NumaNode {
         memory: MessageField::some(vmservice::NodeMemoryConfig {
             memory_mb,
-            transparent_hugepages: Some(false),
             ..Default::default()
         }),
         vps: MessageField::none(),
@@ -1021,8 +1022,9 @@ impl OpenVmmInner {
         }
         let (pcie, gi_node_count) = make_pcie_topology(root_ports, &vfio_plan.assignments)?;
 
-        // memory_config always enables transparent hugepages; numa_config can
-        // opt out, so describe even a single-node guest through it.
+        // Guest RAM is described through numa_config, even for a single-node
+        // guest, so that coherent GPUs can add their memoryless Generic
+        // Initiator nodes next to it.
         let numa_config =
             make_numa_config(self.config.memory_info.default_memory as u64, gi_node_count);
         let iommufds = if gi_node_count > 0 {
@@ -1364,9 +1366,10 @@ mod tests {
         let numa = make_numa_config(4096, 2);
         assert_eq!(numa.nodes.len(), 3);
         assert_eq!(numa.nodes[0].memory.as_ref().unwrap().memory_mb, 4096);
+        // Unset: OpenVMM backs guest RAM with transparent hugepages.
         assert_eq!(
             numa.nodes[0].memory.as_ref().unwrap().transparent_hugepages,
-            Some(false)
+            None
         );
         assert!(numa.nodes[0].vps.is_none());
         for node in &numa.nodes[1..] {
