@@ -100,9 +100,12 @@ overhead_vcpus = 1.0
 default_maxvcpus = @DEFMAXVCPUS@
 
 # Default memory size in MiB for SB/VM.
-# GB200 baseline: the NVIDIA driver's coherent-memory hot-add needs ~16 GiB of
-# non-movable struct-page metadata for a 1 TiB hot-add.
-default_memory = 49152
+# If unspecified then it will be set @DEFMEMSZ@ MiB.
+# Grace-based hosts (GB200): the NVIDIA driver's coherent-memory hot-add needs
+# about 1/64 of the hot-added GPU memory as non-movable guest memory (struct
+# page metadata); raise default_memory and overhead_memory there through a
+# config.d drop-in (kata-deploy shims.<name>.dropIn).
+default_memory = @DEFAULTMEMORY_NV@
 
 # Guest-side memory overhead budget (MiB) used with static_sandbox_resource_mgmt.
 # When workload limits are present, vm_memory = requested_memory + overhead_memory.
@@ -110,8 +113,7 @@ default_memory = 49152
 # missing, requested_memory is treated as 0, so vm_memory equals overhead_memory.
 # When no workload limits are present, default_memory is used instead.
 # See docs/how-to/how-to-size-sandbox-overhead-runtime-rs.md
-# GB200: the default_memory baseline is added on top of the workload request.
-overhead_memory = 49152
+overhead_memory = @DEFOVERHEADMEMSZ_NV@
 
 # Shared file system type:
 #   - virtio-fs

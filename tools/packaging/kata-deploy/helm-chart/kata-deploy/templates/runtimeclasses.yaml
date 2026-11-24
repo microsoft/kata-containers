@@ -7,6 +7,10 @@
   overhead lets the VMM get OOM-killed for small-memory-limit pods. 320Mi keeps
   it comfortably within the cgroup. It is applied on all arches for simplicity
   (x86 is over-provisioned by ~160Mi, which is acceptable).
+
+  NOTE: the *-azure-gpus shims use the qemu-nvidia-gpu values. Hosts that raise
+  their default_memory/overhead_memory through a drop-in (GB200) must raise
+  shims.<name>.runtimeClass.overhead to match.
 */ -}}
 {{- define "kata-deploy.runtimeClassConfigs" -}}
 {{- toYaml (dict
@@ -14,13 +18,13 @@
   "clh-azure" (dict "memory" "130Mi" "cpu" "250m")
   "clh-runtime-rs" (dict "memory" "130Mi" "cpu" "250m")
   "clh-azure-runtime-rs" (dict "memory" "130Mi" "cpu" "250m")
-  "clh-azure-gpus" (dict "memory" "130Mi" "cpu" "250m")
+  "clh-azure-gpus" (dict "memory" "10240Mi" "cpu" "1.0")
   "openvmm-azure-runtime-rs" (dict "memory" "130Mi" "cpu" "250m")
-  "openvmm-azure-gpus-runtime-rs" (dict "memory" "130Mi" "cpu" "250m")
+  "openvmm-azure-gpus-runtime-rs" (dict "memory" "10240Mi" "cpu" "1.0")
   "dragonball" (dict "memory" "130Mi" "cpu" "250m")
   "fc" (dict "memory" "130Mi" "cpu" "250m")
   "qemu" (dict "memory" "320Mi" "cpu" "250m")
-  "qemu-azure-gpus" (dict "memory" "320Mi" "cpu" "250m")
+  "qemu-azure-gpus" (dict "memory" "10240Mi" "cpu" "1.0")
   "qemu-coco-dev" (dict "memory" "160Mi" "cpu" "250m")
   "qemu-coco-dev-runtime-rs" (dict "memory" "320Mi" "cpu" "250m")
   "qemu-runtime-rs" (dict "memory" "320Mi" "cpu" "250m")

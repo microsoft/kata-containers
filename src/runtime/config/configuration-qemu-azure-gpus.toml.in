@@ -132,8 +132,11 @@ default_bridges = @DEFBRIDGES@
 
 # Default memory size in MiB for SB/VM.
 # If unspecified then it will be set @DEFMEMSZ@ MiB.
-# GB200 baseline for the NVIDIA coherent-memory struct-page overhead.
-default_memory = 49152
+# Grace-based hosts (GB200): the NVIDIA driver's coherent-memory hot-add needs
+# about 1/64 of the hot-added GPU memory as non-movable guest memory (struct
+# page metadata); raise default_memory there through a config.d drop-in
+# (kata-deploy shims.<name>.dropIn).
+default_memory = @DEFAULTMEMORY_NV@
 #
 # Default memory slots per SB/VM.
 # If unspecified then it will be set @DEFMEMSLOTS@.
