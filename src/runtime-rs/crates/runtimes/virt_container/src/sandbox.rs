@@ -440,7 +440,7 @@ fn load_restore_manifest(snapshot_dir: &Path, package_version: &str) -> Result<S
         if container.cri_name.is_empty()
             || container.source_host_id.is_empty()
             || container.snapshot_guest_id.is_empty()
-            || container.oci_identity_version != crate::restore::OCI_IDENTITY_VERSION
+            || !crate::restore::supported_oci_identity_version(container.oci_identity_version)
             || !valid_sha256_digest(&container.oci_identity_sha256)
             || !host_ids.insert(container.source_host_id.as_str())
             || !guest_ids.insert(container.snapshot_guest_id.as_str())
@@ -496,7 +496,7 @@ fn load_restore_manifest(snapshot_dir: &Path, package_version: &str) -> Result<S
     }
     for container in &manifest.completed_containers {
         if container.cri_name.is_empty()
-            || container.oci_identity_version != crate::restore::OCI_IDENTITY_VERSION
+            || !crate::restore::supported_oci_identity_version(container.oci_identity_version)
             || !valid_sha256_digest(&container.oci_identity_sha256)
             || !names.insert(container.cri_name.as_str())
         {
@@ -1113,6 +1113,44 @@ mod snapshot_manifest_tests {
         )
         .unwrap();
         assert!(load_restore_manifest(snapshot.path(), TEST_PACKAGE_VERSION).is_err());
+    }
+
+    #[test]
+    fn restore_manifest_supports_v1_and_v2_identities_and_rejects_unknown_versions() {
+        let snapshot = tempfile::tempdir().unwrap();
+        let mut manifest = write_restore_fixture(snapshot.path());
+        manifest
+            .completed_containers
+            .push(SnapshotCompletedContainerManifest {
+                cri_name: "setup".to_string(),
+                exit_code: 0,
+                oci_identity_version: 1,
+                oci_identity_sha256: format!("sha256:{}", "2".repeat(64)),
+            });
+        for live_version in [0, 1, 2, 3] {
+            for completed_version in [0, 1, 2, 3] {
+                manifest.live_containers[0].oci_identity_version = live_version;
+                manifest.completed_containers[0].oci_identity_version = completed_version;
+                fs::write(
+                    snapshot.path().join(SNAPSHOT_MANIFEST_FILE),
+                    serde_json::to_vec(&manifest).unwrap(),
+                )
+                .unwrap();
+                let loaded = load_restore_manifest(snapshot.path(), TEST_PACKAGE_VERSION);
+                assert_eq!(
+                    loaded.is_ok(),
+                    matches!(live_version, 1 | 2) && matches!(completed_version, 1 | 2),
+                    "live {live_version}, completed {completed_version}"
+                );
+                if let Ok(loaded) = loaded {
+                    assert_eq!(loaded.live_containers[0].oci_identity_version, live_version);
+                    assert_eq!(
+                        loaded.completed_containers[0].oci_identity_version,
+                        completed_version
+                    );
+                }
+            }
+        }
     }
 
     #[test]

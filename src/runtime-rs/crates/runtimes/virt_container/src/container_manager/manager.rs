@@ -33,8 +33,7 @@ use kata_types::k8s::{container_name, container_type};
 
 use crate::container_manager::is_termination_signal;
 use crate::restore::{
-    canonical_oci_identity, RestoreContext, RestoreCreateAction, RestoreIdentity,
-    OCI_IDENTITY_VERSION,
+    canonical_oci_identity, RestoreContext, RestoreCreateAction, OCI_IDENTITY_VERSION,
 };
 
 use super::{logger_with_process, Container};
@@ -152,10 +151,10 @@ impl ContainerManager for VirtContainerManager {
             if cri_name.is_empty() && is_pause {
                 cri_name = "POD".to_string();
             }
-            let identity = RestoreIdentity {
-                oci_identity_version: OCI_IDENTITY_VERSION,
-                oci_identity_sha256: canonical_oci_identity(&spec)?,
-            };
+            let identity = self
+                .restore_context
+                .identity_for_create(&cri_name, &spec)
+                .await?;
             let host_id = HostContainerId::new(&config.container_id);
             let action = match self
                 .restore_context

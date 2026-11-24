@@ -11,7 +11,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 use tokio::sync::{Mutex, MutexGuard};
 
-pub(crate) const OCI_IDENTITY_VERSION: u32 = 1;
+pub(crate) const OCI_IDENTITY_VERSION: u32 = 2;
+
+pub(crate) fn supported_oci_identity_version(version: u32) -> bool {
+    matches!(version, 1 | 2)
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub(crate) enum RestoreActivation {
@@ -137,6 +141,7 @@ impl RestoreContext {
         for slot in live_slots {
             if slot.cri_name.is_empty()
                 || slot.guest_id.as_str().is_empty()
+                || !supported_oci_identity_version(slot.identity.oci_identity_version)
                 || live_by_name
                     .insert(
                         slot.cri_name,
@@ -158,6 +163,7 @@ impl RestoreContext {
         let mut completed_by_name = HashMap::new();
         for slot in completed_slots {
             if slot.cri_name.is_empty()
+                || !supported_oci_identity_version(slot.identity.oci_identity_version)
                 || live_by_name.contains_key(&slot.cri_name)
                 || completed_by_name
                     .insert(
@@ -193,6 +199,33 @@ impl RestoreContext {
 
     pub(crate) async fn is_restore(&self) -> bool {
         self.state.lock().await.activation != RestoreActivation::Cold
+    }
+
+    pub(crate) async fn identity_for_create(
+        &self,
+        cri_name: &str,
+        spec: &oci::Spec,
+    ) -> Result<RestoreIdentity> {
+        let version = {
+            let state = self.state.lock().await;
+            state
+                .live_slots
+                .get(cri_name)
+                .map(|slot| &slot.identity)
+                .or_else(|| {
+                    state
+                        .completed_slots
+                        .get(cri_name)
+                        .map(|slot| &slot.identity)
+                })
+                .map_or(OCI_IDENTITY_VERSION, |identity| {
+                    identity.oci_identity_version
+                })
+        };
+        Ok(RestoreIdentity {
+            oci_identity_version: version,
+            oci_identity_sha256: canonical_oci_identity_version(spec, version)?,
+        })
     }
 
     pub(crate) async fn classify_create(
@@ -481,6 +514,23 @@ impl RestoreContext {
         {
             return Err(anyhow!("unsupported persisted restore state"));
         }
+        for identity in persisted
+            .state
+            .live_slots
+            .values()
+            .map(|slot| &slot.identity)
+            .chain(
+                persisted
+                    .state
+                    .completed_slots
+                    .values()
+                    .map(|slot| &slot.identity),
+            )
+        {
+            if !supported_oci_identity_version(identity.oci_identity_version) {
+                return Err(anyhow!("unsupported persisted OCI identity version"));
+            }
+        }
         for (host_id, guest_id) in &persisted.state.host_to_guest {
             if persisted.state.guest_to_host.get(guest_id) != Some(host_id) {
                 return Err(anyhow!("persisted restore ID maps are inconsistent"));
@@ -549,7 +599,9 @@ struct CanonicalProcess<'a> {
     rlimits: &'a Option<Vec<oci::PosixRlimit>>,
     no_new_privileges: Option<bool>,
     apparmor_profile: &'a Option<String>,
-    oom_score_adj: Option<i32>,
+    // Outer None omits the v2 field; Some(None) preserves v1's JSON null.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    oom_score_adj: Option<Option<i32>>,
     selinux_label: &'a Option<String>,
     io_priority: &'a Option<oci::LinuxIOPriority>,
     scheduler: &'a Option<oci::Scheduler>,
@@ -647,7 +699,7 @@ fn canonical_environment(
         .transpose()
 }
 
-fn canonical_process(process: &oci::Process) -> Result<CanonicalProcess<'_>> {
+fn canonical_process(process: &oci::Process, version: u32) -> Result<CanonicalProcess<'_>> {
     Ok(CanonicalProcess {
         terminal: process.terminal(),
         console_size: process.console_size(),
@@ -660,7 +712,7 @@ fn canonical_process(process: &oci::Process) -> Result<CanonicalProcess<'_>> {
         rlimits: process.rlimits(),
         no_new_privileges: process.no_new_privileges(),
         apparmor_profile: process.apparmor_profile(),
-        oom_score_adj: process.oom_score_adj(),
+        oom_score_adj: (version == 1).then(|| process.oom_score_adj()),
         selinux_label: process.selinux_label(),
         io_priority: process.io_priority(),
         scheduler: process.scheduler(),
@@ -689,6 +741,18 @@ fn canonical_linux_resources(resources: &oci::LinuxResources) -> CanonicalLinuxR
 }
 
 pub(crate) fn canonical_oci_identity(spec: &oci::Spec) -> Result<String> {
+    canonical_oci_identity_version(spec, OCI_IDENTITY_VERSION)
+}
+
+fn canonical_oci_identity_version(spec: &oci::Spec, version: u32) -> Result<String> {
+    let encoded = serde_json::to_vec(&canonical_oci_projection(spec, version)?)?;
+    Ok(format!("sha256:{}", hex::encode(Sha256::digest(encoded))))
+}
+
+fn canonical_oci_projection(spec: &oci::Spec, version: u32) -> Result<CanonicalOciIdentity<'_>> {
+    if !supported_oci_identity_version(version) {
+        return Err(anyhow!("unsupported OCI identity version {version}"));
+    }
     // Compare guest-visible OCI semantics, not node-local rootfs or mount
     // sources. Packaged snapshot storage supplies the restored bytes.
     if spec.hooks().is_some() {
@@ -743,16 +807,18 @@ pub(crate) fn canonical_oci_identity(spec: &oci::Spec) -> Result<String> {
             .as_ref()
             .map(|values| values.clone().into_iter().collect()),
     });
-    let identity = CanonicalOciIdentity {
-        version: OCI_IDENTITY_VERSION,
+    Ok(CanonicalOciIdentity {
+        version,
         oci_version: spec.version(),
-        process: spec.process().as_ref().map(canonical_process).transpose()?,
+        process: spec
+            .process()
+            .as_ref()
+            .map(|process| canonical_process(process, version))
+            .transpose()?,
         root_readonly: spec.root().as_ref().and_then(|root| root.readonly()),
         mounts,
         linux,
-    };
-    let encoded = serde_json::to_vec(&identity)?;
-    Ok(format!("sha256:{}", hex::encode(Sha256::digest(encoded))))
+    })
 }
 
 #[cfg(test)]
@@ -1109,6 +1175,207 @@ mod tests {
             canonical_oci_identity(&source).unwrap(),
             canonical_oci_identity(&target).unwrap()
         );
+    }
+
+    #[test]
+    fn v2_omits_oom_score_for_all_scores() {
+        let mut spec = identity_spec("/rootfs", "/config", &["true"]);
+        let expected = canonical_oci_identity(&spec).unwrap();
+        for score in [None, Some(-1000), Some(0), Some(996), Some(998), Some(1000)] {
+            spec.process_mut()
+                .as_mut()
+                .unwrap()
+                .set_oom_score_adj(score);
+            assert_eq!(canonical_oci_identity(&spec).unwrap(), expected);
+            let projection =
+                serde_json::to_value(canonical_oci_projection(&spec, 2).unwrap()).unwrap();
+            assert!(projection["process"].get("oomScoreAdj").is_none());
+            assert_eq!(spec.process().as_ref().unwrap().oom_score_adj(), score);
+        }
+        assert!(canonical_oci_identity_version(&spec, 0).is_err());
+        assert!(canonical_oci_identity_version(&spec, 3).is_err());
+    }
+
+    #[test]
+    fn v1_preserves_legacy_golden_hashes_and_null_oom_score() {
+        let mut spec = identity_spec("/rootfs", "/config", &["true"]);
+        assert_eq!(
+            canonical_oci_identity_version(&spec, 1).unwrap(),
+            "sha256:5683a62987e8d473cb230972adeecd238d94a58c5b2b91c1dcafacad4b042054"
+        );
+        let projection = serde_json::to_value(canonical_oci_projection(&spec, 1).unwrap()).unwrap();
+        assert_eq!(
+            projection["process"].get("oomScoreAdj"),
+            Some(&serde_json::Value::Null)
+        );
+        spec.process_mut()
+            .as_mut()
+            .unwrap()
+            .set_oom_score_adj(Some(996));
+        let score_996 = canonical_oci_identity_version(&spec, 1).unwrap();
+        assert_eq!(
+            score_996,
+            "sha256:634d0381cdcad79b447c13948e5a24240624afb33cf2d594234931f87cce56db"
+        );
+        spec.process_mut()
+            .as_mut()
+            .unwrap()
+            .set_oom_score_adj(Some(998));
+        assert_ne!(canonical_oci_identity_version(&spec, 1).unwrap(), score_996);
+    }
+
+    #[tokio::test]
+    async fn live_and_completed_matching_uses_each_slots_identity_version() {
+        for version in [1, 2] {
+            let mut source = identity_spec("/rootfs", "/config", &["sleep", "10"]);
+            source
+                .process_mut()
+                .as_mut()
+                .unwrap()
+                .set_oom_score_adj(Some(996));
+            let saved = RestoreIdentity {
+                oci_identity_version: version,
+                oci_identity_sha256: canonical_oci_identity_version(&source, version).unwrap(),
+            };
+            let context = RestoreContext::new("target");
+            context
+                .begin(
+                    "source",
+                    vec![
+                        live_slot("POD", "source-pause", "pause"),
+                        RestoreLiveSlot {
+                            cri_name: "app".to_string(),
+                            guest_id: guest("source-app"),
+                            identity: saved.clone(),
+                            node_local_mounts: Vec::new(),
+                        },
+                    ],
+                    vec![RestoreCompletedSlot {
+                        cri_name: "setup".to_string(),
+                        exit_code: 17,
+                        identity: saved.clone(),
+                    }],
+                )
+                .await
+                .unwrap();
+            context.prepared_paused().await.unwrap();
+            context
+                .classify_create(&host("target"), "POD", true, &identity("pause"))
+                .await
+                .unwrap();
+            context.begin_activation(&host("target")).await.unwrap();
+            context.activate().await.unwrap();
+
+            let context =
+                RestoreContext::from_persist("target", Some(context.persist_state().await))
+                    .unwrap();
+            let completed = context.completed_containers().await;
+            assert_eq!(completed[0].oci_identity_version, version);
+            assert_eq!(completed[0].oci_identity_sha256, saved.oci_identity_sha256);
+
+            for name in ["app", "setup"] {
+                for (path, value) in [
+                    ("/process/args/1", serde_json::json!("20")),
+                    ("/process/env/0", serde_json::json!("A=C")),
+                    ("/process/user/uid", serde_json::json!(1000)),
+                    ("/linux/resources/memory/limit", serde_json::json!(2097152)),
+                ] {
+                    let mut changed = serde_json::to_value(&source).unwrap();
+                    *changed.pointer_mut(path).unwrap() = value;
+                    let changed = serde_json::from_value(changed).unwrap();
+                    let incoming = context.identity_for_create(name, &changed).await.unwrap();
+                    assert!(
+                        context
+                            .classify_create(&host(name), name, false, &incoming)
+                            .await
+                            .is_err(),
+                        "version {}, slot {}, change {}",
+                        version,
+                        name,
+                        path
+                    );
+                }
+                let mut changed = source.clone();
+                changed
+                    .process_mut()
+                    .as_mut()
+                    .unwrap()
+                    .set_oom_score_adj(Some(998));
+                let incoming = context.identity_for_create(name, &changed).await.unwrap();
+                let result = context
+                    .classify_create(&host(name), name, false, &incoming)
+                    .await;
+                if version == 1 {
+                    assert!(result.is_err());
+                } else {
+                    assert!(result.is_ok());
+                }
+                let incoming = context.identity_for_create(name, &source).await.unwrap();
+                assert_eq!(incoming, saved);
+                let expected = if name == "app" {
+                    RestoreCreateAction::AdoptLive {
+                        guest_id: guest("source-app"),
+                        is_pause: false,
+                    }
+                } else {
+                    RestoreCreateAction::SyntheticCompleted { exit_code: 17 }
+                };
+                assert_eq!(
+                    context
+                        .classify_create(&host(name), name, false, &incoming)
+                        .await
+                        .unwrap(),
+                    expected
+                );
+            }
+            // Claims and synthetic completion must not relabel a carried-forward hash.
+            context.take_synthetic_exit_code(&host("setup")).await;
+            let restored =
+                RestoreContext::from_persist("target", Some(context.persist_state().await))
+                    .unwrap();
+            let completed = restored.completed_containers().await;
+            assert_eq!(completed[0].oci_identity_version, version);
+            assert_eq!(completed[0].oci_identity_sha256, saved.oci_identity_sha256);
+        }
+    }
+
+    #[tokio::test]
+    async fn persisted_restore_rejects_unknown_identity_versions() {
+        for completed in [false, true] {
+            let context = RestoreContext::new("target");
+            context
+                .begin(
+                    "source",
+                    vec![live_slot("POD", "source-pause", "pause")],
+                    vec![RestoreCompletedSlot {
+                        cri_name: "setup".to_string(),
+                        exit_code: 0,
+                        identity: identity("setup"),
+                    }],
+                )
+                .await
+                .unwrap();
+            context.prepared_paused().await.unwrap();
+            let mut persisted = context.persist_state().await;
+            if completed {
+                persisted
+                    .state
+                    .completed_slots
+                    .get_mut("setup")
+                    .unwrap()
+                    .identity
+                    .oci_identity_version = 3;
+            } else {
+                persisted
+                    .state
+                    .live_slots
+                    .get_mut("POD")
+                    .unwrap()
+                    .identity
+                    .oci_identity_version = 3;
+            }
+            assert!(RestoreContext::from_persist("target", Some(persisted)).is_err());
+        }
     }
 
     #[test]
