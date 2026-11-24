@@ -38,6 +38,8 @@ pub(crate) struct VmmInstance {
     /// Persistent ttrpc async client for the OpenVMM `vmservice.VM` service,
     /// established once the process is launched and reused for every RPC.
     client: Option<VmClient>,
+    /// Runtime that connected `client` (the shim's main runtime, with timers).
+    rpc_runtime: Option<tokio::runtime::Handle>,
     console_task: Option<JoinHandle<()>>,
 }
 
@@ -59,6 +61,7 @@ impl VmmInstance {
             wait_task: None,
             exit_notify: Some(exit_notify),
             client: None,
+            rpc_runtime: None,
             console_task: None,
         }
     }
@@ -179,6 +182,7 @@ impl VmmInstance {
         self.ttrpc_socket_path = Some(ttrpc_socket_path);
         self.child = Some(child);
         self.client = Some(client);
+        self.rpc_runtime = Some(tokio::runtime::Handle::current());
 
         Ok(())
     }
@@ -275,11 +279,11 @@ impl VmmInstance {
             ..Default::default()
         };
 
-        self.client()?
-            .add_pcie_device(rpc_ctx(), &request)
-            .await
-            .map(|_| ())
-            .map_err(|e| anyhow!("openvmm add_pcie_device RPC failed: {:?}", e))
+        self.call_on_rpc_runtime("add_pcie_device", move |client| async move {
+            client.add_pcie_device(rpc_ctx(), &request).await
+        })
+        .await
+        .map(|_| ())
     }
 
     /// Hot-remove the device behind the named PCIe hotplug port.
@@ -289,11 +293,37 @@ impl VmmInstance {
             ..Default::default()
         };
 
-        self.client()?
-            .remove_pcie_device(rpc_ctx(), &request)
+        self.call_on_rpc_runtime("remove_pcie_device", move |client| async move {
+            client.remove_pcie_device(rpc_ctx(), &request).await
+        })
+        .await
+        .map(|_| ())
+    }
+
+    /// Run a VM service RPC on the runtime that connected the TTRPC client.
+    ///
+    /// runtime-rs attaches and detaches pod network devices from a dedicated
+    /// OS thread (so that it can enter the pod netns) whose current-thread
+    /// runtime has no timer driver, while every TTRPC request arms a timeout
+    /// timer. Spawning the request on the client's own runtime makes hot-plug
+    /// independent of the caller's runtime.
+    async fn call_on_rpc_runtime<T, F, Fut>(&self, name: &str, call: F) -> Result<T>
+    where
+        F: FnOnce(VmClient) -> Fut,
+        Fut: std::future::Future<Output = ttrpc::Result<T>> + Send + 'static,
+        T: Send + 'static,
+    {
+        let client = self.client()?.clone();
+        let runtime = self
+            .rpc_runtime
+            .clone()
+            .context("openvmm TTRPC client runtime not set")?;
+
+        runtime
+            .spawn(call(client))
             .await
-            .map(|_| ())
-            .map_err(|e| anyhow!("openvmm remove_pcie_device RPC failed: {:?}", e))
+            .map_err(|e| anyhow!("openvmm {} RPC task failed: {:?}", name, e))?
+            .map_err(|e| anyhow!("openvmm {} RPC failed: {:?}", name, e))
     }
 
     /// Log the guest virtio-console output relayed by OpenVMM.
@@ -350,6 +380,7 @@ impl VmmInstance {
             console_task.abort();
         }
         self.client = None;
+        self.rpc_runtime = None;
         self.pid = None;
 
         Ok(())
@@ -657,5 +688,53 @@ mod tests {
         assert_eq!(*exit_waiter.borrow(), Some(7));
         assert!(instance.child.is_none());
         assert!(instance.wait_task.is_some());
+    }
+
+    // runtime-rs attaches pod network devices from an OS thread whose
+    // current-thread runtime has no timer driver; a hot-plug RPC issued from
+    // there must not panic on the ttrpc request timeout.
+    #[tokio::test]
+    async fn pcie_hotplug_rpcs_work_from_a_runtime_without_timers() {
+        let temp_dir = TempDir::new().unwrap();
+        let socket_path = temp_dir.path().join("openvmm.sock");
+        let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+        // A VM service that closes each connection once it has received a
+        // request, so the client is already waiting on the response timeout.
+        tokio::spawn(async move {
+            use tokio::io::AsyncReadExt;
+            while let Ok((mut stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 64];
+                    let _ = stream.read(&mut buf).await;
+                });
+            }
+        });
+
+        let (exit_notify, _exit_waiter) = watch::channel(None);
+        let mut instance = VmmInstance::new(exit_notify);
+        instance.client = Some(
+            connect_client(&socket_path.to_string_lossy(), Duration::from_secs(1))
+                .await
+                .unwrap(),
+        );
+        instance.rpc_runtime = Some(tokio::runtime::Handle::current());
+
+        let netns_thread = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_io()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                let device = vmservice::PcieDeviceKind::new();
+                let added = instance.add_pcie_device("hp0", device).await;
+                let removed = instance.remove_pcie_device("hp0").await;
+                (added.is_err(), removed.is_err())
+            })
+        });
+        let result = tokio::task::spawn_blocking(move || netns_thread.join())
+            .await
+            .unwrap();
+
+        assert_eq!(result.expect("hot-plug RPC panicked"), (true, true));
     }
 }
