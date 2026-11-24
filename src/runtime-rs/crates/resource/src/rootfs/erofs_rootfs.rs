@@ -28,9 +28,7 @@ use hypervisor::{
     virtio_blk_modern::BlockSourceFormat,
     BlockConfigModern, BlockDeviceAio,
 };
-use kata_sys_util::{
-    fs::reflink_copy,
-};
+use kata_sys_util::fs::reflink_copy;
 use kata_types::mount::Mount;
 use kata_types::{
     gpt_disk::{

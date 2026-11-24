@@ -452,12 +452,7 @@ impl ContainerManager for VirtContainerManager {
                 let guest_process =
                     ContainerProcess::new(guest_id.as_str(), req.process.exec_id())?;
                 return container
-                    .kill_process(
-                        self.containers.clone(),
-                        &guest_process,
-                        req.signal,
-                        req.all,
-                    )
+                    .kill_process(self.containers.clone(), &guest_process, req.signal, req.all)
                     .await
                     .or_else(|error| {
                         let expected = matches!(
