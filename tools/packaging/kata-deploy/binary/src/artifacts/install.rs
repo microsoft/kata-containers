@@ -3,7 +3,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::config::{variant_handler, Config, Variant, DEFAULT_KATA_INSTALL_DIR};
+use crate::config::{variant_handler, Config, CustomRuntime, Variant, DEFAULT_KATA_INSTALL_DIR};
 use crate::utils;
 use crate::utils::toml as toml_utils;
 use anyhow::{Context, Result};
@@ -288,8 +288,27 @@ fn reconcile_stale_drop_in(config_d_dir: &str, filename: &str) -> Result<()> {
     Ok(())
 }
 
+/// Where the chart mounts a shim's user drop-in (shims.<name>.dropIn).
+fn shim_user_drop_in_source(shim: &str) -> String {
+    format!("/custom-configs/dropin-{}.toml", shim)
+}
+
+/// The user drop-in a custom runtime installs as 50-overrides.toml.
+///
+/// Debug and devkit variants mirror their base shim, so they take the shim's
+/// user drop-in (shims.<name>.dropIn); otherwise settings such as a raised
+/// default_memory would apply to kata-<shim> but not to kata-<shim>-debug,
+/// which shares its RuntimeClass overhead.
+fn custom_runtime_drop_in_source(runtime: &CustomRuntime) -> Option<String> {
+    runtime.drop_in_file.clone().or_else(|| {
+        runtime
+            .debug_variant
+            .then(|| shim_user_drop_in_source(&runtime.base_config))
+    })
+}
+
 fn install_default_runtime_drop_in(shim: &str, config_d_dir: &str) -> Result<()> {
-    let drop_in_source = format!("/custom-configs/dropin-{}.toml", shim);
+    let drop_in_source = shim_user_drop_in_source(shim);
     let drop_in_dest = format!("{}/50-user-overrides.toml", config_d_dir);
     reconcile_optional_drop_in(
         Some(&drop_in_source),
@@ -435,7 +454,7 @@ fn install_custom_runtime_configs(config: &Config, container_runtime: &str) -> R
         // If it was removed from values in a later upgrade/migration, remove stale file.
         let drop_in_dest = format!("{}/50-overrides.toml", config_d_dir);
         reconcile_optional_drop_in(
-            runtime.drop_in_file.as_deref(),
+            custom_runtime_drop_in_source(runtime).as_deref(),
             &drop_in_dest,
             &format!("custom runtime drop-in for {}", runtime.handler),
         )?;
@@ -2554,6 +2573,36 @@ mod tests {
         reconcile_stale_drop_in(config_d_dir.to_str().unwrap(), filename).unwrap();
 
         assert!(!drop_in.exists());
+    }
+
+    #[rstest]
+    #[case::user_runtime(false, None, None)]
+    #[case::user_runtime_with_drop_in(
+        false,
+        Some("/custom-configs/dropin-kata-mine.toml"),
+        Some("/custom-configs/dropin-kata-mine.toml")
+    )]
+    #[case::variant_takes_shim_drop_in(
+        true,
+        None,
+        Some("/custom-configs/dropin-qemu-nvidia-gpu.toml")
+    )]
+    fn test_custom_runtime_drop_in_source(
+        #[case] debug_variant: bool,
+        #[case] drop_in_file: Option<&str>,
+        #[case] expected: Option<&str>,
+    ) {
+        let runtime = CustomRuntime {
+            handler: "kata-qemu-nvidia-gpu-debug".to_string(),
+            base_config: "qemu-nvidia-gpu".to_string(),
+            drop_in_file: drop_in_file.map(str::to_string),
+            containerd_snapshotter: None,
+            crio_pull_type: None,
+            debug_variant,
+            devkit: false,
+        };
+
+        assert_eq!(custom_runtime_drop_in_source(&runtime).as_deref(), expected);
     }
 
     #[test]
