@@ -58,6 +58,24 @@ Runtime handlers manage sandbox and container operations:
 | `LinuxContainer` | `linux` | Linux container runtime (experimental) |
 | `WasmContainer` | `wasm` | WebAssembly runtime (experimental) |
 
+#### Snapshot OCI identity
+
+New Cloud Hypervisor snapshots use OCI identity version 2 for live and completed
+containers. This version excludes `process.oomScoreAdj` from the canonical hash
+projection because kubelet can derive different scores from node memory for the
+same workload. Other semantic identity checks are unchanged; the incoming OCI
+specification and guest OOM behavior are not modified.
+
+Version 1 entries remain supported with their original exact hash interpretation,
+including `oomScoreAdj` (and JSON `null` when unset). They still require matching
+scores. Unknown identity versions are rejected. Taking another snapshot recomputes
+version 2 identities when OCI specifications are available; completed entries
+carried forward without OCI specifications retain their original version and hash.
+
+The outer snapshot manifest version and runtime-package-version compatibility
+requirements are unchanged; supporting an OCI identity version does not bypass
+those checks.
+
 ### resource
 
 All resources abstracted uniformly:
