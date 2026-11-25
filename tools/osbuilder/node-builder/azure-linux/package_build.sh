@@ -45,6 +45,8 @@ runtime_go_make_flags=(
 	"DEFSTATICSANDBOXWORKLOADVCPUS=1"
 	"DEFVIRTIOFSDAEMON=${VIRTIOFSD_BINARY_LOCATION}"
 	"PREFIX=${INSTALL_PATH_PREFIX}"
+	# uvm_build.sh builds ext4 guest images; upstream now defaults to EROFS.
+	'DEFROOTFSTYPE=\"ext4\"'
 )
 
 runtime_rs_make_flags=(
@@ -65,6 +67,7 @@ runtime_rs_make_flags=(
 	"DEFVCPUS=0"
 	"DEFOVERHEADVCPUS_CLH=0"
 	"DEFSTATICSANDBOXWORKLOADVCPUS=1"
+	'DEFROOTFSTYPE=\"ext4\"'
 )
 
 # - for vanilla Kata we use the kernel binary and explicitly set DEFSTATICRESOURCEMGMT_CLH.

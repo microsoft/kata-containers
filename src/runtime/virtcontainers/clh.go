@@ -672,7 +672,8 @@ func (clh *cloudHypervisor) CreateVM(ctx context.Context, id string, network Net
 	// Set initial amount of cpu's for the virtual machine
 	clh.vmconfig.Cpus = chclient.NewCpusConfig(int32(clh.config.NumVCPUs()), int32(clh.config.DefaultMaxVCPUs))
 
-	clh.vmconfig.Cpus.SetNested(!clh.config.DisableNestedVirtualization)
+	// Nested virtualization is not supported yet on MSHV, whatever the config says.
+	clh.vmconfig.Cpus.SetNested(!clh.config.DisableNestedVirtualization && !pathExists("/dev/mshv"))
 
 	disableNvdimm := true
 	enableDax := false

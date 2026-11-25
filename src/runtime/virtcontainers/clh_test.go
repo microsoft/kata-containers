@@ -598,7 +598,7 @@ func TestClhCreateVM(t *testing.T) {
 
 		assert.NoError(err, msg)
 
-		assert.Equal(d.wantNested, clh.vmconfig.Cpus.GetNested(), msg)
+		assert.Equal(d.wantNested && !pathExists("/dev/mshv"), clh.vmconfig.Cpus.GetNested(), msg)
 
 		if d.configMatch {
 			assert.Exactly(d.config, clh.config, msg)
