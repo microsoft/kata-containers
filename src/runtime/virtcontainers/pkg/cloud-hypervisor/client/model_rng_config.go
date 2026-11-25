@@ -16,11 +16,11 @@ import (
 
 // RngConfig struct for RngConfig
 type RngConfig struct {
-	Id          *string    `json:"id,omitempty"`
-	PciSegment  *int32     `json:"pci_segment,omitempty"`
-	PciDeviceId *int32     `json:"pci_device_id,omitempty"`
-	Iommu       *IommuType `json:"iommu,omitempty"`
-	Src         string     `json:"src"`
+	Id          *string `json:"id,omitempty"`
+	PciSegment  *int32  `json:"pci_segment,omitempty"`
+	PciDeviceId *int32  `json:"pci_device_id,omitempty"`
+	Iommu       *bool   `json:"iommu,omitempty"`
+	Src         string  `json:"src"`
 }
 
 // NewRngConfig instantiates a new RngConfig object
@@ -29,7 +29,7 @@ type RngConfig struct {
 // will change when the set of required properties is changed
 func NewRngConfig(src string) *RngConfig {
 	this := RngConfig{}
-	var iommu IommuType = IOMMUTYPE_OFF
+	var iommu bool = false
 	this.Iommu = &iommu
 	this.Src = src
 	return &this
@@ -40,7 +40,7 @@ func NewRngConfig(src string) *RngConfig {
 // but it doesn't guarantee that properties required by API are set
 func NewRngConfigWithDefaults() *RngConfig {
 	this := RngConfig{}
-	var iommu IommuType = IOMMUTYPE_OFF
+	var iommu bool = false
 	this.Iommu = &iommu
 	return &this
 }
@@ -142,9 +142,9 @@ func (o *RngConfig) SetPciDeviceId(v int32) {
 }
 
 // GetIommu returns the Iommu field value if set, zero value otherwise.
-func (o *RngConfig) GetIommu() IommuType {
+func (o *RngConfig) GetIommu() bool {
 	if o == nil || o.Iommu == nil {
-		var ret IommuType
+		var ret bool
 		return ret
 	}
 	return *o.Iommu
@@ -152,7 +152,7 @@ func (o *RngConfig) GetIommu() IommuType {
 
 // GetIommuOk returns a tuple with the Iommu field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *RngConfig) GetIommuOk() (*IommuType, bool) {
+func (o *RngConfig) GetIommuOk() (*bool, bool) {
 	if o == nil || o.Iommu == nil {
 		return nil, false
 	}
@@ -168,8 +168,8 @@ func (o *RngConfig) HasIommu() bool {
 	return false
 }
 
-// SetIommu gets a reference to the given IommuType and assigns it to the Iommu field.
-func (o *RngConfig) SetIommu(v IommuType) {
+// SetIommu gets a reference to the given bool and assigns it to the Iommu field.
+func (o *RngConfig) SetIommu(v bool) {
 	o.Iommu = &v
 }
 

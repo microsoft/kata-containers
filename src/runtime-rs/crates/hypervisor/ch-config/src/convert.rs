@@ -490,7 +490,7 @@ fn get_serial_cfg(debug: bool) -> ConsoleConfig {
     ConsoleConfig {
         file: None,
         mode,
-        iommu: false.into(),
+        iommu: false,
     }
 }
 
@@ -498,7 +498,7 @@ fn get_console_cfg() -> ConsoleConfig {
     ConsoleConfig {
         file: None,
         mode: ConsoleOutputMode::Off,
-        iommu: false.into(),
+        iommu: false,
     }
 }
 
@@ -681,7 +681,7 @@ mod tests {
                 result: ConsoleConfig {
                     file: None,
                     mode: ConsoleOutputMode::Off,
-                    iommu: false.into(),
+                    iommu: false,
                 },
             },
             TestData {
@@ -689,7 +689,7 @@ mod tests {
                 result: ConsoleConfig {
                     file: None,
                     mode: ConsoleOutputMode::Tty,
-                    iommu: false.into(),
+                    iommu: false,
                 },
             },
         ];
@@ -718,7 +718,7 @@ mod tests {
             ConsoleConfig {
                 file: None,
                 mode: ConsoleOutputMode::Off,
-                iommu: false.into(),
+                iommu: false,
             }
         );
     }

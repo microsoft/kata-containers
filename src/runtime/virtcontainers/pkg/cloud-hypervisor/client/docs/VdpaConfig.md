@@ -6,7 +6,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **Path** | **string** |  | 
 **NumQueues** | **int32** |  | [default to 1]
-**Iommu** | Pointer to [**IommuType**](IommuType.md) |  | [optional] [default to IOMMUTYPE_OFF]
+**Iommu** | Pointer to **bool** |  | [optional] [default to false]
 **PciSegment** | Pointer to **int32** |  | [optional] 
 **PciDeviceId** | Pointer to **int32** |  | [optional] 
 **Id** | Pointer to **string** |  | [optional] 
@@ -72,20 +72,20 @@ SetNumQueues sets NumQueues field to given value.
 
 ### GetIommu
 
-`func (o *VdpaConfig) GetIommu() IommuType`
+`func (o *VdpaConfig) GetIommu() bool`
 
 GetIommu returns the Iommu field if non-nil, zero value otherwise.
 
 ### GetIommuOk
 
-`func (o *VdpaConfig) GetIommuOk() (*IommuType, bool)`
+`func (o *VdpaConfig) GetIommuOk() (*bool, bool)`
 
 GetIommuOk returns a tuple with the Iommu field if it's non-nil, zero value otherwise
 and a boolean to check if the value has been set.
 
 ### SetIommu
 
-`func (o *VdpaConfig) SetIommu(v IommuType)`
+`func (o *VdpaConfig) SetIommu(v bool)`
 
 SetIommu sets Iommu field to given value.
 

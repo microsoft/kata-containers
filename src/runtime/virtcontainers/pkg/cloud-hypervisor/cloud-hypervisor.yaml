@@ -983,12 +983,6 @@ components:
           type: integer
           format: int32
 
-    IommuType:
-      description: Virtual IOMMU the device is attached to.
-      type: string
-      enum: ["Off", "Virtio", "Smmuv3"]
-      default: "Off"
-
     PlatformConfig:
       type: object
       properties:
@@ -1214,7 +1208,8 @@ components:
           type: boolean
           default: false
         iommu:
-          $ref: "#/components/schemas/IommuType"
+          type: boolean
+          default: false
         num_queues:
           type: integer
           default: 1
@@ -1277,7 +1272,8 @@ components:
         mtu:
           type: integer
         iommu:
-          $ref: "#/components/schemas/IommuType"
+          type: boolean
+          default: false
         num_queues:
           type: integer
           default: 2
@@ -1326,7 +1322,8 @@ components:
           type: integer
           format: uint8
         iommu:
-          $ref: "#/components/schemas/IommuType"
+          type: boolean
+          default: false
         src:
           type: string
 
@@ -1342,7 +1339,8 @@ components:
           type: integer
           format: uint8
         iommu:
-          $ref: "#/components/schemas/IommuType"
+          type: boolean
+          default: false
 
     BalloonConfig:
       required:
@@ -1358,7 +1356,8 @@ components:
           type: integer
           format: uint8
         iommu:
-          $ref: "#/components/schemas/IommuType"
+          type: boolean
+          default: false
         size:
           type: integer
           format: int64
@@ -1435,7 +1434,8 @@ components:
           type: integer
           format: int64
         iommu:
-          $ref: "#/components/schemas/IommuType"
+          type: boolean
+          default: false
         discard_writes:
           type: boolean
           default: false
@@ -1464,7 +1464,8 @@ components:
         mode:
           $ref: "#/components/schemas/ConsoleMode"
         iommu:
-          $ref: "#/components/schemas/IommuType"
+          type: boolean
+          default: false
         id:
           type: string
         pci_segment:
@@ -1509,7 +1510,8 @@ components:
             out of band via SCM_RIGHTS on the UNIX domain socket, never
             in this body.
         iommu:
-          $ref: "#/components/schemas/IommuType"
+          type: boolean
+          default: false
         pci_segment:
           type: integer
           format: int16
@@ -1563,7 +1565,8 @@ components:
           type: integer
           default: 1
         iommu:
-          $ref: "#/components/schemas/IommuType"
+          type: boolean
+          default: false
         pci_segment:
           type: integer
           format: int16
@@ -1588,7 +1591,8 @@ components:
           type: string
           description: Path to UNIX domain socket, used to proxy vsock connections.
         iommu:
-          $ref: "#/components/schemas/IommuType"
+          type: boolean
+          default: false
         pci_segment:
           type: integer
           format: int16

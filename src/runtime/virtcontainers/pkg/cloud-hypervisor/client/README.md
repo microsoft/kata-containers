@@ -132,7 +132,6 @@ Class | Method | HTTP request | Description
  - [FsConfig](docs/FsConfig.md)
  - [GenericVhostUserConfig](docs/GenericVhostUserConfig.md)
  - [ImageType](docs/ImageType.md)
- - [IommuType](docs/IommuType.md)
  - [LandlockConfig](docs/LandlockConfig.md)
  - [LockGranularity](docs/LockGranularity.md)
  - [MemoryConfig](docs/MemoryConfig.md)

@@ -210,7 +210,7 @@ impl CloudHypervisorInner {
 
         let device_config = DeviceConfig {
             path: PathBuf::from(sysfsdev),
-            iommu: false.into(),
+            iommu: false,
             ..Default::default()
         };
 
@@ -453,7 +453,7 @@ impl CloudHypervisorInner {
                     let sysfsdev = primary_device.sysfs_path.clone();
                     let device_config = DeviceConfig {
                         path: PathBuf::from(sysfsdev),
-                        iommu: false.into(),
+                        iommu: false,
                         ..Default::default()
                     };
                     info!(

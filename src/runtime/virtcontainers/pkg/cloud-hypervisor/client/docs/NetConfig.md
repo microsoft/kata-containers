@@ -10,7 +10,7 @@ Name | Type | Description | Notes
 **Mac** | Pointer to **string** |  | [optional] 
 **HostMac** | Pointer to **string** |  | [optional] 
 **Mtu** | Pointer to **int32** |  | [optional] 
-**Iommu** | Pointer to [**IommuType**](IommuType.md) |  | [optional] [default to IOMMUTYPE_OFF]
+**Iommu** | Pointer to **bool** |  | [optional] [default to false]
 **NumQueues** | Pointer to **int32** |  | [optional] [default to 2]
 **QueueSize** | Pointer to **int32** |  | [optional] [default to 256]
 **VhostUser** | Pointer to **bool** |  | [optional] [default to false]
@@ -195,20 +195,20 @@ HasMtu returns a boolean if a field has been set.
 
 ### GetIommu
 
-`func (o *NetConfig) GetIommu() IommuType`
+`func (o *NetConfig) GetIommu() bool`
 
 GetIommu returns the Iommu field if non-nil, zero value otherwise.
 
 ### GetIommuOk
 
-`func (o *NetConfig) GetIommuOk() (*IommuType, bool)`
+`func (o *NetConfig) GetIommuOk() (*bool, bool)`
 
 GetIommuOk returns a tuple with the Iommu field if it's non-nil, zero value otherwise
 and a boolean to check if the value has been set.
 
 ### SetIommu
 
-`func (o *NetConfig) SetIommu(v IommuType)`
+`func (o *NetConfig) SetIommu(v bool)`
 
 SetIommu sets Iommu field to given value.
 

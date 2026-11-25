@@ -7,7 +7,7 @@ Name | Type | Description | Notes
 **File** | Pointer to **string** |  | [optional] 
 **Socket** | Pointer to **string** |  | [optional] 
 **Mode** | [**ConsoleMode**](ConsoleMode.md) |  | 
-**Iommu** | Pointer to [**IommuType**](IommuType.md) |  | [optional] [default to IOMMUTYPE_OFF]
+**Iommu** | Pointer to **bool** |  | [optional] [default to false]
 **Id** | Pointer to **string** |  | [optional] 
 **PciSegment** | Pointer to **int32** |  | [optional] 
 **PciDeviceId** | Pointer to **int32** |  | [optional] 
@@ -103,20 +103,20 @@ SetMode sets Mode field to given value.
 
 ### GetIommu
 
-`func (o *ConsoleConfig) GetIommu() IommuType`
+`func (o *ConsoleConfig) GetIommu() bool`
 
 GetIommu returns the Iommu field if non-nil, zero value otherwise.
 
 ### GetIommuOk
 
-`func (o *ConsoleConfig) GetIommuOk() (*IommuType, bool)`
+`func (o *ConsoleConfig) GetIommuOk() (*bool, bool)`
 
 GetIommuOk returns a tuple with the Iommu field if it's non-nil, zero value otherwise
 and a boolean to check if the value has been set.
 
 ### SetIommu
 
-`func (o *ConsoleConfig) SetIommu(v IommuType)`
+`func (o *ConsoleConfig) SetIommu(v bool)`
 
 SetIommu sets Iommu field to given value.
 

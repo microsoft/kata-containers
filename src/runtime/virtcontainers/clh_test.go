@@ -154,11 +154,6 @@ func (c *clhClientMock) ResumeVM(ctx context.Context) (*http.Response, error) {
 	return nil, nil
 }
 
-func TestClhIommuType(t *testing.T) {
-	assert.Equal(t, chclient.IOMMUTYPE_OFF, clhIommuType(false))
-	assert.Equal(t, chclient.IOMMUTYPE_VIRTIO, clhIommuType(true))
-}
-
 func TestClhRtcConfig(t *testing.T) {
 	mshvDevice := filepath.Join(t.TempDir(), "mshv")
 	if err := os.WriteFile(mshvDevice, nil, 0o600); err != nil {
@@ -194,8 +189,8 @@ func TestClhRtcConfig(t *testing.T) {
 			rtcJSON, hasRTC := serialized["rtc"]
 			assert.Equal(test.wantRTC, hasRTC)
 			if test.wantRTC && assert.NotNil(vmConfig.Rtc) {
-				assert.Equal(clhIommuType(test.iommu), vmConfig.Rtc.GetIommu())
-				assert.JSONEq(fmt.Sprintf(`{"iommu":%q}`, clhIommuType(test.iommu)), string(rtcJSON))
+				assert.Equal(test.iommu, vmConfig.Rtc.GetIommu())
+				assert.JSONEq(fmt.Sprintf(`{"iommu":%t}`, test.iommu), string(rtcJSON))
 			}
 		})
 	}
@@ -611,12 +606,15 @@ func TestClhCreateVM(t *testing.T) {
 
 		vmConfigJSON, err := json.Marshal(clh.vmconfig)
 		assert.NoError(err, msg)
+		// The fork's CLH predates v54 and rejects iommu sent as a string.
+		assert.NotContains(string(vmConfigJSON), `"iommu":"`, msg)
+		assert.Contains(string(vmConfigJSON), fmt.Sprintf(`"iommu":%t`, d.config.IOMMU), msg)
 		var vmConfig map[string]json.RawMessage
 		assert.NoError(json.Unmarshal(vmConfigJSON, &vmConfig), msg)
 		rtcJSON, hasRTC := vmConfig["rtc"]
 		assert.Equal(pathExists("/dev/mshv"), hasRTC, msg)
 		if hasRTC {
-			assert.JSONEq(fmt.Sprintf(`{"iommu":%q}`, clhIommuType(d.config.IOMMU)), string(rtcJSON), msg)
+			assert.JSONEq(fmt.Sprintf(`{"iommu":%t}`, d.config.IOMMU), string(rtcJSON), msg)
 		}
 	}
 }

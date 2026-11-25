@@ -747,6 +747,7 @@ components:
             pci_segment: 8
             path: path
             readonly: false
+            iommu: false
             vhost_socket: vhost_socket
             serial: serial
             sparse: true
@@ -780,6 +781,7 @@ components:
             pci_segment: 8
             path: path
             readonly: false
+            iommu: false
             vhost_socket: vhost_socket
             serial: serial
             sparse: true
@@ -803,6 +805,7 @@ components:
             pci_device_id: 4
           vsock:
             pci_segment: 4
+            iommu: false
             socket: socket
             id: id
             cid: 3
@@ -834,12 +837,14 @@ components:
           - pci_segment: 5
             file: file
             size: 7
+            iommu: false
             id: id
             discard_writes: false
             pci_device_id: 3
           - pci_segment: 5
             file: file
             size: 7
+            iommu: false
             id: id
             discard_writes: false
             pci_device_id: 3
@@ -914,6 +919,7 @@ components:
             pci_segment: 6
             offload_tso: false
             vhost_mode: Client
+            iommu: false
             vhost_socket: vhost_socket
             vhost_user: false
             id: id
@@ -940,6 +946,7 @@ components:
             pci_segment: 6
             offload_tso: false
             vhost_mode: Client
+            iommu: false
             vhost_socket: vhost_socket
             vhost_user: false
             id: id
@@ -947,16 +954,19 @@ components:
           pvpanic: false
           rtc:
             pci_segment: 1
+            iommu: false
             id: id
             pci_device_id: 8
           console:
             pci_segment: 4
             file: file
+            iommu: false
             socket: socket
             id: id
             pci_device_id: 0
           balloon:
             pci_segment: 3
+            iommu: false
             size: 0
             deflate_on_oom: false
             id: id
@@ -988,6 +998,7 @@ components:
           - pci_segment: 4
             path: path
             x_nv_gpudirect_clique: 4
+            iommu: false
             id: id
             x_exclude_mmap_bars:
             - 7
@@ -996,6 +1007,7 @@ components:
           - pci_segment: 4
             path: path
             x_nv_gpudirect_clique: 4
+            iommu: false
             id: id
             x_exclude_mmap_bars:
             - 7
@@ -1005,11 +1017,13 @@ components:
           - pci_segment: 0
             path: path
             num_queues: 9
+            iommu: false
             id: id
             pci_device_id: 7
           - pci_segment: 0
             path: path
             num_queues: 9
+            iommu: false
             id: id
             pci_device_id: 7
           numa:
@@ -1047,6 +1061,7 @@ components:
             guest_numa_id: 8
           rng:
             pci_segment: 6
+            iommu: false
             src: src
             id: id
             pci_device_id: 3
@@ -1362,6 +1377,7 @@ components:
           pci_segment: 8
           path: path
           readonly: false
+          iommu: false
           vhost_socket: vhost_socket
           serial: serial
           sparse: true
@@ -1395,6 +1411,7 @@ components:
           pci_segment: 8
           path: path
           readonly: false
+          iommu: false
           vhost_socket: vhost_socket
           serial: serial
           sparse: true
@@ -1418,6 +1435,7 @@ components:
           pci_device_id: 4
         vsock:
           pci_segment: 4
+          iommu: false
           socket: socket
           id: id
           cid: 3
@@ -1449,12 +1467,14 @@ components:
         - pci_segment: 5
           file: file
           size: 7
+          iommu: false
           id: id
           discard_writes: false
           pci_device_id: 3
         - pci_segment: 5
           file: file
           size: 7
+          iommu: false
           id: id
           discard_writes: false
           pci_device_id: 3
@@ -1529,6 +1549,7 @@ components:
           pci_segment: 6
           offload_tso: false
           vhost_mode: Client
+          iommu: false
           vhost_socket: vhost_socket
           vhost_user: false
           id: id
@@ -1555,6 +1576,7 @@ components:
           pci_segment: 6
           offload_tso: false
           vhost_mode: Client
+          iommu: false
           vhost_socket: vhost_socket
           vhost_user: false
           id: id
@@ -1562,16 +1584,19 @@ components:
         pvpanic: false
         rtc:
           pci_segment: 1
+          iommu: false
           id: id
           pci_device_id: 8
         console:
           pci_segment: 4
           file: file
+          iommu: false
           socket: socket
           id: id
           pci_device_id: 0
         balloon:
           pci_segment: 3
+          iommu: false
           size: 0
           deflate_on_oom: false
           id: id
@@ -1603,6 +1628,7 @@ components:
         - pci_segment: 4
           path: path
           x_nv_gpudirect_clique: 4
+          iommu: false
           id: id
           x_exclude_mmap_bars:
           - 7
@@ -1611,6 +1637,7 @@ components:
         - pci_segment: 4
           path: path
           x_nv_gpudirect_clique: 4
+          iommu: false
           id: id
           x_exclude_mmap_bars:
           - 7
@@ -1620,11 +1647,13 @@ components:
         - pci_segment: 0
           path: path
           num_queues: 9
+          iommu: false
           id: id
           pci_device_id: 7
         - pci_segment: 0
           path: path
           num_queues: 9
+          iommu: false
           id: id
           pci_device_id: 7
         numa:
@@ -1662,6 +1691,7 @@ components:
           guest_numa_id: 8
         rng:
           pci_segment: 6
+          iommu: false
           src: src
           id: id
           pci_device_id: 3
@@ -1886,14 +1916,6 @@ components:
       required:
       - pci_segment
       type: object
-    IommuType:
-      default: "Off"
-      description: Virtual IOMMU the device is attached to.
-      enum:
-      - "Off"
-      - Virtio
-      - Smmuv3
-      type: string
     PlatformConfig:
       example:
         iommu_segments:
@@ -2236,6 +2258,7 @@ components:
         pci_segment: 8
         path: path
         readonly: false
+        iommu: false
         vhost_socket: vhost_socket
         serial: serial
         sparse: true
@@ -2252,7 +2275,8 @@ components:
           default: false
           type: boolean
         iommu:
-          $ref: '#/components/schemas/IommuType'
+          default: false
+          type: boolean
         num_queues:
           default: 1
           type: integer
@@ -2319,6 +2343,7 @@ components:
         pci_segment: 6
         offload_tso: false
         vhost_mode: Client
+        iommu: false
         vhost_socket: vhost_socket
         vhost_user: false
         id: id
@@ -2342,7 +2367,8 @@ components:
         mtu:
           type: integer
         iommu:
-          $ref: '#/components/schemas/IommuType'
+          default: false
+          type: boolean
         num_queues:
           default: 2
           type: integer
@@ -2380,6 +2406,7 @@ components:
     RngConfig:
       example:
         pci_segment: 6
+        iommu: false
         src: src
         id: id
         pci_device_id: 3
@@ -2393,7 +2420,8 @@ components:
           format: uint8
           type: integer
         iommu:
-          $ref: '#/components/schemas/IommuType'
+          default: false
+          type: boolean
         src:
           type: string
       required:
@@ -2402,6 +2430,7 @@ components:
     RtcConfig:
       example:
         pci_segment: 1
+        iommu: false
         id: id
         pci_device_id: 8
       properties:
@@ -2414,11 +2443,13 @@ components:
           format: uint8
           type: integer
         iommu:
-          $ref: '#/components/schemas/IommuType'
+          default: false
+          type: boolean
       type: object
     BalloonConfig:
       example:
         pci_segment: 3
+        iommu: false
         size: 0
         deflate_on_oom: false
         id: id
@@ -2434,7 +2465,8 @@ components:
           format: uint8
           type: integer
         iommu:
-          $ref: '#/components/schemas/IommuType'
+          default: false
+          type: boolean
         size:
           format: int64
           type: integer
@@ -2522,6 +2554,7 @@ components:
         pci_segment: 5
         file: file
         size: 7
+        iommu: false
         id: id
         discard_writes: false
         pci_device_id: 3
@@ -2532,7 +2565,8 @@ components:
           format: int64
           type: integer
         iommu:
-          $ref: '#/components/schemas/IommuType'
+          default: false
+          type: boolean
         discard_writes:
           default: false
           type: boolean
@@ -2560,6 +2594,7 @@ components:
       example:
         pci_segment: 4
         file: file
+        iommu: false
         socket: socket
         id: id
         pci_device_id: 0
@@ -2571,7 +2606,8 @@ components:
         mode:
           $ref: '#/components/schemas/ConsoleMode'
         iommu:
-          $ref: '#/components/schemas/IommuType'
+          default: false
+          type: boolean
         id:
           type: string
         pci_segment:
@@ -2616,6 +2652,7 @@ components:
         pci_segment: 4
         path: path
         x_nv_gpudirect_clique: 4
+        iommu: false
         id: id
         x_exclude_mmap_bars:
         - 7
@@ -2630,7 +2667,8 @@ components:
             in this body.
           type: string
         iommu:
-          $ref: '#/components/schemas/IommuType'
+          default: false
+          type: boolean
         pci_segment:
           format: int16
           type: integer
@@ -2682,6 +2720,7 @@ components:
         pci_segment: 0
         path: path
         num_queues: 9
+        iommu: false
         id: id
         pci_device_id: 7
       properties:
@@ -2691,7 +2730,8 @@ components:
           default: 1
           type: integer
         iommu:
-          $ref: '#/components/schemas/IommuType'
+          default: false
+          type: boolean
         pci_segment:
           format: int16
           type: integer
@@ -2707,6 +2747,7 @@ components:
     VsockConfig:
       example:
         pci_segment: 4
+        iommu: false
         socket: socket
         id: id
         cid: 3
@@ -2721,7 +2762,8 @@ components:
           description: Path to UNIX domain socket, used to proxy vsock connections.
           type: string
         iommu:
-          $ref: '#/components/schemas/IommuType'
+          default: false
+          type: boolean
         pci_segment:
           format: int16
           type: integer

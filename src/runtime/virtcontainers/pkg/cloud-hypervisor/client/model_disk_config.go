@@ -19,7 +19,7 @@ type DiskConfig struct {
 	Path              *string              `json:"path,omitempty"`
 	Readonly          *bool                `json:"readonly,omitempty"`
 	Direct            *bool                `json:"direct,omitempty"`
-	Iommu             *IommuType           `json:"iommu,omitempty"`
+	Iommu             *bool                `json:"iommu,omitempty"`
 	NumQueues         *int32               `json:"num_queues,omitempty"`
 	QueueSize         *int32               `json:"queue_size,omitempty"`
 	VhostUser         *bool                `json:"vhost_user,omitempty"`
@@ -48,7 +48,7 @@ func NewDiskConfig() *DiskConfig {
 	this.Readonly = &readonly
 	var direct bool = false
 	this.Direct = &direct
-	var iommu IommuType = IOMMUTYPE_OFF
+	var iommu bool = false
 	this.Iommu = &iommu
 	var numQueues int32 = 1
 	this.NumQueues = &numQueues
@@ -74,7 +74,7 @@ func NewDiskConfigWithDefaults() *DiskConfig {
 	this.Readonly = &readonly
 	var direct bool = false
 	this.Direct = &direct
-	var iommu IommuType = IOMMUTYPE_OFF
+	var iommu bool = false
 	this.Iommu = &iommu
 	var numQueues int32 = 1
 	this.NumQueues = &numQueues
@@ -188,9 +188,9 @@ func (o *DiskConfig) SetDirect(v bool) {
 }
 
 // GetIommu returns the Iommu field value if set, zero value otherwise.
-func (o *DiskConfig) GetIommu() IommuType {
+func (o *DiskConfig) GetIommu() bool {
 	if o == nil || o.Iommu == nil {
-		var ret IommuType
+		var ret bool
 		return ret
 	}
 	return *o.Iommu
@@ -198,7 +198,7 @@ func (o *DiskConfig) GetIommu() IommuType {
 
 // GetIommuOk returns a tuple with the Iommu field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *DiskConfig) GetIommuOk() (*IommuType, bool) {
+func (o *DiskConfig) GetIommuOk() (*bool, bool) {
 	if o == nil || o.Iommu == nil {
 		return nil, false
 	}
@@ -214,8 +214,8 @@ func (o *DiskConfig) HasIommu() bool {
 	return false
 }
 
-// SetIommu gets a reference to the given IommuType and assigns it to the Iommu field.
-func (o *DiskConfig) SetIommu(v IommuType) {
+// SetIommu gets a reference to the given bool and assigns it to the Iommu field.
+func (o *DiskConfig) SetIommu(v bool) {
 	o.Iommu = &v
 }
 

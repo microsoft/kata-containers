@@ -24,7 +24,7 @@ type NetConfig struct {
 	Mac               *string            `json:"mac,omitempty"`
 	HostMac           *string            `json:"host_mac,omitempty"`
 	Mtu               *int32             `json:"mtu,omitempty"`
-	Iommu             *IommuType         `json:"iommu,omitempty"`
+	Iommu             *bool              `json:"iommu,omitempty"`
 	NumQueues         *int32             `json:"num_queues,omitempty"`
 	QueueSize         *int32             `json:"queue_size,omitempty"`
 	VhostUser         *bool              `json:"vhost_user,omitempty"`
@@ -49,7 +49,7 @@ func NewNetConfig() *NetConfig {
 	this.Ip = &ip
 	var mask string = "255.255.255.0"
 	this.Mask = &mask
-	var iommu IommuType = IOMMUTYPE_OFF
+	var iommu bool = false
 	this.Iommu = &iommu
 	var numQueues int32 = 2
 	this.NumQueues = &numQueues
@@ -77,7 +77,7 @@ func NewNetConfigWithDefaults() *NetConfig {
 	this.Ip = &ip
 	var mask string = "255.255.255.0"
 	this.Mask = &mask
-	var iommu IommuType = IOMMUTYPE_OFF
+	var iommu bool = false
 	this.Iommu = &iommu
 	var numQueues int32 = 2
 	this.NumQueues = &numQueues
@@ -289,9 +289,9 @@ func (o *NetConfig) SetMtu(v int32) {
 }
 
 // GetIommu returns the Iommu field value if set, zero value otherwise.
-func (o *NetConfig) GetIommu() IommuType {
+func (o *NetConfig) GetIommu() bool {
 	if o == nil || o.Iommu == nil {
-		var ret IommuType
+		var ret bool
 		return ret
 	}
 	return *o.Iommu
@@ -299,7 +299,7 @@ func (o *NetConfig) GetIommu() IommuType {
 
 // GetIommuOk returns a tuple with the Iommu field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *NetConfig) GetIommuOk() (*IommuType, bool) {
+func (o *NetConfig) GetIommuOk() (*bool, bool) {
 	if o == nil || o.Iommu == nil {
 		return nil, false
 	}
@@ -315,8 +315,8 @@ func (o *NetConfig) HasIommu() bool {
 	return false
 }
 
-// SetIommu gets a reference to the given IommuType and assigns it to the Iommu field.
-func (o *NetConfig) SetIommu(v IommuType) {
+// SetIommu gets a reference to the given bool and assigns it to the Iommu field.
+func (o *NetConfig) SetIommu(v bool) {
 	o.Iommu = &v
 }
 

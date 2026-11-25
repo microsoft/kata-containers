@@ -19,11 +19,11 @@ type VsockConfig struct {
 	// Guest Vsock CID
 	Cid int64 `json:"cid"`
 	// Path to UNIX domain socket, used to proxy vsock connections.
-	Socket      string     `json:"socket"`
-	Iommu       *IommuType `json:"iommu,omitempty"`
-	PciSegment  *int32     `json:"pci_segment,omitempty"`
-	PciDeviceId *int32     `json:"pci_device_id,omitempty"`
-	Id          *string    `json:"id,omitempty"`
+	Socket      string  `json:"socket"`
+	Iommu       *bool   `json:"iommu,omitempty"`
+	PciSegment  *int32  `json:"pci_segment,omitempty"`
+	PciDeviceId *int32  `json:"pci_device_id,omitempty"`
+	Id          *string `json:"id,omitempty"`
 }
 
 // NewVsockConfig instantiates a new VsockConfig object
@@ -34,7 +34,7 @@ func NewVsockConfig(cid int64, socket string) *VsockConfig {
 	this := VsockConfig{}
 	this.Cid = cid
 	this.Socket = socket
-	var iommu IommuType = IOMMUTYPE_OFF
+	var iommu bool = false
 	this.Iommu = &iommu
 	return &this
 }
@@ -44,7 +44,7 @@ func NewVsockConfig(cid int64, socket string) *VsockConfig {
 // but it doesn't guarantee that properties required by API are set
 func NewVsockConfigWithDefaults() *VsockConfig {
 	this := VsockConfig{}
-	var iommu IommuType = IOMMUTYPE_OFF
+	var iommu bool = false
 	this.Iommu = &iommu
 	return &this
 }
@@ -98,9 +98,9 @@ func (o *VsockConfig) SetSocket(v string) {
 }
 
 // GetIommu returns the Iommu field value if set, zero value otherwise.
-func (o *VsockConfig) GetIommu() IommuType {
+func (o *VsockConfig) GetIommu() bool {
 	if o == nil || o.Iommu == nil {
-		var ret IommuType
+		var ret bool
 		return ret
 	}
 	return *o.Iommu
@@ -108,7 +108,7 @@ func (o *VsockConfig) GetIommu() IommuType {
 
 // GetIommuOk returns a tuple with the Iommu field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *VsockConfig) GetIommuOk() (*IommuType, bool) {
+func (o *VsockConfig) GetIommuOk() (*bool, bool) {
 	if o == nil || o.Iommu == nil {
 		return nil, false
 	}
@@ -124,8 +124,8 @@ func (o *VsockConfig) HasIommu() bool {
 	return false
 }
 
-// SetIommu gets a reference to the given IommuType and assigns it to the Iommu field.
-func (o *VsockConfig) SetIommu(v IommuType) {
+// SetIommu gets a reference to the given bool and assigns it to the Iommu field.
+func (o *VsockConfig) SetIommu(v bool) {
 	o.Iommu = &v
 }
 

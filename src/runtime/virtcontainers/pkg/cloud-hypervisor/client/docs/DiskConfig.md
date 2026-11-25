@@ -7,7 +7,7 @@ Name | Type | Description | Notes
 **Path** | Pointer to **string** |  | [optional] 
 **Readonly** | Pointer to **bool** |  | [optional] [default to false]
 **Direct** | Pointer to **bool** |  | [optional] [default to false]
-**Iommu** | Pointer to [**IommuType**](IommuType.md) |  | [optional] [default to IOMMUTYPE_OFF]
+**Iommu** | Pointer to **bool** |  | [optional] [default to false]
 **NumQueues** | Pointer to **int32** |  | [optional] [default to 1]
 **QueueSize** | Pointer to **int32** |  | [optional] [default to 128]
 **VhostUser** | Pointer to **bool** |  | [optional] [default to false]
@@ -121,20 +121,20 @@ HasDirect returns a boolean if a field has been set.
 
 ### GetIommu
 
-`func (o *DiskConfig) GetIommu() IommuType`
+`func (o *DiskConfig) GetIommu() bool`
 
 GetIommu returns the Iommu field if non-nil, zero value otherwise.
 
 ### GetIommuOk
 
-`func (o *DiskConfig) GetIommuOk() (*IommuType, bool)`
+`func (o *DiskConfig) GetIommuOk() (*bool, bool)`
 
 GetIommuOk returns a tuple with the Iommu field if it's non-nil, zero value otherwise
 and a boolean to check if the value has been set.
 
 ### SetIommu
 
-`func (o *DiskConfig) SetIommu(v IommuType)`
+`func (o *DiskConfig) SetIommu(v bool)`
 
 SetIommu sets Iommu field to given value.
 

@@ -6,7 +6,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **File** | **string** |  | 
 **Size** | Pointer to **int64** |  | [optional] 
-**Iommu** | Pointer to [**IommuType**](IommuType.md) |  | [optional] [default to IOMMUTYPE_OFF]
+**Iommu** | Pointer to **bool** |  | [optional] [default to false]
 **DiscardWrites** | Pointer to **bool** |  | [optional] [default to false]
 **PciSegment** | Pointer to **int32** |  | [optional] 
 **PciDeviceId** | Pointer to **int32** |  | [optional] 
@@ -78,20 +78,20 @@ HasSize returns a boolean if a field has been set.
 
 ### GetIommu
 
-`func (o *PmemConfig) GetIommu() IommuType`
+`func (o *PmemConfig) GetIommu() bool`
 
 GetIommu returns the Iommu field if non-nil, zero value otherwise.
 
 ### GetIommuOk
 
-`func (o *PmemConfig) GetIommuOk() (*IommuType, bool)`
+`func (o *PmemConfig) GetIommuOk() (*bool, bool)`
 
 GetIommuOk returns a tuple with the Iommu field if it's non-nil, zero value otherwise
 and a boolean to check if the value has been set.
 
 ### SetIommu
 
-`func (o *PmemConfig) SetIommu(v IommuType)`
+`func (o *PmemConfig) SetIommu(v bool)`
 
 SetIommu sets Iommu field to given value.
 
