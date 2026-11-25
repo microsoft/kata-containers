@@ -39,7 +39,7 @@ fn build_kernel_cmdline(
         kernel_verity_params,
         rootfs_driver,
         rootfs_type,
-        false,
+        rootfs_driver == VM_ROOTFS_DRIVER_PMEM,
     )?;
     params.append(&mut rootfs_params);
     params.append(&mut KernelParams::from_string(kernel_params));
@@ -645,7 +645,16 @@ mod tests {
                     .split_whitespace()
                     .any(|p| p == format!("root={root}")));
                 assert!(cmdline.contains(&format!("rootfstype={fs}")));
-                assert!(!cmdline.contains("dax"));
+                if driver == VM_ROOTFS_DRIVER_PMEM {
+                    let rootflags = if fs == "ext4" {
+                        "rootflags=dax,data=ordered,errors=remount-ro"
+                    } else {
+                        "rootflags=dax"
+                    };
+                    assert!(cmdline.split_whitespace().any(|p| p == rootflags));
+                } else {
+                    assert!(!cmdline.contains("dax"));
+                }
 
                 let cmdline = build_kernel_cmdline(
                     false,

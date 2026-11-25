@@ -24,6 +24,7 @@ rootfs_type = @DEFROOTFSTYPE@
 #   - virtio-blk-pci (default)
 #   - virtio-pmem (file-backed persistent memory)
 # virtio-pmem requires guest kernel support for VIRTIO_PMEM_F_SHMEM_REGION.
+# Filesystem DAX is enabled for virtio-pmem unless dm-verity is configured.
 # The image must be non-empty and its size a multiple of 4 KiB.
 vm_rootfs_driver = "@VMROOTFSDRIVER_OPENVMM@"
 
