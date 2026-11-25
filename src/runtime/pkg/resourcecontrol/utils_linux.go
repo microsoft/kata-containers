@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/containerd/cgroups"
 	systemdDbus "github.com/coreos/go-systemd/v22/dbus"
@@ -87,6 +88,7 @@ func createCgroupsSystemd(slice string, unit string, pid int) error {
 		newProperty("MemoryAccounting", true),
 		newProperty("CPUAccounting", true),
 		newProperty("IOAccounting", true),
+		newProperty("TimeoutStopUSec", uint64((5*time.Minute)/time.Microsecond)),
 	}
 
 	if strings.HasSuffix(unit, ".slice") {
