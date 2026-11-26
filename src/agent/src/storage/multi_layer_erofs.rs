@@ -28,7 +28,7 @@ use crate::linux_abi::pcipath_from_dev_tree_path;
 use crate::mount::baremount;
 use crate::rpc::CONTAINER_BASE;
 use crate::sandbox::Sandbox;
-use crate::storage::{StorageContext, StorageHandler};
+use crate::storage::{MountRollbackGuard, StorageContext, StorageHandler};
 use anyhow::{anyhow, Context, Result};
 use kata_sys_util::mount::{create_mount_destination, Mounter};
 use kata_types::device::{DRIVER_BLK_MMIO_TYPE, DRIVER_BLK_PCI_TYPE, DRIVER_SCSI_TYPE};
@@ -84,7 +84,7 @@ const OPT_DMVERITY_NO_SUPERBLOCK: &str = "X-kata.dmverity.no-superblock=";
 #[derive(Debug)]
 pub struct MultiLayerErofsHandler {}
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct MultiLayerErofsResult {
     pub mount_point: String,
     pub processed_mount_points: Vec<String>,
@@ -94,6 +94,7 @@ pub struct MultiLayerErofsResult {
     pub temp_mount_points: Vec<String>,
     /// dm-verity device paths that need to be destroyed during cleanup
     pub verity_devices: Vec<String>,
+    pub(super) cleanup: MultiLayerCleanup,
 }
 
 #[derive(Debug)]
@@ -104,7 +105,33 @@ struct MkdirDirective {
 /// Helper struct to track layer mount information including dm-verity devices
 #[derive(Debug)]
 struct LayerMountInfo {
-    verity_device: Option<String>,
+    mount: MountRollbackGuard,
+    verity_device: MountRollbackGuard,
+}
+
+impl LayerMountInfo {
+    fn commit(self) {
+        scopeguard::ScopeGuard::into_inner(self.mount);
+        scopeguard::ScopeGuard::into_inner(self.verity_device);
+    }
+}
+
+#[derive(Debug, Default)]
+pub(super) struct MultiLayerCleanup {
+    // Drop the overlay before the backing mounts and their mapper devices.
+    overlay: Option<MountRollbackGuard>,
+    layers: Vec<LayerMountInfo>,
+}
+
+impl MultiLayerCleanup {
+    pub(super) fn commit(self) {
+        if let Some(overlay) = self.overlay {
+            scopeguard::ScopeGuard::into_inner(overlay);
+        }
+        for layer in self.layers {
+            layer.commit();
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -264,8 +291,11 @@ pub async fn handle_multi_layer_erofs_group(
     };
     fs::create_dir_all(&upper_mount).context("failed to create upper mount dir")?;
 
+    let mut cleanup = MultiLayerCleanup::default();
     if let Some(upper) = upper_storage {
-        wait_and_mount_layer(upper, &upper_mount, sandbox, &logger, None).await?;
+        cleanup
+            .layers
+            .push(wait_and_mount_layer(upper, &upper_mount, sandbox, &logger, None).await?);
     } else {
         info!(
             logger,
@@ -353,8 +383,6 @@ pub async fn handle_multi_layer_erofs_group(
     );
 
     let mut results: Vec<(usize, PathBuf, LayerMountInfo)> = Vec::with_capacity(erofs_count);
-    let mut failed_verity_devices: Vec<String> = Vec::new();
-    let mut failed_mount_points: Vec<PathBuf> = Vec::new();
     let mut first_err: Option<anyhow::Error> = None;
 
     for result in futures::future::join_all(futures).await {
@@ -369,33 +397,6 @@ pub async fn handle_multi_layer_erofs_group(
     }
 
     if let Some(e) = first_err {
-        // Collect resources from successfully created layers
-        let mut sort_results: Vec<_> = results;
-        sort_results.sort_by_key(|(index, _, _)| *index);
-        for (_, lower_mount, mount_info) in sort_results {
-            if let Some(verity_dev) = mount_info.verity_device {
-                failed_verity_devices.push(verity_dev);
-            }
-            failed_mount_points.push(lower_mount);
-        }
-
-        // Unmount layers before destroying dm-verity devices.
-        for mp in failed_mount_points.iter().rev() {
-            if let Err(umount_err) = nix::mount::umount(mp) {
-                warn!(
-                    logger,
-                    "failed to unmount layer during concurrent-mount cleanup";
-                    "mount-point" => mp.display(),
-                    "error" => format!("{:#}", umount_err),
-                );
-            }
-        }
-
-        #[cfg(feature = "devicemapper")]
-        if !failed_verity_devices.is_empty() {
-            cleanup_dmverity_devices(&failed_verity_devices, &logger);
-        }
-
         return Err(e.context("failed to mount one or more EROFS layers concurrently"));
     }
 
@@ -405,9 +406,10 @@ pub async fn handle_multi_layer_erofs_group(
 
     for (_, lower_mount, mount_info) in results {
         lower_mounts.push(lower_mount);
-        if let Some(verity_dev) = mount_info.verity_device {
-            verity_devices.push(verity_dev);
+        if let Some(verity_dev) = mount_info.verity_device.as_ref() {
+            verity_devices.push(verity_dev.clone());
         }
+        cleanup.layers.push(mount_info);
     }
 
     // If any mkdir directive refers to {{ mount 1 }}, resolve it now using the first lower mount.
@@ -479,6 +481,10 @@ pub async fn handle_multi_layer_erofs_group(
     overlay_mount
         .mount(Path::new(&target_mount_point))
         .context("failed to mount overlay")?;
+    cleanup.overlay = Some(super::mount_rollback_guard(
+        &logger,
+        Some(target_mount_point.clone()),
+    ));
 
     info!(
         logger,
@@ -522,6 +528,7 @@ pub async fn handle_multi_layer_erofs_group(
         processed_mount_points,
         temp_mount_points,
         verity_devices,
+        cleanup,
     })
 }
 
@@ -885,15 +892,20 @@ async fn wait_and_mount_layer(
         "dmverity-enabled" => dmverity_enabled,
     );
 
-    let verity_device = scopeguard::guard(verity_device_path, |path| {
-        #[cfg(feature = "devicemapper")]
-        if let Some(path) = path {
-            let logger = logger.clone();
-            tokio::task::spawn_blocking(move || cleanup_dmverity_devices(&[path], &logger));
-        }
-        #[cfg(not(feature = "devicemapper"))]
-        let _ = path;
-    });
+    let cleanup_logger = logger.clone();
+    let verity_device: MountRollbackGuard = scopeguard::guard(
+        verity_device_path,
+        Box::new(move |path| {
+            #[cfg(feature = "devicemapper")]
+            if let Some(path) = path {
+                tokio::task::spawn_blocking(move || {
+                    cleanup_dmverity_devices(&[path], &cleanup_logger)
+                });
+            }
+            #[cfg(not(feature = "devicemapper"))]
+            let _ = (path, cleanup_logger);
+        }),
+    );
     mount_and_track_layer(
         layer,
         layer_mount,
@@ -905,17 +917,14 @@ async fn wait_and_mount_layer(
     .await
 }
 
-async fn mount_and_track_layer<F>(
+async fn mount_and_track_layer(
     layer: &Storage,
     layer_mount: &Path,
     sandbox: &Arc<Mutex<Sandbox>>,
     logger: &Logger,
     dev_path: &str,
-    verity_device: scopeguard::ScopeGuard<Option<String>, F>,
-) -> Result<LayerMountInfo>
-where
-    F: FnOnce(Option<String>),
-{
+    verity_device: MountRollbackGuard,
+) -> Result<LayerMountInfo> {
     create_mount_destination(Path::new(dev_path), layer_mount, "", &layer.fstype)
         .context("failed to create layer mount destination")?;
 
@@ -971,10 +980,9 @@ where
 
     // After successfully mounting the layer, we track the mount point for cleanup.
     track_temporary_mount_for_cleanup(sandbox, layer_mount, logger).await?;
-    scopeguard::ScopeGuard::into_inner(mount);
-
     Ok(LayerMountInfo {
-        verity_device: scopeguard::ScopeGuard::into_inner(verity_device),
+        mount,
+        verity_device,
     })
 }
 
@@ -1105,9 +1113,12 @@ mod tests {
             let mapper_path = root.path().join(format!("mapping-{index}"));
             fs::write(&mapper_path, "").unwrap();
             let mapper_path_str = mapper_path.display().to_string();
-            let cleanup = scopeguard::guard(Some(mapper_path_str.clone()), |path| {
-                fs::remove_file(path.unwrap()).unwrap();
-            });
+            let cleanup: MountRollbackGuard = scopeguard::guard(
+                Some(mapper_path_str.clone()),
+                Box::new(|path| {
+                    fs::remove_file(path.unwrap()).unwrap();
+                }),
+            );
             let layer = Storage {
                 fstype: "kata-invalid-filesystem".to_string(),
                 ..Default::default()
@@ -1147,13 +1158,16 @@ mod tests {
             fs::write(&mapper_path, "").unwrap();
             let mapper_path_str = mapper_path.display().to_string();
             let cleanup_mount = mount_point.clone();
-            let cleanup = scopeguard::guard(Some(mapper_path_str.clone()), move |path| {
-                assert_eq!(
-                    crate::mount::is_mounted(cleanup_mount.to_str().unwrap()).unwrap(),
-                    reused_mount,
-                );
-                fs::remove_file(path.unwrap()).unwrap();
-            });
+            let cleanup: MountRollbackGuard = scopeguard::guard(
+                Some(mapper_path_str.clone()),
+                Box::new(move |path| {
+                    assert_eq!(
+                        crate::mount::is_mounted(cleanup_mount.to_str().unwrap()).unwrap(),
+                        reused_mount,
+                    );
+                    fs::remove_file(path.unwrap()).unwrap();
+                }),
+            );
             scopeguard::defer! {
                 if crate::mount::is_mounted(mount_point.to_str().unwrap()).unwrap() {
                     nix::mount::umount(&mount_point).unwrap();
@@ -1202,7 +1216,7 @@ mod tests {
             } else {
                 drop(locked_sandbox);
                 let result = pending.await.unwrap();
-                assert_eq!(result.verity_device, Some(mapper_path_str));
+                assert_eq!(*result.verity_device, Some(mapper_path_str));
                 assert!(mapper_path.exists());
                 assert!(crate::mount::is_mounted(mount_point.to_str().unwrap()).unwrap());
                 assert!(sandbox
@@ -1210,6 +1224,177 @@ mod tests {
                     .await
                     .storages
                     .contains_key(mount_point.to_str().unwrap()));
+                result.commit();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_group_failure_rolls_back_completed_layers() {
+        test_utils::skip_if_not_root!();
+
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let sandbox = Arc::new(Mutex::new(Sandbox::new(&logger).unwrap()));
+        let root = tempfile::tempdir().unwrap();
+        let cid = format!(
+            "group-{}",
+            root.path().file_name().unwrap().to_str().unwrap()
+        );
+        let temp_base = Path::new(MULTI_LAYER_EROFS_BASE).join(&cid);
+        let container_base = Path::new(CONTAINER_BASE).join(&cid);
+        let lower_mount = temp_base.join("lower-0");
+        scopeguard::defer! {
+            if crate::mount::is_mounted(lower_mount.to_str().unwrap()).unwrap() {
+                nix::mount::umount(&lower_mount).unwrap();
+            }
+            fs::remove_dir_all(&temp_base).unwrap();
+            fs::remove_dir_all(&container_base).unwrap();
+        }
+
+        let source = root.path().join("source");
+        fs::write(&source, "").unwrap();
+        let blocker = root.path().join("not-a-directory");
+        fs::write(&blocker, "").unwrap();
+        let layer = Storage {
+            source: source.display().to_string(),
+            driver: DRIVER_BLK_MMIO_TYPE.to_string(),
+            fstype: "tmpfs".to_string(),
+            mount_point: blocker.join("overlay").display().to_string(),
+            options: vec![OPT_MULTI_LAYER.to_string(), OPT_OVERLAY_LOWER.to_string()],
+            ..Default::default()
+        };
+
+        for _ in 0..2 {
+            let error = handle_multi_layer_erofs_group(
+                &layer,
+                std::slice::from_ref(&layer),
+                &Some(cid.clone()),
+                &sandbox,
+                &logger,
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("failed to create overlay mount destination"),
+                "{:#}",
+                error,
+            );
+            assert!(!crate::mount::is_mounted(lower_mount.to_str().unwrap()).unwrap());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_group_mapper_ownership_during_registration() {
+        test_utils::skip_if_not_root!();
+
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let sandbox = Arc::new(Mutex::new(Sandbox::new(&logger).unwrap()));
+        let root = tempfile::tempdir().unwrap();
+
+        for cancel in [true, false] {
+            let lower_mount = root.path().join(format!("lower-{cancel}"));
+            let overlay_mount = root.path().join(format!("overlay-{cancel}"));
+            let mapper_path = root.path().join(format!("mapping-{cancel}"));
+            fs::write(&mapper_path, "").unwrap();
+            let mapper_path_str = mapper_path.display().to_string();
+            let cleanup_mounts = [overlay_mount.clone(), lower_mount.clone()];
+            let mapper: MountRollbackGuard = scopeguard::guard(
+                Some(mapper_path_str.clone()),
+                Box::new(move |path| {
+                    for mount in cleanup_mounts {
+                        assert!(!crate::mount::is_mounted(mount.to_str().unwrap()).unwrap());
+                    }
+                    fs::remove_file(path.unwrap()).unwrap();
+                }),
+            );
+            scopeguard::defer! {
+                for mount in [&overlay_mount, &lower_mount] {
+                    if crate::mount::is_mounted(mount.to_str().unwrap()).unwrap() {
+                        nix::mount::umount(mount).unwrap();
+                    }
+                }
+            }
+            let layer = Storage {
+                fstype: "tmpfs".to_string(),
+                ..Default::default()
+            };
+            let layer_info = mount_and_track_layer(
+                &layer,
+                &lower_mount,
+                &sandbox,
+                &logger,
+                &mapper_path_str,
+                mapper,
+            )
+            .await
+            .unwrap();
+            fs::create_dir(&overlay_mount).unwrap();
+            nix::mount::mount(
+                Some("tmpfs"),
+                &overlay_mount,
+                Some("tmpfs"),
+                nix::mount::MsFlags::empty(),
+                None::<&str>,
+            )
+            .unwrap();
+            let cleanup = MultiLayerCleanup {
+                overlay: Some(super::super::mount_rollback_guard(
+                    &logger,
+                    Some(overlay_mount.display().to_string()),
+                )),
+                layers: vec![layer_info],
+            };
+            let result = super::super::MultiLayerProcessResult {
+                device: super::super::new_device(overlay_mount.display().to_string()).unwrap(),
+                processed_mount_points: vec![overlay_mount.display().to_string()],
+                temp_mount_points: vec![lower_mount.display().to_string()],
+                verity_devices: vec![mapper_path_str.clone()],
+                cleanup,
+            };
+            let cid = Some(format!("container-{cancel}"));
+            let locked_sandbox = sandbox.lock().await;
+            let mut pending = Box::pin(super::super::register_multi_layer_storage(
+                &logger,
+                result,
+                &layer,
+                std::slice::from_ref(&layer),
+                &sandbox,
+                &cid,
+            ));
+            std::future::poll_fn(|cx| {
+                use std::future::Future;
+                assert!(pending.as_mut().poll(cx).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+            assert!(mapper_path.exists());
+
+            if cancel {
+                drop(pending);
+                assert!(!mapper_path.exists());
+                assert!(!crate::mount::is_mounted(overlay_mount.to_str().unwrap()).unwrap());
+                assert!(!crate::mount::is_mounted(lower_mount.to_str().unwrap()).unwrap());
+                assert!(!locked_sandbox
+                    .container_verity_devices
+                    .contains_key(cid.as_ref().unwrap()));
+            } else {
+                drop(locked_sandbox);
+                let mounts = pending.await.unwrap();
+                assert_eq!(
+                    mounts,
+                    vec![
+                        overlay_mount.display().to_string(),
+                        lower_mount.display().to_string(),
+                        mapper_path_str.clone(),
+                    ],
+                );
+                assert!(mapper_path.exists());
+                assert_eq!(
+                    sandbox.lock().await.container_verity_devices[cid.as_ref().unwrap()],
+                    vec![mapper_path_str],
+                );
             }
         }
     }

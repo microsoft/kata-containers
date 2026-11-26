@@ -37,7 +37,9 @@ use self::ephemeral_handler::EphemeralHandler;
 use self::fs_handler::{OverlayfsHandler, VirtioFsHandler};
 use self::image_pull_handler::ImagePullHandler;
 use self::local_handler::LocalHandler;
-use self::multi_layer_erofs::{handle_multi_layer_erofs_group, is_multi_layer_storage};
+use self::multi_layer_erofs::{
+    handle_multi_layer_erofs_group, is_multi_layer_storage, MultiLayerCleanup,
+};
 use crate::mount::{baremount, is_mounted, remove_mounts};
 use crate::sandbox::Sandbox;
 
@@ -180,6 +182,7 @@ struct MultiLayerProcessResult {
     temp_mount_points: Vec<String>,
     /// dm-verity device paths that need to be destroyed during cleanup
     verity_devices: Vec<String>,
+    cleanup: MultiLayerCleanup,
 }
 
 /// Handle multi-layer storage by creating the overlay device.
@@ -222,6 +225,7 @@ async fn handle_multi_layer_storage(
         processed_mount_points: result.processed_mount_points,
         temp_mount_points: result.temp_mount_points,
         verity_devices: result.verity_devices,
+        cleanup: result.cleanup,
     }))
 }
 
@@ -233,18 +237,19 @@ async fn update_storage_device(
     device: Arc<dyn StorageDevice>,
     logger: &Logger,
 ) -> Result<()> {
-    if let Err(device) = sandbox
-        .lock()
-        .await
-        .update_sandbox_storage(mount_point, device)
-    {
+    let mut sandbox = sandbox.lock().await;
+    update_storage_device_locked(&mut sandbox, mount_point, device, logger).await
+}
+
+async fn update_storage_device_locked(
+    sandbox: &mut Sandbox,
+    mount_point: &str,
+    device: Arc<dyn StorageDevice>,
+    logger: &Logger,
+) -> Result<()> {
+    if let Err(device) = sandbox.update_sandbox_storage(mount_point, device) {
         error!(logger, "failed to update device for storage"; "mount-point" => mount_point);
-        if let Err(e) = sandbox
-            .lock()
-            .await
-            .remove_sandbox_storage(mount_point)
-            .await
-        {
+        if let Err(e) = sandbox.remove_sandbox_storage(mount_point).await {
             warn!(logger, "failed to remove dummy sandbox storage"; "error" => ?e);
         }
         if let Err(e) = device.cleanup() {
@@ -285,52 +290,13 @@ pub async fn add_storages(
         )
         .await?
         {
-            // Register all processed mount points
             for mp in &result.processed_mount_points {
                 processed_mount_points.insert(mp.clone());
             }
-
-            // Add sandbox storage for each mount point in the group.
-            // Derive the shared flag from the matching storage in the
-            // group rather than assuming all members share the trigger's
-            // flag.
-            for mp in &result.processed_mount_points {
-                let shared = storages
-                    .iter()
-                    .find(|s| s.mount_point == *mp)
-                    .map_or(storage.shared, |s| s.shared);
-                let state = sandbox.lock().await.add_sandbox_storage(mp, shared).await;
-
-                // Only update device for the first occurrence
-                if state.ref_count().await == 1 {
-                    update_storage_device(sandbox, mp, result.device.clone(), &logger).await?;
-                }
-            }
-
-            // Add the primary mount point to the list first, followed by
-            // the temporary backing mounts (upper, lower-*).  Cleanup
-            // iterates in order, so the overlay target is unmounted before
-            // the mounts it depends on.
-            if let Some(path) = result.device.path() {
-                if !path.is_empty() {
-                    mount_list.push(path.to_string());
-                }
-            }
-            mount_list.extend(result.temp_mount_points);
-            mount_list.extend(result.verity_devices.clone());
-
-            // Record verity devices for cleanup
-            if let Some(ref cid) = cid {
-                if !result.verity_devices.is_empty() {
-                    let mut sandbox_guard = sandbox.lock().await;
-                    sandbox_guard
-                        .container_verity_devices
-                        .entry(cid.clone())
-                        .or_insert_with(Vec::new)
-                        .extend(result.verity_devices.clone());
-                }
-            }
-
+            mount_list.extend(
+                register_multi_layer_storage(&logger, result, storage, &storages, sandbox, &cid)
+                    .await?,
+            );
             continue;
         }
 
@@ -396,6 +362,50 @@ pub async fn add_storages(
     Ok(mount_list)
 }
 
+async fn register_multi_layer_storage(
+    logger: &Logger,
+    result: MultiLayerProcessResult,
+    storage: &Storage,
+    storages: &[Storage],
+    sandbox: &Arc<Mutex<Sandbox>>,
+    cid: &Option<String>,
+) -> Result<Vec<String>> {
+    let mut sandbox = sandbox.lock().await;
+    // Derive each shared flag from its group member rather than the trigger.
+    for mp in &result.processed_mount_points {
+        let shared = storages
+            .iter()
+            .find(|s| s.mount_point == *mp)
+            .map_or(storage.shared, |s| s.shared);
+        let state = sandbox.add_sandbox_storage(mp, shared).await;
+        if state.ref_count().await == 1 {
+            update_storage_device_locked(&mut sandbox, mp, result.device.clone(), logger).await?;
+        }
+    }
+
+    // Keep the overlay before its backing mounts for container teardown.
+    let mut mount_list = Vec::new();
+    if let Some(path) = result.device.path() {
+        if !path.is_empty() {
+            mount_list.push(path.to_string());
+        }
+    }
+    mount_list.extend(result.temp_mount_points);
+    mount_list.extend(result.verity_devices.clone());
+
+    if let Some(cid) = cid {
+        if !result.verity_devices.is_empty() {
+            sandbox
+                .container_verity_devices
+                .entry(cid.clone())
+                .or_insert_with(Vec::new)
+                .extend(result.verity_devices);
+        }
+    }
+    result.cleanup.commit();
+    Ok(mount_list)
+}
+
 pub(crate) fn new_device(path: String) -> Result<Arc<dyn StorageDevice>> {
     let device = StorageDeviceGeneric::new(path);
     Ok(Arc::new(device))
@@ -409,19 +419,22 @@ pub(crate) fn common_storage_handler(logger: &Logger, storage: &Storage) -> Resu
     Ok(storage.mount_point.clone())
 }
 
-fn mount_rollback_guard(
-    logger: &Logger,
-    path: Option<String>,
-) -> scopeguard::ScopeGuard<Option<String>, impl FnOnce(Option<String>)> {
+type MountRollbackGuard =
+    scopeguard::ScopeGuard<Option<String>, Box<dyn FnOnce(Option<String>) + Send>>;
+
+fn mount_rollback_guard(logger: &Logger, path: Option<String>) -> MountRollbackGuard {
     let logger = logger.clone();
-    scopeguard::guard(path, move |path| {
-        if let Some(path) = path {
-            if let Err(e) = remove_mounts(std::slice::from_ref(&path)) {
-                error!(logger, "failed to roll back storage mount";
+    scopeguard::guard(
+        path,
+        Box::new(move |path| {
+            if let Some(path) = path {
+                if let Err(e) = remove_mounts(std::slice::from_ref(&path)) {
+                    error!(logger, "failed to roll back storage mount";
                     "mount-point" => path, "error" => ?e);
+                }
             }
-        }
-    })
+        }),
+    )
 }
 
 fn split_lowerdirs(lowerdirs: &str) -> Vec<String> {
